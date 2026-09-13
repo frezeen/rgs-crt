@@ -1,0 +1,238 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# zz_crt_dual — CRT-DUAL minimal boot service
+#
+# What it does (and only this):
+#   1. X11 conf: OWNED by the pre-X hook (/etc/init.d/S15crt-dual-gen:
+#      universal roles-per-type conf generated BEFORE X
+#      from sysfs truth at every boot. This service REGENERATES it
+#      unconditionally as self-correction (a present-but-stale conf cannot
+#      be detected as missing - verified live 2026-08-24) and NEVER
+#      persists it (a saved copy becomes inherited poison after any
+#      hardware change).
+#   2. Boot layout: probe presumed outputs, re-detect, apply
+#      (layout_apply_if_changed — writes the /tmp/crt-dual-layout-fp
+#      fingerprint that the live hotplug uses).
+#   3. Crash recovery level 2 (crash-clean.sh): removes residual marked
+#      profile blocks from the tracked config files + stale runtime state
+#      left by a crash (prerequisite for the profile engine).
+#   4. Diagnostic snapshot (diag-dump.sh) — self-sufficient logs.
+#   5. Start the layout watcher (live hotplug, no reboot).
+#
+# What it does NOT do (by design):
+#   no Python runtime patches, no config-swap engine, no emulator binary
+#   symlinks, no clock-probe daemon, no backup machinery, no update gate,
+#   no udev rule deploy (install.sh owns that). Runtime layout during
+#   games belongs to the selector — this service only sets up
+#   the desktop.
+#
+# Runs from /userdata/system/services (Batocera custom service).
+# Package root: /userdata/system/crt-dual (installed by install.sh).
+
+set -uo pipefail
+
+	case "$1" in
+	start)
+		PKG_ROOT="/userdata/system/crt-dual"
+		# Logs live in Batocera's OFFICIAL logs dir (/userdata/system/logs),
+		# beside the stock display.log / mpv.log / es_launch_* (owner directive
+		# 2026-08-29). Truncation is an EXPLICIT per-file list: the dir is
+		# SHARED with stock logs — a glob would truncate stock files too.
+		LOG_DIR="/userdata/system/logs"
+		LOG="$LOG_DIR/service.log"
+		mkdir -p "$LOG_DIR"
+		: >"$LOG"
+		# The /tmp/crt-dual state dir MUST exist before anything writes into
+		# it: the early layout apply takes layout.lock inside it, and a missing
+		# dir failed exec 9> silently (AMD boot 2026-09-01 02:13: no write
+		# traced, "applied" printed anyway — the watcher recovered, the
+		# pre-ES-apply step was a no-op since the dir only appeared at 13.7).
+		mkdir -p "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}" 2>/dev/null || true
+		# All crt-dual logs are persistent (/userdata) — truncate at every boot so each boot starts with clean logs (requested: always-pristine logs).
+		for _cl in service.log selector.log selector-core.log layout-watch.log sr-owner.log display-trace.log gamepad-reprobe.log; do : >"$LOG_DIR/$_cl" 2>/dev/null || true; done
+		exec > >(tee -i "$LOG") 2>&1
+
+		echo ""
+		echo "=== CRT-DUAL BOOT SERVICE (minimal) — $(date) ==="
+
+		# Libs from the package (installed by install.sh).
+		for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh" "$PKG_ROOT/src/lib/display-lib.sh"; do
+			[ -r "$_lib" ] && source "$_lib" 2>/dev/null || true # libs may be missing on a broken install; boot must continue
+		done
+		# Classification vars must exist even if detect_outputs never runs
+		# (broken install, X down): set -u makes an unset var an error.
+		CRT_OUTS="${CRT_OUTS:-}"
+		CRT_PRESUMED_OUTS="${CRT_PRESUMED_OUTS:-}"
+		LCD_OUTS="${LCD_OUTS:-}"
+		command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true # libs may be absent; default GPU_DOTCLOCK=25 applies
+		echo "GPU: ${GPU_VENDOR:-unknown} (${GPU_MODEL:-unknown}, dotclock: ${GPU_DOTCLOCK:-25})"
+
+		# AMD power: avoid 300MHz downclock glitch/lag in LCD-only when analog poll becomes active (seen 2026-08-25: balanced/auto → 300MHz, ES lag + glitch storm on 1s probe). Force high when analog will be watched (LCD-only).
+		if [ "${GPU_VENDOR:-}" = "amd" ]; then
+			echo high > /sys/class/drm/card0/device/power_dpm_force_performance_level 2>/dev/null || true
+		fi
+
+		# ── AMD glitch-free xrandr wrapper — placed by the PRE-X hook, not here ──
+		# (src/service/crt-gen-initd.sh, S15): the service starts after the boot
+		# force-requery callers already execute xrandr — ETXTBSY race (boot
+		# 2026-08-31) and too late for the first glitch-capable calls. Single
+		# writer = the S15 hook; volatile (re-placed every boot, never saved).
+
+		# ── AMD X11 OutputClass — owned by the PRE-X hook, not here ──
+		# (src/service/crt-gen-initd.sh, S15): the neutralization must land
+		# BEFORE X parses xorg.conf.d. The service runs AFTER X start — this
+		# call only ever worked because a past overlay save persisted the
+		# fix; pre-X it is re-applied every boot (volatile, like the
+		# wrapper). Single writer = the S15 hook.
+		# Self-heal: an upgrade wipes /etc init hooks; redeploy the early
+		# generator so the NEXT boot still pre-dates X (bootstrap pattern).
+
+		# ── Crash recovery level 2 (boot) ──
+		# Removes marked profile blocks left by a crash + stale /tmp
+		# state. Runs BEFORE the layout so a stale block cannot surface.
+		if [ -f "$PKG_ROOT/src/service/crash-clean.sh" ]; then
+			bash "$PKG_ROOT/src/service/crash-clean.sh"
+		fi
+
+		# ── X11 config for the CRT ──
+		export DISPLAY="${DISPLAY:-:0}"
+		for i in $(seq 1 15); do
+			xrandr --current 2>/dev/null | grep -q " connected" && break
+			sleep 2
+		done
+		detect_outputs 2>/dev/null || true
+		echo "  Outputs — CRT confirmed: ${CRT_OUTS:-none} | presumed: ${CRT_PRESUMED_OUTS:-none} | LCD: ${LCD_OUTS:-none}"
+
+		# ── Boot layout — EARLY (before the generator + overlay save) ──
+		# Apply the dual as soon as X is up, so the CRT is on 15kHz (the driver's
+		# own interlace — NVIDIA needs no custom-named modeline for that, verified
+		# live 2026-08-21 GTX 970: the CRT displays via its own "640x480" interlace
+		# 0x1bd, and a Screen Modes request only feeds the LCD the wrong mode)
+		# BEFORE EmulationStation starts — the user then never sees the X-startup
+		# state (LCD native + CRT dark). Previously the apply ran AFTER the
+		# generator + batocera-save-overlay (a 61MB image save — many seconds),
+		# leaving a ~10-20s broken window. The watcher's first pass then only
+		# verifies (it accepts any 15kHz-class CRT active mode — layout-watch
+		# canonicalization). Re-detect here collects a probe promotion first.
+		crt_probe 2>/dev/null || true
+		detect_outputs 2>/dev/null || true
+		# Box keys self-heal — MUST run AFTER detect (CRT_OUTS known). Before the fix this block ran at service start with CRT_OUTS="" and always reverted to auto (bug: install set 480i then service wiped it).
+		if [ -n "$CRT_OUTS" ]; then
+			for _bk in es.resolution global.videomode; do
+				if [ "$(batocera-settings-get "$_bk" 2>/dev/null || true)" != "640x480i.60.00" ]; then
+					batocera-settings-set "$_bk" "640x480i.60.00" >/dev/null 2>&1 || true
+					echo "  box key $_bk self-healed to 640x480i.60.00"
+				fi
+			done
+		else
+			for _bk in es.resolution global.videomode; do
+				if [ "$(batocera-settings-get "$_bk" 2>/dev/null || true)" != "auto" ]; then
+					batocera-settings-set "$_bk" "auto" >/dev/null 2>&1 || true
+					echo "  box key $_bk reverted to auto (no confirmed CRT — LCD-only boot, ES starts native)"
+				fi
+			done
+		fi
+		# Splash keys (global.videooutput + splash.screen.resize) are written
+		# PRE-X by the generator chain (S15 -> crt-x11-generator.sh) — the
+		# single writer. S28splash reads them at S28, BEFORE this late pass
+		# runs (boot.log 2026-08-30: S15 14:08:58 -> S28 14:08:59 -> S99
+		# 14:09:11): a late writer lagged one boot behind every topology
+		# change — a CRT-only boot removed the keys and the first dual
+		# boot's splash fell to the stock first-connected fallback, whose
+		# mpv/DRM scan listed the EMPTY analog DVI-I-1 as connected (NVIDIA
+		# load-detection phantom) — splash rendered into the void.
+		if command -v batocera-settings-set >/dev/null 2>&1 && [ -f /boot/batocera-boot.conf ]; then
+			_v="640x480i.60.00"; [ -z "$CRT_OUTS" ] && _v="auto"
+			[ "$(batocera-settings-get -f /boot/batocera-boot.conf es.resolution 2>/dev/null || true)" != "$_v" ] &&
+				batocera-settings-set -f /boot/batocera-boot.conf es.resolution "$_v" >/dev/null 2>&1 &&
+				echo "  BOOTCONF es.resolution mirrored to $_v (S65values4boot parity)"
+		fi
+		if layout_apply_if_changed; then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — watcher retry (convergence contract) owns it"; fi
+
+		# -- X11 conf: regenerate ALWAYS (revert of tonight's slimming) --
+		# The early hook owns PRE-X generation, but this pass must STILL
+		# regenerate unconditionally: it is the SELF-CORRECTION for stale
+		# confs (a conf present-but-stale can never be detected as "missing",
+		# regression verified live on the AMD re-mount 2026-08-24: stale
+		# nvidia conf survived this pass and kept X dead). The conf is NEVER
+		# persisted (design closed 2026-08-24) and the only overlay save in
+		# this section is the hook bootstrap below (event-gated, not md5).
+		bash "$PKG_ROOT/src/x11/crt-x11-generator.sh" --force || true
+
+		# NO PERSISTENCE of the CONF (design closed 2026-08-24): the pre-X
+		# hook (/etc/init.d/S15crt-dual-gen) regenerates it BEFORE X at every
+		# boot from CURRENT sysfs truth - a saved copy would be either a
+		# useless cache or, after a hardware change, inherited POISON
+		# (wrong-driver fatal, verified twice live). Runtime self-corrects
+		# via always-regenerate.
+		#
+		# Bootstrap FIRST — usage must follow init under set -u (the reversed
+		# order crashed right here: "_hook_installed: unbound variable",
+		# verified boot 2026-08-24). An upgrade wipes /etc/init.d too;
+		# redeploy the PRE-X generator hook if missing.
+		_hook_installed=0
+		if [ -f "$PKG_ROOT/src/service/crt-gen-initd.sh" ] && [ -d /etc/init.d ] && [ ! -f /etc/init.d/S15crt-dual-gen ]; then
+			cp "$PKG_ROOT/src/service/crt-gen-initd.sh" /etc/init.d/S15crt-dual-gen 2>/dev/null \
+				&& chmod +x /etc/init.d/S15crt-dual-gen 2>/dev/null && _hook_installed=1
+		fi
+
+		# The HOOK itself (/etc/init.d/S15crt-dual-gen) lives in the RAM
+		# overlay: persist it right after installing it (only then).
+		if [ "$_hook_installed" = 1 ] && command -v batocera-save-overlay >/dev/null 2>&1; then
+			umount /overlay/saved 2>/dev/null || true
+			batocera-save-overlay >/dev/null 2>&1 && echo "  hook S15 installed AND persisted to overlay"
+		fi
+
+		# ── Diagnostic snapshot (self-sufficient logs) ──
+		if [ -f "$PKG_ROOT/src/tools/diag-dump.sh" ]; then
+			mkdir -p "$(dirname "$LOG")/diag"
+			bash "$PKG_ROOT/src/tools/diag-dump.sh" >"$(dirname "$LOG")/diag/diag-last-boot.txt" 2>&1 || true
+			echo "  Diag dump: $(dirname "$LOG")/diag/diag-last-boot.txt"
+		fi
+
+		# ── Layout watcher (live hotplug, no reboot) ──
+		# Gate is -f (exists), NOT -x: the service runs it via `bash`, so an
+		# executable bit is not required to launch it. Gating on -x silently
+		# skips the daemon when a deploy copies the script as 0644 (verified
+		# 2026-08-20: layout-watch.sh landed 644 -> -x gate failed -> watcher
+		# never started -> hotplug not detected until the next boot).
+		if [ -f "$PKG_ROOT/src/layout/layout-watch.sh" ]; then
+			if ! pgrep -f "layout-watch.sh" >/dev/null 2>&1; then
+				setsid nohup bash "$PKG_ROOT/src/layout/layout-watch.sh" >/dev/null 2>&1 &
+				echo "  layout-watch started (live hotplug)"
+			else
+				echo "  layout-watch already active"
+			fi
+		fi
+
+		# ── Gamepad manual-reprobe trigger (universal, non-grabbing) ──
+		# Watches any gamepad (the user's driver normalizes arcade encoders
+		# to a pad; standard pads work as-is) for the Select+L1 combo and
+		# touches the manual hotplug trigger, which the watcher consumes
+		# (re-detect + forced apply). This is the MANUAL analog re-probe for
+		# AMD dce_v6 where the periodic forced probe is disabled (glitch).
+		if [ -f "$PKG_ROOT/src/layout/gamepad-reprobe.py" ]; then
+			mkdir -p "$LOG_DIR"
+			pkill -f "gamepad-reprobe.py" 2>/dev/null || true
+			CRT_DUAL_STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}" \
+				setsid nohup python3 -u "$PKG_ROOT/src/layout/gamepad-reprobe.py" \
+				>/dev/null 2>>"$LOG_DIR/gamepad-reprobe.log" &
+			echo "  gamepad-reprobe started (manual hotplug trigger)"
+		fi
+
+		echo "=== CRT-DUAL BOOT SERVICE COMPLETE — $(date) ==="
+		;;
+
+	stop)
+		# Kills the layout watcher + the gamepad trigger; a service restart
+		# relaunches both (pgrep guard against duplicates in start).
+		pkill -f "layout-watch.sh" 2>/dev/null || true
+		pkill -f "gamepad-reprobe.py" 2>/dev/null || true
+		;;
+
+	*)
+		echo "Usage: $0 {start|stop}"
+		;;
+esac

@@ -1,0 +1,37 @@
+#!/bin/bash
+# vnc — VNC launcher for the crt-dual layer (bundled x11vnc)
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# Usage: vnc [port]   (default port: 5900)
+#
+# Ported from the original dual-output project (2026-08-10) with the
+# same flags and a self-contained environment (LD_LIBRARY_PATH +
+# libcrypt.so.1 symlink via vnc-env.sh).
+#
+# Flags (established conventions, see vnc-env.sh):
+#   -forever   keep serving after a client disconnects
+#   -noxdamage avoid the crash on resolution changes (the CRT switches
+#              modes often) — NEVER -clip
+#   (no -xrandr) RandR-following is DROPPED: on the AMD dce_v6 the
+#              -xrandr mode polls RandR every ~4s, and every RandR
+#              contact blips the display (verified 2026-08-12, R9 270X).
+#              The VNC is a debug tool and must stay a passive grab.
+#   -noshm     avoid shared-memory issues over the network
+#   -shared    allow multiple simultaneous clients
+#   -nopw      no password (local-network use; documented limitation)
+#   -xkb -modtweak  keyboard mapping
+
+set -uo pipefail
+
+VNC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" 2>/dev/null || VNC_DIR="/userdata/system/crt-dual/src/vnc"
+[ -f "$VNC_DIR/vnc-env.sh" ] && source "$VNC_DIR/vnc-env.sh"
+
+PORT="${1:-5900}"
+export DISPLAY="${DISPLAY:-:0}"
+
+# A previous instance on this port would hold it (stale service or a
+# manual run); free it before starting.
+fuser -k "${PORT}/tcp" 2>/dev/null || true
+
+exec "$VNC_BIN/x11vnc" -forever -noxdamage -noshm -rfbport "$PORT" -shared -nopw -xkb -modtweak

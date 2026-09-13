@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# 99-crt-dual-hotplug.rules — CRT-DUAL: drm hotplug -> wake the layout watcher.
+# The handler is a MUTE POKE (drops /tmp/crt-dual/hotplug-trigger): since the
+# convergence refactor (consolidate-watcher, 2026-08-23) layout-watch.sh is
+# the single applier — it consumes the trigger, observes until X settles, and
+# applies only what convergence says is missing (see src/layout/hotplug-layout.sh).
+# Deployed by install.sh to /etc/udev/rules.d/.
+SUBSYSTEM=="drm", KERNEL=="card*", ACTION=="change", RUN+="/userdata/system/crt-dual/src/layout/hotplug-layout.sh"

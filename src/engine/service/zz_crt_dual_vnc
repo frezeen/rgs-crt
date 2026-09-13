@@ -1,0 +1,88 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# zz_crt_dual_vnc — autostart VNC for the crt-dual layer (Batocera custom
+# service, registered via `batocera-services enable`).
+#
+# What it does (and only this):
+#   1. Waits for X (:0) to be up — the CRT service may still be preparing
+#      the display modes when this service starts (zz_ = late).
+#   2. Starts the bundled x11vnc (src/vnc/vnc) on port 5900, standard
+#      (unscaled) view, under a respawn loop: x11vnc 0.9.17 can segfault
+#      on X damage storms (observed 2026-08-10 on this box — signal 11,
+#      even with -noxdamage), and a boot service must come back on its
+#      own. The loop PID lives in /tmp/crt-dual-vnc.pid; stop kills the
+#      loop first (no respawn) then x11vnc.
+#
+# The `vnc` / `vnc-scaled` commands stay available for manual
+# use (install.sh symlinks them into /usr/bin); a manual instance holds
+# the port, the loop retries until it exits, then takes over.
+#
+# Runs from /userdata/system/services (Batocera custom service).
+# Package root: /userdata/system/crt-dual (installed by install.sh).
+
+set -uo pipefail
+
+case "$1" in
+	start)
+		PKG_ROOT="/userdata/system/crt-dual"
+		VNC="$PKG_ROOT/src/vnc/vnc"
+		LOG="$PKG_ROOT/logs/vnc.log"
+		PIDFILE="/tmp/crt-dual-vnc.pid"
+		mkdir -p "$(dirname "$LOG")"
+
+		[ -x "$VNC" ] || {
+			echo "zz_crt_dual_vnc: launcher $VNC missing — is the package installed?" >&2
+			exit 1
+		}
+
+		# Single instance: a live respawn loop -> nothing to do.
+		if [ -f "$PIDFILE" ] && pgrep -F "$PIDFILE" >/dev/null 2>&1; then
+			echo "zz_crt_dual_vnc: already running (loop pid $(cat "$PIDFILE" 2>/dev/null))"
+			exit 0
+		fi
+		rm -f "$PIDFILE"
+
+		# Wait for X (:0) — the boot service may still be applying modes.
+		export DISPLAY="${DISPLAY:-:0}"
+		for _i in $(seq 1 15); do
+			xrandr --current 2>/dev/null | grep -q " connected" && break
+			sleep 2
+		done
+
+		# Respawn loop (self-healing on crash; clean exit 0 = no respawn).
+		nohup bash -c '
+			echo $$ >"$1"
+			while :; do
+				"$2" >>"$3" 2>&1
+				_rc=$?
+				[ "$_rc" = 0 ] && break
+				sleep 2
+			done
+			rm -f "$1"
+		' _ "$PIDFILE" "$VNC" "$LOG" >/dev/null 2>&1 &
+		sleep 2
+		if pgrep -x x11vnc >/dev/null 2>&1; then
+			echo "zz_crt_dual_vnc: x11vnc started (port 5900, DISPLAY=$DISPLAY, respawn loop) — log: $LOG"
+		else
+			echo "zz_crt_dual_vnc: x11vnc failed to start — log: $LOG" >&2
+			exit 1
+		fi
+		;;
+
+	stop)
+		PIDFILE="/tmp/crt-dual-vnc.pid"
+		# Kill the loop FIRST (stops the respawning), then x11vnc.
+		if [ -f "$PIDFILE" ]; then
+			kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null || true
+			rm -f "$PIDFILE"
+		fi
+		pkill -x x11vnc 2>/dev/null || true
+		echo "zz_crt_dual_vnc: x11vnc stopped"
+		;;
+
+	*)
+		echo "Usage: $0 {start|stop}"
+		;;
+esac

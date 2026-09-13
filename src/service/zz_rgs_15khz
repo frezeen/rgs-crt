@@ -1,0 +1,593 @@
+#!/bin/bash
+# zz_rgs_15khz — RGS boot service + update watch (step 8).
+#
+# Runs in the SAME S99userservices loop as rgs_config (enabled via stock
+# batocera-services, called as `zz_rgs_15khz {start|stop}`). Order vs
+# rgs_config is NOT guaranteed (it runs async via `start &`), so this
+# service is order-INDEPENDENT: it observes (cmp) and re-deploys, never
+# assumes.
+#
+# start duties: truncate OUR log files (explicit list — the logs dir is
+# shared with stock logs, a glob would truncate stock files); log the
+# rgs_config ordering evidence; run the update watch (adopt a re-verified
+# RGS update, or on RED hold the 15kHz profile so launches run stock/LCD
+# behavior and skip the re-injection onto an unverified system — the log
+# invites the user to run the rgs_crt_check tool from the Batocera
+# config menu); re-deploy ONLY the manifest-listed overlay
+# files that drifted (install.sh is authoritative and rewrites the
+# manifest every run); save the overlay IFF something was re-deployed;
+# re-create the VNC symlinks (stateless per boot); recompute the amdgpu
+# dc=0 modprobe pin (amdgpu-legacy duty, 2026-09-10 — the modprobe.d
+# file must exist BEFORE the module binds, so the boot service writes
+# it for the NEXT boot; install.sh calls the same one-shot); keep the
+# Intel i915 480i patch on /boot (i915-patch duty: hook + module deployed
+# there once by install.sh, self-healed at boot when drifted; the /boot
+# hook itself swaps the module BEFORE udev at every boot — see the duty
+# below and src/service/i915/boot-custom.sh).
+# Exit 0 always (a boot service must not block boot; drift goes LOUDLY
+# into the log, and verify.sh flags it).
+#
+# Measured update model (2026-09-07): an RGS update lands ONLY under
+# /userdata — rgs.version changes LIVE, the new generators wait in
+# rgs/fix/ and reach the system at the NEXT boot (rgs_config copies
+# fix/ -> /usr,/etc). So fix/ IS the future system state, and the watch
+# verifies the layer against it.
+#
+# Env seams (tests): RGS15_PKG/LOG, RGS15_RGS_VERSION_FILE/
+# BATOCERA_VERSION_FILE/RGS_CONFIG/FIX_DIR/SITE/SHADOW/CONF,
+# RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_DMESG_SRC (amdgpu-legacy),
+# RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_REPO/RGS15_I915_ALLOW_FETCH
+# (i915-patch).
+
+set -uo pipefail
+
+PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
+LOG="${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}"
+LOGS_DIR="$(dirname "$LOG")"
+# Explicit truncation list — OUR files only (service log + engine runtime
+# log the game path appends to; stock display.log/es_launch_* NEVER touched).
+TRUNCATE_LIST="rgs-15khz.log selector-core.log"
+RGS_FIX="/userdata/system/rgs/fix"
+MANIFEST="$PKG/overlay-manifest"
+RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
+BATOCERA_VERSION_SRC="${RGS15_BATOCERA_VERSION_FILE:-/usr/share/batocera/batocera.version}"
+RGS_CONFIG="${RGS15_RGS_CONFIG:-/userdata/system/services/rgs_config}"
+GUARD_SITE="${RGS15_SITE:-$(python3 -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null)}"
+GUARD_SHADOW="${RGS15_SHADOW:-/tmp/rgs-15khz-boot-shadow}"
+GUARD_CONF="${RGS15_CONF:-/userdata/system/batocera.conf}"
+GUARD_FIX="${RGS15_FIX_DIR:-$RGS_FIX}"
+MODPROBE_CONF="${RGS15_MODPROBE_CONF:-/etc/modprobe.d/rgs-15khz-amdgpu-legacy.conf}"
+
+log() {
+	echo "zz_rgs_15khz [$(date +%FT%T)]: $*" >>"$LOG" 2>/dev/null || true
+}
+
+# manifest line -> package source path. Manifest stores installed overlay
+# DSTs; the source is derived: DST under /etc|/usr/lib must equal the
+# package file with the same identifying basename, mapped here explicitly
+# (no guessing — an unmapped entry is a loud error, never a skipped file).
+manifest_src() {
+	case "$1" in
+	*/sitecustomize.py) printf '%s' "$PKG/src/selector/sitecustomize.py" ;;
+	*/S15crt-dual-gen) printf '%s' "$PKG/src/service/crt-gen-initd.sh" ;;
+	*/99-crt-dual-hotplug.rules) printf '%s' "$PKG/src/udev/99-crt-dual-hotplug.rules" ;;
+	*) return 1 ;;
+	esac
+	return 0
+}
+
+# ── profile hold/restore: the RED-state off switch ───────────────────────
+# RED = the layer cannot be certified on the new system. Holding every
+# crt-targeting profile (generic: spec [display] target = crt, never a
+# profile name) leaves the selector with no CRT candidates → launches
+# run the stock profile / stock default = LCD-style behavior, tube stays
+# on the gated boot mode. Fully reversible (restore renames back).
+guard_profile_hold() {
+	local _spec
+	for _spec in "$PKG"/profiles/*/spec.conf; do
+		[ -f "$_spec" ] || continue
+		grep -q '^target = crt' "$_spec" 2>/dev/null || continue
+		mv "$_spec" "$_spec.hold" \
+			&& log "guard profile held: $(basename "$(dirname "$_spec")")" \
+			|| log "guard WARN: could not hold $(dirname "$_spec")"
+	done
+}
+
+guard_profile_restore() {
+	local _spec
+	for _spec in "$PKG"/profiles/*/spec.conf.hold; do
+		[ -f "$_spec" ] || return 0
+		mv "$_spec" "${_spec%.hold}" \
+			&& log "guard profile restored: $(basename "$(dirname "$_spec")")" \
+			|| log "guard WARN: could not restore $(dirname "$_spec")"
+	done
+}
+
+# ── guard_run: the update watch, ONE logic copy. ─────────────────────────
+# Hold => rc 1 (the boot caller skips re-deploy + VNC).
+# Versions match => rc 0, zero cost (the common path).
+guard_run() {
+	_where="guard:"
+	_guard_hold=0
+	if [ -f "$PKG/rgs-version" ] && [ -n "$(cat "$RGS_VERSION_SRC" 2>/dev/null || true)" ]; then
+		_rec_rgs="$(sed -n 's/^rgs\.version=//p' "$PKG/rgs-version")"
+		_rec_bat="$(sed -n 's/^batocera\.version=//p' "$PKG/rgs-version")"
+		_live_rgs="$(cat "$RGS_VERSION_SRC" 2>/dev/null || true)"
+		_live_bat="$(cat "$BATOCERA_VERSION_SRC" 2>/dev/null || true)"
+		if [ "$_rec_rgs" != "$_live_rgs" ] || [ "$_rec_bat" != "$_live_bat" ]; then
+			log "$_where RGS update detected (recorded ${_rec_rgs:-?}/${_rec_bat:-?}, live ${_live_rgs:-?}/${_live_bat:-?}) — re-verifying the layer against the future fix/ state"
+			_ok=1
+			# (a) Preserve-zone invariants: the update rebuilds batocera.conf
+			# keeping everything BEFORE "RGS TUNING" and AFTER "END RGS";
+			# inside that zone the PACK decides. Our keys and services list
+			# must never live there.
+			_tun="$(grep -n 'RGS TUNING' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+			_end="$(grep -n 'END RGS' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+			if [ -n "$_tun" ] && [ -n "$_end" ]; then
+				for _key in es.resolution global.videomode global.videooutput2; do
+					_line="$(grep -n "^${_key}=" "$GUARD_CONF" | head -1 | cut -d: -f1 || true)"
+					if [ -n "$_line" ] && [ "$_line" -gt "$_tun" ] && [ "$_line" -lt "$_end" ]; then
+						log "$_where GUARD FAIL: $_key sits INSIDE the RGS TUNING zone — an update would rewrite it (move after END RGS)"
+						_ok=0
+					fi
+				done
+				_sline="$(grep -n '^system\.services=' "$GUARD_CONF" | head -1 | cut -d: -f1 || true)"
+				if [ -n "$_sline" ] && [ "$_sline" -gt "$_tun" ] && [ "$_sline" -lt "$_end" ]; then
+					log "$_where GUARD FAIL: system.services INSIDE the RGS TUNING zone — an update would unregister our services (move before RGS TUNING)"
+					_ok=0
+				fi
+			fi
+			# (b) Injection check against the FUTURE configgen: shadow tree =
+			#    live tree with every fix/-mapped file copied over it (the
+			#    map is read from the NEW rgs_config the update shipped) —
+			#    then the SAME sitecustomize patch probe verify.sh uses.
+			rm -rf "$GUARD_SHADOW"
+			if mkdir -p "$GUARD_SHADOW" && cp -a "$GUARD_SITE/configgen" "$GUARD_SHADOW/configgen" 2>/dev/null; then
+				grep -E '^[[:space:]]*cp[[:space:]]' "$RGS_CONFIG" 2>/dev/null | while IFS= read -r _cp; do
+					_src="$(printf '%s' "$_cp" | awk '{print $2}')"
+					_dst="$(printf '%s' "$_cp" | awk '{print $3}')"
+					_dst="${_dst%/}" # some cp write a trailing-slash dir dst
+					case "$_src" in "$GUARD_FIX"/*.py) ;; *) continue ;; esac
+					case "$_dst" in "$GUARD_SITE"/*) ;; *) continue ;; esac
+					_tgt="$GUARD_SHADOW/${_dst#"$GUARD_SITE"/}"
+					[ -d "$_tgt" ] && _tgt="$_tgt/$(basename "$_src")"
+					mkdir -p "$(dirname "$_tgt")"
+					[ -f "$_src" ] && cp "$_src" "$_tgt"
+				done
+				if PYTHONPATH="$GUARD_SHADOW:$GUARD_SITE" python3 - <<'PYEOF' 2>>"$LOG"; then
+import sys
+import sitecustomize  # noqa: F401  (engine import hook — same probe as verify.sh)
+import configgen.emulatorlauncher  # noqa: F401  (pulls utils.videoMode too)
+_r = sitecustomize._PATCHER_RESULTS
+_bad = [m for m in sitecustomize._PATCHERS if _r.get(m) is not True]
+sys.exit(1 if _bad else 0)
+PYEOF
+					log "$_where patch patterns match the future (fix/) configgen"
+				else
+					log "$_where GUARD FAIL: patch patterns do NOT match the future (fix/) configgen — layer incompatible with this RGS update"
+					_ok=0
+				fi
+			else
+				log "$_where GUARD FAIL: cannot build the fix/ shadow tree (no live configgen?)"
+				_ok=0
+			fi
+			if [ "$_ok" = "1" ]; then
+				guard_profile_restore
+				printf 'rgs.version=%s\nbatocera.version=%s\n' "$_live_rgs" "$_live_bat" >"$PKG/rgs-version" \
+					&& log "$_where layer re-certified on RGS ${_live_rgs} — version adopted (green until the next update)" \
+					|| log "$_where WARN: could not write $PKG/rgs-version — verify.sh will keep flagging the mismatch"
+			else
+				# Hold the layer: do NOT re-inject our files onto the updated
+				# system. Stock behavior comes from the engine's fail-safe
+				# patches (never break configgen); recovery = uninstall.sh +
+				# install.sh from the re-verified package.
+				_guard_hold=1
+				guard_profile_hold
+				log "$_where GUARD HOLD — 15kHz profile disabled (launches run stock/LCD behavior); re-deploy skipped. Open rgs_crt_check in the Batocera config menu to re-verify, or uninstall"
+			fi
+		else
+			# versions match: any profile still held is restored (self-heal
+			# after e.g. a manual RGS revert — fix/ is our certified content)
+			guard_profile_restore
+		fi
+	fi
+	return "$_guard_hold"
+}
+
+# ── amdgpu legacy pin: the dc=0 modprobe file (2026-09-10) ──────────────
+# WHY (tester R9 380 black-tube case, evidence chain): on kernels < 6.19
+# the amdgpu Display Core (dc=1 — the default for Tonga/Fiji/Polaris/
+# Vega) has NO analog encoders: the DVI-I tube gets NO signal while an
+# LCD on a digital port lights up (exactly the tester's symptom).
+# Upstream landed DC analog encoders in 6.19 (Valve's Timur Kristof,
+# Phoronix 2025-10-29); the kernel's own words on < 6.19: "VGA support
+# which is not supported with DC" (amdgpu_device.c). dc=0 falls back to
+# the classic dce display code (DAC + interlaced complete) = the driver
+# class this layer's AMD adapter is calibrated on (dce_v6-class contract,
+# GPU-ADAPTERS.md). UNSAFE outside that class: DCN cards (Raven/Navi+)
+# have NO legacy display code — dc=0 there = no display at all. The gate
+# is therefore the KERNEL's own boot line (the asic name it printed),
+# never a PCI list and never a hardcoded box.
+# State file (shell-quality §7): who writes = this function (boot duty +
+# the install.sh one-shot call), who reads = kmod when amdgpu loads,
+# who cleans = uninstall.sh + the remove branch below.
+amdgpu_legacy_decide() {
+	local _kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
+	local _knob _asic
+	_knob="$(grep -E '^rgs-15khz\.amdgpu-legacy[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]')"
+	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
+		_asic="$(grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' "$RGS15_DMESG_SRC" 2>/dev/null | cut -d'(' -f2)"
+	else
+		_asic="$(dmesg 2>/dev/null | grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' | cut -d'(' -f2)"
+	fi
+	local _want=0
+	if [ "$_knob" = "off" ]; then
+		_want=0
+	elif [ "$_kernel" != "$(printf '%s\n' '6.19' "$_kernel" | sort -V | tail -1)" ]; then
+		# strictly below 6.19 (sort -V: the larger of {6.19, kernel} != kernel)
+		case "$_asic" in
+		TONGA|FIJI|POLARIS10|POLARIS11|POLARIS12|VEGA10|VEGA12|VEGA20) _want=1 ;;
+		esac
+	fi
+	if [ "$_want" = "1" ]; then
+		if [ -f "$MODPROBE_CONF" ] && grep -q "^options amdgpu dc=0$" "$MODPROBE_CONF"; then
+			log "amdgpu-legacy: pin converged (kernel=$_kernel asic=${_asic:-none})"
+		else
+			local _tmp="$MODPROBE_CONF.tmp.$$"
+			{
+				echo "# rgs-15khz: pin the amdgpu classic display stack (dc=0) — kernel"
+				echo "# $_kernel, asic ${_asic:-?} has no analog encoders in Display Core"
+				echo "# before 6.19. Written by zz_rgs_15khz (amdgpu-legacy) for the next"
+				echo "# module load; removed by uninstall.sh, when the kernel reaches 6.19+"
+				echo "# or when rgs-15khz.amdgpu-legacy=off is set in batocera.conf."
+				echo "options amdgpu dc=0"
+			} >"$_tmp" && mv "$_tmp" "$MODPROBE_CONF" \
+				&& log "amdgpu-legacy: pin WRITTEN ($MODPROBE_CONF) — applies at the NEXT amdgpu load" \
+				|| log "amdgpu-legacy: WARN: could not write $MODPROBE_CONF"
+		fi
+	else
+		if [ -e "$MODPROBE_CONF" ]; then
+			rm -f "$MODPROBE_CONF"
+			log "amdgpu-legacy: pin removed (not applicable: kernel=$_kernel asic=${_asic:-none} knob=${_knob:-auto})"
+		fi
+	fi
+	return 0
+}
+
+# ── Intel i915 480i patch: /boot hook + module (2026-09-10) ────────────
+# WHY (tester Intel HD 530 black-tube report, 2026-09-10, evidence chain
+# in the tester bundle): stock gen9 i915 rejects Y-tiled scanout in
+# IF-ID interlace mode while Mesa/glamor allocates Y-tiled buffers —
+# every 480i modeset dies -EINVAL; X came up "no screens found" and the
+# engine never converged. The community patch set amxcs/
+# batocera-crt-15khz-intel fixes exactly this (patched driver advertises
+# only LINEAR/X_TILED on gen9); its prebuilt module targets THIS
+# Batocera/kernel line, vermagic-checked before use. THE MODULE IS THE
+# ONLY PIECE taken from that project — their installer also rewrites ES
+# modes / batocera.conf keys / boot cmdline, which would fight this
+# layer; see THIRD-PARTY.md.
+# /lib/modules lives on the RAM overlay (reverts at boot) and i915 cannot
+# be unloaded live, so the module is swapped by the /boot hook at every
+# boot BEFORE udev (stock S00bootcustom runs /boot/boot-custom.sh) — the
+# hook (src/service/i915/boot-custom.sh) re-checks vermagic itself, so a
+# kernel update keeps stock i915 loading instead of a black tube.
+# Gate = the KERNEL's own boot line ("Initialized i915" — the i915 iGPU
+# bound this boot), never a PCI list and never a hardcoded box.
+# State files (shell-quality §7): /boot/boot-custom.sh (writer = this
+# duty + install.sh, reader = stock S00bootcustom; foreign hook never
+# overwritten) and /boot/i915-patched.ko (writer = this duty + install.sh,
+# reader = the /boot hook; removed by uninstall.sh). The fetched module
+# is archived in the repo's binaries dir (user-procured class, gitignored)
+# so a later boot redeploys it without re-downloading.
+i915_patch_decide() {
+	local _kernel _dmesg_ok _repo _hook_src _hook_dst _mod_dst _mod_name
+	local _hook_ok _mod_src _vm _want_fetch
+	_kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
+	_hook_dst="${RGS15_BOOT_HOOK:-/boot/boot-custom.sh}"
+	_mod_dst="${RGS15_BOOT_MOD:-/boot/i915-patched.ko}"
+	# repo root: install.sh passes it (fresh install order); the boot duty
+	# derives it from the recorded install-source (the project folder).
+	if [ -n "${RGS15_I915_REPO:-}" ]; then
+		_repo="$RGS15_I915_REPO"
+	else
+		_repo="$(cat "$PKG/install-source" 2>/dev/null || true)"
+	fi
+	_hook_src="$_repo/src/service/i915/boot-custom.sh"
+	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
+		grep -q "Initialized i915" "$RGS15_DMESG_SRC" 2>/dev/null && _dmesg_ok=1 || _dmesg_ok=0
+	else
+		dmesg 2>/dev/null | grep -q "Initialized i915" && _dmesg_ok=1 || _dmesg_ok=0
+	fi
+	if [ "$_dmesg_ok" = "0" ]; then
+		# not an Intel-iGPU boot: the pieces must NOT linger (leftover hook
+		# would run a stale module check forever). OUR module is removed;
+		# a foreign hook is NEVER touched (loud log, uninstall refuses it too).
+		if [ -e "$_mod_dst" ]; then
+			rm -f "$_mod_dst" && log "i915-patch: module removed (not applicable: no i915 this boot)"
+		fi
+		if [ -e "$_hook_dst" ] && [ -f "$_hook_src" ] && ! cmp -s "$_hook_dst" "$_hook_src"; then
+			log "i915-patch: WARN: boot hook is FOREIGN (differs from ours) on a non-Intel box — left in place (inspect $LOG)"
+		fi
+		return 0
+	fi
+	# Intel: converge hook + module onto /boot. Never overwrite a foreign
+	# hook; never deploy a module whose vermagic is not the running kernel.
+	if [ -e "$_hook_dst" ] && [ -f "$_hook_src" ] && ! cmp -s "$_hook_dst" "$_hook_src"; then
+		log "i915-patch: GUARD FAIL: boot hook is FOREIGN (differs from ours) — refusing to touch it (amxcs installer or other CRT tool? uninstall theirs first)"
+		return 1
+	fi
+	_mod_name="i915-patched-$_kernel.ko"
+	_mod_src=""
+	if [ -f "$_mod_dst" ]; then
+		_mod_src="$_mod_dst"
+	elif [ -f "$_repo/src/service/i915/binaries/$_mod_name" ]; then
+		_mod_src="$_repo/src/service/i915/binaries/$_mod_name"
+	elif [ "${RGS15_I915_ALLOW_FETCH:-}" = "1" ]; then
+		_want_fetch="https://github.com/amxcs/batocera-crt-15khz-intel/releases/download/batocera-$(cut -d' ' -f1 "$BATOCERA_VERSION_SRC" 2>/dev/null)/$_mod_name"
+		mkdir -p "$_repo/src/service/i915/binaries" 2>/dev/null || true
+		if curl -fsSL "$_want_fetch" -o "$_repo/src/service/i915/binaries/$_mod_name" 2>/dev/null; then
+			_mod_src="$_repo/src/service/i915/binaries/$_mod_name"
+			log "i915-patch: module fetched from the amxcs release (public URL, no credentials) -> $_repo/src/service/i915/binaries/$_mod_name"
+		else
+			log "i915-patch: no prebuilt module fetched (release 404 or offline) — build per the amxcs README and place i915-patched-$_kernel.ko in src/service/i915/binaries/, then reinstall; progressive 15kHz still works, 480i does not"
+		fi
+	else
+		log "i915-patch: module absent and fetch not allowed (boot recompute) — place i915-patched-$_kernel.ko in src/service/i915/binaries/ and reinstall"
+	fi
+	if [ -z "$_mod_src" ]; then
+		# nothing deployed at all: a hook without its module is dead weight,
+		# and the NEXT boot after the module is placed (repo binaries or
+		# fetch) deploys the pair in one pass
+		return 0
+	fi
+	_vm="$(modinfo -F vermagic "$_mod_src" 2>/dev/null || true)"
+	case "$_vm" in
+	"$_kernel"*) ;;
+	"")
+		log "i915-patch: GUARD FAIL: vermagic unreadable on $_mod_src — not a module built for kernel $_kernel; refusing to deploy it (no-display risk)"
+		return 1
+		;;
+	*)
+		log "i915-patch: GUARD FAIL: vermagic mismatch (module '$_vm' vs kernel '$_kernel') — refusing to deploy it; stock i915 stays (recoverable, not a black tube)"
+		return 1
+		;;
+	esac
+	# Converged check first: identical hook + identical module = zero writes
+	# (no /boot remount on the common path).
+	_hook_ok=0
+	[ -e "$_hook_dst" ] && cmp -s "$_hook_dst" "$_hook_src" && _hook_ok=1
+	if [ "$_hook_ok" = "1" ] && [ -f "$_mod_dst" ] && cmp -s "$_mod_src" "$_mod_dst"; then
+		log "i915-patch: converged (hook identical, module vermagic $_vm)"
+		return 0
+	fi
+	if ! (
+		mount -o remount,rw /boot 2>/dev/null || exit 9
+		trap 'sync; mount -o remount,ro /boot 2>/dev/null' EXIT
+		cp "$_hook_src" "$_hook_dst" 2>/dev/null || exit 10
+		chmod +x "$_hook_dst" 2>/dev/null || true
+		cp "$_mod_src" "$_mod_dst" 2>/dev/null || exit 10
+		sync
+	) 2>/dev/null; then
+		log "i915-patch: WARN: /boot deploy failed (remount/copy) — verify.sh will flag"
+		return 0
+	fi
+	log "i915-patch: deployed hook ($_hook_dst) + module ($_mod_dst, vermagic $_vm) — the hook swaps it BEFORE udev at every boot"
+	return 0
+}
+
+do_start() {
+	# 1. Truncate our logs (boot-pristine).
+	for _f in $TRUNCATE_LIST; do
+		: >"$LOGS_DIR/$_f" 2>/dev/null || true
+	done
+	log "start: logs truncated ($TRUNCATE_LIST)"
+
+	# 2. Ordering evidence: rgs_config products in place?
+	# (S02resize is the canary — rgs_config cmp+cp's it every boot.)
+	if [ -f "$RGS_FIX/S02resize-v42fix" ] && [ -f "/etc/init.d/S02resize" ] \
+		&& cmp -s "$RGS_FIX/S02resize-v42fix" "/etc/init.d/S02resize"; then
+		log "start: rgs_config products in place (S02resize matches fix — ordering OK)"
+	else
+		log "start: rgs_config products NOT in place (ran before rgs_config, or fix changed)"
+	fi
+
+	# 3. Update watch (boot): adopt a re-verified update or hold.
+	_guard_hold=0
+	guard_run || _guard_hold=1
+
+	# 3b. amdgpu-legacy pin (modprobe dc=0 file; the NEXT boot reads it
+	#     before the module binds). Guard-hold skips it: system pins are
+	#     not recomputed on an unverified system — same discipline as the
+	#     re-deploy skip below.
+	_mod_changed=0
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: amdgpu-legacy pin skipped (guard hold)"
+	else
+		_before=0
+		[ -f "$MODPROBE_CONF" ] && _before=1
+		amdgpu_legacy_decide
+		_after=0
+		[ -f "$MODPROBE_CONF" ] && _after=1
+		[ "$_before" != "$_after" ] && _mod_changed=1
+	fi
+	if [ "$_mod_changed" = "1" ]; then
+		if command -v batocera-save-overlay >/dev/null 2>&1 \
+			&& batocera-save-overlay >/dev/null 2>&1; then
+			log "start: overlay saved after amdgpu-legacy pin change"
+		else
+			log "start: overlay save FAILED after amdgpu-legacy pin change (verify.sh will flag)"
+		fi
+	fi
+
+	# 3c. i915 patch (/boot hook + module; self-healing, boot-safe).
+	#     Guard-hold skips it: system-level state is not recomputed on an
+	#     unverified system — same discipline as 3b and the re-deploy skip.
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: i915 patch skipped (guard hold)"
+	else
+		i915_patch_decide
+	fi
+
+	# 4. Re-deploy manifest overlay files (cmp||cp; save IFF drifted).
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: re-deploy skipped (guard hold)"
+	elif [ ! -f "$MANIFEST" ]; then
+		log "start: no overlay manifest (pre-integration install?) — nothing to re-deploy"
+	elif [ ! -d "$PKG/src" ]; then
+		log "start: package missing with manifest present — run install.sh (refusing to guess)"
+	else
+		_drift=0
+		while IFS= read -r _dst || [ -n "$_dst" ]; do
+			[ -n "$_dst" ] || continue
+			case "$_dst" in \#*) continue ;; esac
+			_src="$(manifest_src "$_dst")" || {
+				log "start: UNMAPPED manifest entry $_dst — run install.sh"
+				continue
+			}
+			if [ -f "$_dst" ] && cmp -s "$_src" "$_dst"; then
+				continue
+			fi
+			if cp "$_src" "$_dst" 2>/dev/null; then
+				log "start: re-deployed $_dst (was missing/drifted)"
+				_drift=1
+			else
+				log "start: FAILED to re-deploy $_dst"
+			fi
+		done <"$MANIFEST"
+		if [ "$_drift" = "1" ]; then
+			if command -v batocera-save-overlay >/dev/null 2>&1 \
+				&& batocera-save-overlay >/dev/null 2>&1; then
+				log "start: overlay saved after re-deploy"
+			else
+				log "start: overlay save FAILED after re-deploy (verify.sh will flag)"
+			fi
+		else
+			log "start: overlay files converged (no re-deploy)"
+		fi
+	fi
+
+	# 5. VNC symlinks (stateless per boot: recreate always, no save needed —
+	#    next boot recreates them again; a reboot never strands them).
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: VNC symlinks skipped (guard hold)"
+	elif [ -d "$PKG/src/vnc" ]; then
+		ln -sf "$PKG/src/vnc/vnc" /usr/bin/vnc 2>/dev/null || true
+		ln -sf "$PKG/src/vnc/vnc-scaled" /usr/bin/vnc-scaled 2>/dev/null || true
+		log "start: VNC symlinks re-created"
+	fi
+
+	log "start: done"
+	return 0
+}
+
+case "${1:-}" in
+start)
+	do_start
+	exit 0
+	;;
+stop)
+	exit 0
+	;;
+tool-uninstall)
+	# DELIBERATE teardown from the rgs_crt_check tool (user-launched, no
+	# game launch in flight): run the recorded installer's uninstall.sh,
+	# then reboot into pure stock RGS.
+	_src="$(cat "$PKG/install-source" 2>/dev/null || true)"
+	if [ -n "$_src" ] && [ -f "$_src/uninstall.sh" ]; then
+		log "tool: uninstall requested (deliberate, from rgs_crt_check) — running $_src/uninstall.sh then reboot"
+		bash "$_src/uninstall.sh" >>"$LOG" 2>&1 \
+			|| log "tool: uninstall returned non-zero — reboot ABORTED (inspect the log)"
+		reboot
+	else
+		log "tool: uninstall requested but no install-source recorded ($PKG/install-source) — run uninstall.sh from the project folder"
+	fi
+	exit 0
+	;;
+gamelist-ensure)
+	# Our entry in the +rgs gamelist. ES rewrites gamelists when it records
+	# a launch and drops entries applied while it was running (observed
+	# 2026-09-07: boot re-assert keeps ours alive). Idempotent, OURS only:
+	# first-run backup ($PKG/backups/rgs-gamelist.xml, restored by
+	# uninstall.sh), insert guarded by grep, tile image generated once.
+	_gl="/userdata/roms/rgs/gamelist.xml"
+	[ -f "$_gl" ] || exit 0 # no rgs rom dir: nothing to do
+	mkdir -p "$PKG/backups" 2>/dev/null || true
+	[ -f "$PKG/backups/rgs-gamelist.xml" ] || cp "$_gl" "$PKG/backups/rgs-gamelist.xml"
+	if ! grep -q 'rgs_crt_check.sh' "$_gl"; then
+		python3 - "$_gl" <<'PYEOF'
+import sys
+gl = sys.argv[1]
+text = open(gl, encoding="utf-8", errors="replace").read()
+block = """\t<game>
+\t\t<path>./rgs_crt_check.sh</path>
+\t\t<name>RGS-CRT CHECK &amp; UPDATE</name>
+\t\t<desc>Check the rgs-crt layer against this RGS version: align, update or uninstall. Provided by the rgs-crt project.</desc>
+\t\t<genre>System</genre>
+\t\t<image>./media/images/rgs_crt_check.png</image>
+\t\t<video>./media/videos/rgs_upgrade.mp4</video>
+\t</game>
+"""
+if "rgs_crt_check.sh" not in text:
+    text = text.replace("</gameList>", block + "</gameList>", 1)
+    open(gl, "w", encoding="utf-8").write(text)
+PYEOF
+		log "start: gamelist entry re-asserted (ES had dropped or it was missing)"
+	fi
+	_img="/userdata/roms/rgs/media/images/rgs_crt_check.png"
+	if [ ! -f "$_img" ]; then
+		SDL_VIDEODRIVER=dummy python3 - "$_img" <<'PYEOF' 2>/dev/null || true
+import sys
+import pygame
+pygame.init()
+w, h = 400, 300
+surf = pygame.Surface((w, h))
+surf.fill((12, 12, 16))
+pygame.draw.rect(surf, (168, 32, 32), (16, 16, w - 32, h - 32), 6)
+f_big = pygame.font.SysFont("dejavusans", 54, bold=True)
+f_sm = pygame.font.SysFont("dejavusans", 30)
+f_sm2 = pygame.font.SysFont("dejavusans", 22)
+t1 = f_big.render("RGS-CRT", True, (245, 245, 245))
+t2 = f_sm.render("CHECK & UPDATE", True, (230, 200, 60))
+t3 = f_sm2.render("15kHz CRT layer", True, (150, 150, 160))
+surf.blit(t1, (w // 2 - t1.get_width() // 2, 70))
+surf.blit(t2, (w // 2 - t2.get_width() // 2, 145))
+surf.blit(t3, (w // 2 - t3.get_width() // 2, 205))
+pygame.image.save(surf, sys.argv[1])
+PYEOF
+		log "start: check-tool tile image generated"
+	fi
+	exit 0
+	;;
+amdgpu-legacy)
+	# One-shot recompute of the amdgpu dc=0 modprobe pin (install.sh calls
+	# it at install so the FIRST boot after install already pins; the boot
+	# duty recomputes every boot). Log-only errors: never blocks a boot.
+	amdgpu_legacy_decide
+	exit 0
+	;;
+i915-patch)
+	# One-shot deploy of the Intel i915 480i patch onto /boot (install.sh
+	# calls it with RGS15_I915_REPO + RGS15_I915_ALLOW_FETCH=1; the boot
+	# duty recomputes every boot). rc 1 = a foreign hook or a refused
+	# module (install.sh echoes the WARN and continues — the state stays
+	# loud in verify.sh); log-only inside the function otherwise.
+	i915_patch_decide
+	exit $?
+	;;
+tool-check)
+	# the rgs_crt_check pygame tool: verdict line for the UI (first word),
+	# same watch logic; PASS restores held profiles + adopts
+	guard_run
+	if [ "$_guard_hold" = "0" ]; then
+		echo "GREEN"
+		log "tool: verdict GREEN (layer certified)"
+	else
+		echo "RED"
+		log "tool: verdict RED (layer not certifiable on this system)"
+	fi
+	exit 0
+	;;*)
+	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch}" >&2
+	exit 1
+	;;
+esac

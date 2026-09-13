@@ -1,0 +1,5 @@
+# binaries are USER-PROCURED, never shipped (verify.sh warns, never fails)
+**/binaries/
+__pycache__/
+*.pyc
+*.log
