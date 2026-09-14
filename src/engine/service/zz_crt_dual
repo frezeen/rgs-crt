@@ -118,37 +118,12 @@ set -uo pipefail
 		# canonicalization). Re-detect here collects a probe promotion first.
 		crt_probe 2>/dev/null || true
 		detect_outputs 2>/dev/null || true
-		# Box keys self-heal — MUST run AFTER detect (CRT_OUTS known). Before the fix this block ran at service start with CRT_OUTS="" and always reverted to auto (bug: install set 480i then service wiped it).
-		if [ -n "$CRT_OUTS" ]; then
-			for _bk in es.resolution global.videomode; do
-				if [ "$(batocera-settings-get "$_bk" 2>/dev/null || true)" != "640x480i.60.00" ]; then
-					batocera-settings-set "$_bk" "640x480i.60.00" >/dev/null 2>&1 || true
-					echo "  box key $_bk self-healed to 640x480i.60.00"
-				fi
-			done
-		else
-			for _bk in es.resolution global.videomode; do
-				if [ "$(batocera-settings-get "$_bk" 2>/dev/null || true)" != "auto" ]; then
-					batocera-settings-set "$_bk" "auto" >/dev/null 2>&1 || true
-					echo "  box key $_bk reverted to auto (no confirmed CRT — LCD-only boot, ES starts native)"
-				fi
-			done
-		fi
-		# Splash keys (global.videooutput + splash.screen.resize) are written
-		# PRE-X by the generator chain (S15 -> crt-x11-generator.sh) — the
-		# single writer. S28splash reads them at S28, BEFORE this late pass
-		# runs (boot.log 2026-08-30: S15 14:08:58 -> S28 14:08:59 -> S99
-		# 14:09:11): a late writer lagged one boot behind every topology
-		# change — a CRT-only boot removed the keys and the first dual
-		# boot's splash fell to the stock first-connected fallback, whose
-		# mpv/DRM scan listed the EMPTY analog DVI-I-1 as connected (NVIDIA
-		# load-detection phantom) — splash rendered into the void.
-		if command -v batocera-settings-set >/dev/null 2>&1 && [ -f /boot/batocera-boot.conf ]; then
-			_v="640x480i.60.00"; [ -z "$CRT_OUTS" ] && _v="auto"
-			[ "$(batocera-settings-get -f /boot/batocera-boot.conf es.resolution 2>/dev/null || true)" != "$_v" ] &&
-				batocera-settings-set -f /boot/batocera-boot.conf es.resolution "$_v" >/dev/null 2>&1 &&
-				echo "  BOOTCONF es.resolution mirrored to $_v (S65values4boot parity)"
-		fi
+		# Box keys (es.resolution + global.videomode) are install-owned and
+		# permanently "auto" (2026-09-14, AMD R9 270X, two verbose-proven
+		# boots: with auto the standalone ES picks 640x480i *current on the
+		# CRT itself and native on LCD-only — the value the 480i pins used
+		# to force). NO service writer: a stale key cannot exist because
+		# nothing rewrites these keys after install; verify.sh owns drift.
 		if layout_apply_if_changed; then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — watcher retry (convergence contract) owns it"; fi
 
 		# -- X11 conf: regenerate ALWAYS (revert of tonight's slimming) --

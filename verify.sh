@@ -37,8 +37,7 @@ UDEV_SRC="$REPO/src/engine/udev/99-crt-dual-hotplug.rules"
 UDEV_DST="${RGS15_UDEV:-/etc/udev/rules.d/99-crt-dual-hotplug.rules}"
 VNC1="${RGS15_VNC1:-/usr/bin/vnc}"
 VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
-CRT_BOOT_MODE="640x480i.60.00"
-CRT_PIN_MODE="max-640x480"
+CRT_BOX_KEY_MODE="auto"
 MERGE="$REPO/src/engine/selector/merge.py"
 MARK="# --- CRT-DUAL PROFILE:"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
@@ -181,25 +180,39 @@ done
 
 # ── 4b. amdgpu legacy pin (dc=0 modprobe file): re-derived, never shared
 #      with the service logic (a verifier re-derives from facts). Expected
-#      INSTALLED: the pin exactly when the box is below kernel 6.19 AND
-#      the boot dmesg names a DC-class DCE asic AND the
-#      rgs-15khz.amdgpu-legacy knob is not off; content = the dc=0 line.
-#      Expected STOCK (no package): absent.
-#      Env seams: RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_DMESG_SRC.
+#      INSTALLED: the pin exactly when the box is below kernel 6.19 AND a
+#      sysfs AMD display device inside the DC-default DCE id ranges
+#      (Tonga/Fiji/Polaris10-12/Vega10/12/20/VEGAM — the shipped kernel's
+#      amdgpu table, collision-checked; the same derivation the boot duty
+#      runs, RGS15_PCI_SYS seam) AND the rgs-15khz.amdgpu-legacy knob is
+#      not off; content = the dc=0 line. Expected STOCK (no package): absent.
+#      Env seams: RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_PCI_SYS.
 if [ "$PRESENT" -gt 0 ]; then
 	_v_kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
-	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
-		_v_asic="$(grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' "$RGS15_DMESG_SRC" 2>/dev/null | cut -d'(' -f2)"
-	else
-		_v_asic="$(dmesg 2>/dev/null | grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' | cut -d'(' -f2)"
-	fi
-	_v_expect=0
-	if [ "$_v_kernel" != "$(printf '%s\n' '6.19' "$_v_kernel" | sort -V | tail -1)" ]; then
-		case "$_v_asic" in
-		TONGA|FIJI|POLARIS10|POLARIS11|POLARIS12|VEGA10|VEGA12|VEGA20) _v_expect=1 ;;
+	if [ -n "${RGS15_PCI_SYS:-}" ]; then _v_pci="$RGS15_PCI_SYS"; else _v_pci="/sys/bus/pci/devices"; fi
+	_v_id=""
+	for _d in "$_v_pci"/*; do
+		[ -r "$_d/vendor" ] || continue
+		[ "$(cat "$_d/vendor" 2>/dev/null)" = "0x1002" ] || continue
+		case "$(cat "$_d/class" 2>/dev/null)" in
+		0x0300* | 0x0380*) ;;
+		*) continue ;;
 		esac
-	else
-		_v_expect=0
+		_v_id="$(cat "$_d/device" 2>/dev/null | tr 'a-f' 'A-F')"
+		_v_id="${_v_id#0X}"; _v_id="${_v_id#0x}"
+		if printf '%s\n' "$_v_id" | awk -v R="66A0-66AF 67C0-67FF 6860-687F 6920-6939 694C-694F 6980-699F 69A0-69AF 7300-730F" '
+			BEGIN { n = split(R, r, " "); ok = 0 }
+			{ for (i = 1; i <= n; i++) { split(r[i], p, "-")
+				if ($0 >= p[1] && $0 <= p[2]) ok = 1 }
+			  if ($0 == "6FDF") ok = 1; exit !ok }'; then
+			break
+		else
+			_v_id=""
+		fi
+	done
+	_v_expect=0
+	if [ "$_v_kernel" != "$(printf '%s\n' '6.19' "$_v_kernel" | sort -V | tail -1)" ] && [ -n "$_v_id" ]; then
+		_v_expect=1
 	fi
 	# the knob is read from the same conf the service reads (the boot duty
 	# re-derives it too); the conf path seam keeps seam tests hermetic
@@ -212,15 +225,15 @@ if [ "$PRESENT" -gt 0 ]; then
 			# full-install count (mixed-state false FAIL). This branch owns
 			# its presence verdict.
 			grep -q "^options amdgpu dc=0$" "$MODPROBE_DST" \
-				&& ok "amdgpu legacy pin present with dc=0 (kernel=${RGS15_UNAME_R:-$(uname -r)} asic=${_v_asic:-none})" \
+				&& ok "amdgpu legacy pin present with dc=0 (kernel=${RGS15_UNAME_R:-$(uname -r)} id=${_v_id:-none})" \
 				|| bad "amdgpu legacy pin present but WRONG content ($MODPROBE_DST)"
 		else
 			bad "amdgpu legacy pin MISSING for a DC-class AMD box below kernel 6.19 ($MODPROBE_DST — run install.sh; tube would stay black on dc=1)"
 		fi
 	elif [ -e "$MODPROBE_DST" ]; then
-		bad "amdgpu legacy pin present but NOT applicable (kernel=${RGS15_UNAME_R:-$(uname -r)} asic=${_v_asic:-none} knob=${_v_knob:-auto}) — remove it (uninstall.sh or the service amdgpu-legacy one-shot)"
+		bad "amdgpu legacy pin present but NOT applicable (kernel=${RGS15_UNAME_R:-$(uname -r)} id=${_v_id:-none} knob=${_v_knob:-auto}) — remove it (uninstall.sh or the service amdgpu-legacy one-shot)"
 	else
-		ok "amdgpu legacy pin absent (not applicable: kernel=${RGS15_UNAME_R:-$(uname -r)} asic=${_v_asic:-none})"
+		ok "amdgpu legacy pin absent (not applicable: kernel=${RGS15_UNAME_R:-$(uname -r)} id=${_v_id:-none})"
 	fi
 else
 	# stock state: the pin must be gone too (uninstall removes it)
@@ -241,7 +254,7 @@ fi
 #      install: progressive 15kHz still works, 480i needs the module).
 #      Expected STOCK (no package): both gone.
 #      Env seams: RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_PRESENT/
-#      RGS15_UNAME_R (+ RGS15_DMESG_SRC as in 4b).
+#      RGS15_UNAME_R (+ RGS15_DMESG_SRC; 4b moved to the RGS15_PCI_SYS seam).
 if [ "$PRESENT" -gt 0 ]; then
 	_v_i915="${RGS15_I915_PRESENT:-}"
 	if [ -z "$_v_i915" ]; then
@@ -289,6 +302,30 @@ else
 		bad "i915 /boot piece LEFT OVER in stock state (${RGS15_BOOT_HOOK:-/boot/boot-custom.sh} ${RGS15_BOOT_MOD:-/boot/i915-patched.ko})"
 	else
 		ok "i915 patch absent (stock state)"
+	fi
+fi
+
+# ── 4d. launcher raster hunks (/usr/bin/batocera-resolution): same
+#      discipline as 4c (NOT counted in PRESENT — owns its verdict).
+#      Expected INSTALLED: the hunks present AND the stock snapshot exists
+#      (uninstall's restore source). Expected STOCK: hunks absent.
+if [ "$PRESENT" -gt 0 ]; then
+	RES_DST="${RGS15_RES_TARGET:-/usr/bin/batocera-resolution}"
+	RES_BAK="${RGS15_RES_BAK:-$PKG/backups/stock-originals/batocera-resolution}"
+	if grep -q "RGS-15KHZ-EXT (stock raster channel" "$RES_DST" 2>/dev/null; then
+		if [ -f "$RES_BAK" ]; then
+			ok "launcher raster hunks applied + stock snapshot present"
+		else
+			bad "launcher raster hunks applied but NO stock snapshot ($RES_BAK) — uninstall could not restore stock"
+		fi
+	else
+		bad "launcher raster hunks MISSING ($RES_DST — run install.sh; the videomode-key channel would be refused by configgen)"
+	fi
+else
+	if grep -q "RGS-15KHZ-EXT (stock raster channel" "${RGS15_RES_TARGET:-/usr/bin/batocera-resolution}" 2>/dev/null; then
+		bad "launcher raster hunks LEFT OVER in stock state"
+	else
+		ok "launcher raster hunks absent (stock state)"
 	fi
 fi
 
@@ -363,21 +400,19 @@ if [ -z "${RGS15_SKIP_KEYS:-}" ]; then
 if [ "$PRESENT" -gt 0 ]; then
 	for _key in es.resolution global.videomode; do
 		_val="$(batocera-settings-get "$_key" 2>/dev/null || true)"
-		_exp="$CRT_BOOT_MODE"
-		# global.videomode accepts the resolved i-form too: stock setMode
-		# normalizes max-640x480 back to the mode name on resolve+save
-		# (seen live 2026-09-06). Both mean the 480i pin; our per-system
-		# max-* keys rule at launch anyway, global is only the fallback.
-		if [ "$_key" = "global.videomode" ]; then
-			if [ "$_val" = "$CRT_PIN_MODE" ] || [ "$_val" = "$CRT_BOOT_MODE" ]; then
-				ok "box key $_key=$_val"
-			else
-				bad "box key $_key: expected $CRT_PIN_MODE (or resolved $CRT_BOOT_MODE), got '${_val:-absent}' (tube risk; re-run install.sh)"
-			fi
-		elif [ "$_val" = "$_exp" ]; then
-			ok "box key $_key=$_val"
+		# Permanently auto (2026-09-14, AMD R9 270X, two verbose-proven boots:
+		# auto = the standalone ES picks 640x480i *current on the CRT itself
+		# and native on LCD-only). Install owns the keys as auto; nothing
+		# rewrites them after install — any other value is drift (the
+		# unresolved videomode-deleter WATCH closes: the 480i value our
+		# install used to pin no longer exists to be deleted).
+		# Absent counts as owned too: absence and "auto" are the SAME branch
+		# in the stock launcher (no global setting or it's 'auto' ->
+		# re-initialize with --auto), so fresh-stock absent = the owned state.
+		if [ -z "$_val" ] || [ "$_val" = "$CRT_BOX_KEY_MODE" ]; then
+			ok "box key $_key=${_val:-absent}"
 		else
-			bad "box key $_key: expected $_exp, got '${_val:-absent}' (tube risk; re-run install.sh)"
+			bad "box key $_key: expected absent or $CRT_BOX_KEY_MODE, got '$_val' (post-install rewrite — drift; re-run install.sh)"
 		fi
 	done
 	_vo2="$(batocera-settings-get global.videooutput2 2>/dev/null || true)"
@@ -429,8 +464,8 @@ if [ "$PRESENT" -gt 0 ]; then
 else
 	for _key in es.resolution global.videomode; do
 		_val="$(batocera-settings-get "$_key" 2>/dev/null || true)"
-		if [ "$_val" = "$CRT_BOOT_MODE" ]; then
-			echo "WARN: box key $_key still CRT mode with nothing installed (uninstall skipped restore?)" >&2
+		if [ "$_val" != "$CRT_BOX_KEY_MODE" ]; then
+			echo "WARN: box key $_key=$_val with nothing installed (uninstall should have restored the pre-install value)" >&2
 		fi
 	done
 	ok "box keys unchecked in stock state (backup mechanism owns restoration)"

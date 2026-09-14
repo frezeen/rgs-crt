@@ -246,6 +246,14 @@ fi
 printf '%s\n' "$REPO" >"$PKG/install-source"
 echo "  install-source -> $PKG/install-source ($REPO)"
 
+# ── 7d-bis. launcher raster hunks (one-shot NOW so the FIRST launches
+#    already speak the stock videomode-key channel; the boot service
+#    re-applies at every boot after rgs_config re-copies the stock file,
+#    first apply takes the stock snapshot — uninstall restores it).
+bash "$SVCDIR/$OUR_SVC" resolution-patch \
+	|| echo "  WARN: resolution patch failed (anchor drift? see $LOG)"
+echo "  launcher raster hunks recomputed (service log: $LOG)"
+
 # ── 7e. gamelist entry + tile (single logic copy in the service) ──
 bash "$SVCDIR/$OUR_SVC" gamelist-ensure \
 	&& echo "  gamelist entry + tile ensured" \

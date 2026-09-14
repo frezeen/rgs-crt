@@ -35,9 +35,9 @@
 #
 # Env seams (tests): RGS15_PKG/LOG, RGS15_RGS_VERSION_FILE/
 # BATOCERA_VERSION_FILE/RGS_CONFIG/FIX_DIR/SITE/SHADOW/CONF,
-# RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_DMESG_SRC (amdgpu-legacy),
-# RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_REPO/RGS15_I915_ALLOW_FETCH
-# (i915-patch).
+# RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_PCI_SYS (amdgpu-legacy),
+# RGS15_DMESG_SRC + RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_REPO/
+# RGS15_I915_ALLOW_FETCH (i915-patch).
 
 set -uo pipefail
 
@@ -206,40 +206,84 @@ PYEOF
 # class this layer's AMD adapter is calibrated on (dce_v6-class contract,
 # GPU-ADAPTERS.md). UNSAFE outside that class: DCN cards (Raven/Navi+)
 # have NO legacy display code — dc=0 there = no display at all. The gate
-# is therefore the KERNEL's own boot line (the asic name it printed),
-# never a PCI list and never a hardcoded box.
+# is the PCI device id of the AMD display device in sysfs, checked
+# against the DC-default DCE ranges of the shipped kernel's amdgpu table
+# (Tonga/Fiji/Polaris10-12/Vega10/12/20/VEGAM — collision-checked set,
+# upstream-proposal classification; no dmesg format dependency, works
+# even when amdgpu never printed). Hex string compare is sound: the ids
+# are uppercase, same width, ASCII order = numeric order.
 # State file (shell-quality §7): who writes = this function (boot duty +
 # the install.sh one-shot call), who reads = kmod when amdgpu loads,
 # who cleans = uninstall.sh + the remove branch below.
+# ── the stock launcher raster channel (resolution-patch duty, 2026-09-13)
+# /usr/bin/batocera-resolution is a STOCK file rgs_config re-copies from
+# rgs/fix/ at every boot BEFORE this service runs — so the duty re-applies
+# the raster hunks at every boot, right after it. First apply takes a
+# whole-file snapshot under backups/stock-originals (restore = uninstall.sh);
+# the content guard needs the exact stock anchors: an RGS update that
+# changes the file = LOUD skip, verify flags the drift, the next boot
+# re-applies when the anchors return. The hunks = the upstream
+# batocera-crt-proposal's patch 0003 logic (announce + generate-at-request
+# + interlaced fallback), gated on the bridge presence — without the
+# engine deployed every hunk's action is byte-for-byte stock. Owner
+# authorization 2026-09-13 (direct stock-file modification; when the
+# proposal lands upstream this duty + the applier are deleted, the file
+# is born already carrying the hunks). The launcher script is read fresh
+# at every invocation: no bounce, no reload — a patch between two launches
+# is live at the next launch.
+resolution_patch_decide() {
+	local _tgt="/usr/bin/batocera-resolution" _bak
+	[ -n "${RGS15_RES_TARGET:-}" ] && _tgt="$RGS15_RES_TARGET"
+	_bak="${RGS15_RES_BAK:-$PKG/backups/stock-originals/batocera-resolution}"
+	if python3 "$PKG/src/service/resolution-crt-patch.py" apply "$_tgt" "$_bak" >>"$LOG" 2>&1; then
+		log "resolution-patch: launcher raster channel applied (hunks verified)"
+	else
+		log "resolution-patch: WARN hunks not applied (anchor drift or write refused) — verify flags it, launches run stock-safe"
+	fi
+	return 0
+}
+
 amdgpu_legacy_decide() {
 	local _kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
-	local _knob _asic
+	local _knob _pci _d _id _hit=0
 	_knob="$(grep -E '^rgs-15khz\.amdgpu-legacy[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]')"
-	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
-		_asic="$(grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' "$RGS15_DMESG_SRC" 2>/dev/null | cut -d'(' -f2)"
-	else
-		_asic="$(dmesg 2>/dev/null | grep -m1 -o 'kernel modesetting ([A-Z0-9_]*' | cut -d'(' -f2)"
-	fi
+	if [ -n "${RGS15_PCI_SYS:-}" ]; then _pci="$RGS15_PCI_SYS"; else _pci="/sys/bus/pci/devices"; fi
+	for _d in "$_pci"/*; do
+		[ -r "$_d/vendor" ] || continue
+		[ "$(cat "$_d/vendor" 2>/dev/null)" = "0x1002" ] || continue
+		case "$(cat "$_d/class" 2>/dev/null)" in
+		0x0300* | 0x0380*) ;;
+		*) continue ;;
+		esac
+		_id="$(cat "$_d/device" 2>/dev/null | tr 'a-f' 'A-F')"
+		_id="${_id#0X}"; _id="${_id#0x}"
+		if printf '%s\n' "$_id" | awk -v R="66A0-66AF 67C0-67FF 6860-687F 6920-6939 694C-694F 6980-699F 69A0-69AF 7300-730F" '
+			BEGIN { n = split(R, r, " "); ok = 0 }
+			{ for (i = 1; i <= n; i++) { split(r[i], p, "-")
+				if ($0 >= p[1] && $0 <= p[2]) ok = 1 }
+			  if ($0 == "6FDF") ok = 1; exit !ok }'; then
+			_hit=1
+			break
+		fi
+	done
 	local _want=0
 	if [ "$_knob" = "off" ]; then
 		_want=0
 	elif [ "$_kernel" != "$(printf '%s\n' '6.19' "$_kernel" | sort -V | tail -1)" ]; then
 		# strictly below 6.19 (sort -V: the larger of {6.19, kernel} != kernel)
-		case "$_asic" in
-		TONGA|FIJI|POLARIS10|POLARIS11|POLARIS12|VEGA10|VEGA12|VEGA20) _want=1 ;;
-		esac
+		[ "$_hit" = "1" ] && _want=1
 	fi
 	if [ "$_want" = "1" ]; then
 		if [ -f "$MODPROBE_CONF" ] && grep -q "^options amdgpu dc=0$" "$MODPROBE_CONF"; then
-			log "amdgpu-legacy: pin converged (kernel=$_kernel asic=${_asic:-none})"
+			log "amdgpu-legacy: pin converged (kernel=$_kernel id=${_id:-none})"
 		else
 			local _tmp="$MODPROBE_CONF.tmp.$$"
 			{
 				echo "# rgs-15khz: pin the amdgpu classic display stack (dc=0) — kernel"
-				echo "# $_kernel, asic ${_asic:-?} has no analog encoders in Display Core"
-				echo "# before 6.19. Written by zz_rgs_15khz (amdgpu-legacy) for the next"
-				echo "# module load; removed by uninstall.sh, when the kernel reaches 6.19+"
-				echo "# or when rgs-15khz.amdgpu-legacy=off is set in batocera.conf."
+				echo "# $_kernel, AMD id 0x${_id:-?} (DC-default DCE) has no analog encoders"
+				echo "# in Display Core before 6.19. Written by zz_rgs_15khz (amdgpu-legacy)"
+				echo "# for the next module load; removed by uninstall.sh, when the kernel"
+				echo "# reaches 6.19+ or when rgs-15khz.amdgpu-legacy=off is set in batocera.conf."
 				echo "options amdgpu dc=0"
 			} >"$_tmp" && mv "$_tmp" "$MODPROBE_CONF" \
 				&& log "amdgpu-legacy: pin WRITTEN ($MODPROBE_CONF) — applies at the NEXT amdgpu load" \
@@ -248,7 +292,7 @@ amdgpu_legacy_decide() {
 	else
 		if [ -e "$MODPROBE_CONF" ]; then
 			rm -f "$MODPROBE_CONF"
-			log "amdgpu-legacy: pin removed (not applicable: kernel=$_kernel asic=${_asic:-none} knob=${_knob:-auto})"
+			log "amdgpu-legacy: pin removed (not applicable: kernel=$_kernel id=${_id:-none} knob=${_knob:-auto})"
 		fi
 	fi
 	return 0
@@ -428,6 +472,16 @@ do_start() {
 		i915_patch_decide
 	fi
 
+	# 3d. launcher raster hunks (/usr/bin/batocera-resolution; rgs_config
+	#     re-copied the stock file earlier this boot — re-apply AFTER it,
+	#     self-healing every boot, snapshot at first apply). Guard-hold
+	#     skips it like 3c: system-level state is not recomputed while held.
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: resolution patch skipped (guard hold)"
+	else
+		resolution_patch_decide
+	fi
+
 	# 4. Re-deploy manifest overlay files (cmp||cp; save IFF drifted).
 	if [ "$_guard_hold" = "1" ]; then
 		log "start: re-deploy skipped (guard hold)"
@@ -574,6 +628,13 @@ i915-patch)
 	i915_patch_decide
 	exit $?
 	;;
+resolution-patch)
+	# One-shot apply of the launcher raster hunks (install.sh 7c + the boot
+	# duty). rc 1 = anchor drift (the applier logged it loudly; install.sh
+	# echoes the WARN and continues).
+	resolution_patch_decide
+	exit 0
+	;;
 tool-check)
 	# the rgs_crt_check pygame tool: verdict line for the UI (first word),
 	# same watch logic; PASS restores held profiles + adopts
@@ -587,7 +648,7 @@ tool-check)
 	fi
 	exit 0
 	;;*)
-	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch}" >&2
+	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch}" >&2
 	exit 1
 	;;
 esac

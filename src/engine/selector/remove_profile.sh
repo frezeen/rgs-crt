@@ -62,32 +62,27 @@ if ! python3 "$MERGE" remove "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT
 	exit 1
 fi
 
-# ── 2. Restore desktop via SR-OWNER (thin sender over the want-file) ──
-# Owner YIELDS during games; on gameStop it restores dual (want=dual).
-# Thin sender: write want + flock → sr-owner (no direct xrandr, no fallback).
-WANT_FILE="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/want"
-WANT_LOCK="$WANT_FILE.lock"
-mkdir -p "$(dirname "$WANT_FILE")" 2>/dev/null || true
-printf '%s\n' "dual" >"$WANT_FILE" 2>/dev/null || true
-# Game guard must be cleared BEFORE sr-owner — otherwise owner sees
-# /tmp/crt-dual/profile (still present via first_script) or /tmp/crt-dual-mode
-# and yields (regression 2026-08-25 31-stop: want=dual but guard active → dual never restored, screen 1920x1080 extended not 640x480 clone).
+# ── 2. GameStop restore — the WATCHER owns it (owner order 2026-09-13) ──
+# RGS-15KHZ-EXT (watcher-owned restore): this hook NEVER calls sr-owner.
+# Stock already restored the launch display (the patched launcher's
+# interlaced fallback for the tube — measured live megadrive 2026-09-13:
+# `setMode: interlaced fallback 640x480 -> 640x480i` landed before any
+# engine step); the watcher's game-ended emitter then re-applies the dual
+# within one poll (POLL_SEC=2) when the topology is dual. Per-launch
+# engine work here = the keys above + the guard clear only, in ANY
+# topology. The game-ended emitter (layout-watch `_prev_game=active` in
+# the guard branch) is what makes this correct: pre-fix it was dead
+# (_game_ended could never fire) and the hook carried a redundant direct
+# converge that ran double with the watcher's own.
+# Guard clear MUST stay here (the crash-clean contract + the watcher's
+# yield release — the game-ended emitter needs the guard GONE to fire).
+_lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
+_crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile 2>/dev/null || true
-# Topology is frozen while the game guard is up (watcher sleeps during a
-# session) — passing --no-detect lets sr-owner reuse the last detect-state
-# instead of re-classifying (~1.2s saved; measured 2026-08-28).
-# RGS-15KHZ-EXT (single call, loud failure): ONE sr-owner attempt, no silent
-# retry chain, no swallowed rc — the old "|| sr-owner again || true" doubled
-# every gameStop restore (two identical want=dual passes, 2026-09-10 01:40,
-# display-trace) and hid the not-converged rc the design leaves to the
-# watcher, whose job is to RE-EMIT a failed request every poll. A busy lock
-# (rc from flock, sr-owner never ran) is the same watcher-covered case.
-_rc=0
-if command -v flock >/dev/null 2>&1; then
-	flock -n "$WANT_LOCK" bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply --no-detect 2>/dev/null || _rc=$?
+if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then
+	log "stand-down: single-display topology — the patched launcher restored the desktop (boot + hotplug keep the engine)"
 else
-	bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply --no-detect 2>/dev/null || _rc=$?
+	log "dual topology — the watcher re-applies the dual layout (game-ended emitter, <=2s)"
 fi
-[ "$_rc" -eq 0 ] || log "sr-owner dual restore rc=$_rc — layout not converged here; the watcher re-emits want=dual"
-log "profile '$NAME' removed (via sr-owner dual restore)"
+log "profile '$NAME' removed (keys + guard cleared; restore = watcher)"
 exit 0

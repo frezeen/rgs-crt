@@ -159,17 +159,23 @@ talks to (keep the naming of the shipped profiles: `<something>Generator.py`):
 Everything here is session-scoped: archived and restored on exit like
 the rest.
 
-### 6. Asking for a specific display mode — `[display] mode`
+### 6. Asking for a specific display mode — the system's `videomode` key
 
 ```
 [amiga1200]
-[display]
-mode = 640x464@50
+[batocera.conf]
+amiga1200.videomode = 640x464.50
 ```
 
 Asks, for that system only, for a resolution/refresh the tube can
-handle — computed with the same safety rules the rest of the layer
-uses, switched live, back to the desktop signal at exit; a refusal
+handle — declared the same way RGS's own video-mode settings are, with
+one extra capability: the value can be **bare** (`640x464`) to let the
+safety preset place it at the nearest clean refresh, or **dotted**
+(`640x464.50`) to hand the exact rate you want to the same safety
+preset that governs every mode of the system — it delivers it as asked
+or places it at the nearest safe refresh by its own rules. The launcher
+switches to it on its own, computed with the same safety rules the rest
+of the layer uses, and returns to the desktop signal at exit; a refusal
 leaves the launch on the standard signal instead of breaking it.
 Advanced: the shipped tube profile does not need it (it lets each
 emulator choose its native mode) — reach for it only for a system you

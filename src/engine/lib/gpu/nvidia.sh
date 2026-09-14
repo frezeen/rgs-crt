@@ -63,36 +63,7 @@ _impl_crt_active_truth() {
 	'
 }
 
-_impl_probe_periodic() {
-	echo 1 # forced probes never glitch this stack
-}
 
-_impl_hotplug_poll() {
-	# The hotplug heart (runs every idle wake-up from layout-watch.sh):
-	# compare the X-side output state against the stored fingerprint;
-	# a change re-classifies and converges-or-applies once.
-	local _ana _ana_file _ana_old
-	_ana=$(_xrandr_query_all)
-	_ana_file="$CRT_DUAL_STATE_DIR/x-analog-fp"
-	_ana_old="$(cat "$_ana_file" 2>/dev/null)"
-	if [ "$_ana" != "$_ana_old" ]; then
-		printf '%s\n' "$_ana" >"$_ana_file"
-		_log "NVIDIA X state changed: ${_ana_old:-none} -> $_ana"
-		command -v detect_outputs >/dev/null 2>&1 && detect_outputs 2>/dev/null || true
-		# One applier path: rc is honest since verify-after-apply
-		# (2026-08-23) — a non-converged apply reports failure.
-		if layout_apply_if_changed 2>/dev/null; then
-			_es_resize
-			_log "detect-state: $(tr '\n' ' ' <"$CRT_DUAL_STATE_DIR/detect-state" 2>/dev/null)"
-		else
-			# Not converged after the apply (e.g. a freshly replugged
-			# analog still enumerating modes): the light retry takes
-			# over at its 30s cadence instead of trusting a one-shot.
-			_fix_mode="light"
-			_log "apply did not converge -> light retry"
-		fi
-	fi
-}
 
 _impl_fingerprint() {
 	# X-side connector tokens — the family truth channel (sysfs NEVER).
@@ -100,16 +71,6 @@ _impl_fingerprint() {
 	echo
 }
 
-_impl_xorg_driver() { echo nvidia; }
-_impl_tearfree() { echo true; } # no TearFree option on this driver
-_impl_monitor_variant() {       # $1=out -> m640 (confirmed) | plain (presumed)
-	local _c
-	for _c in ${CRT_OUTS:-}; do [ "$_c" = "$1" ] && {
-		echo m640
-		return 0
-	}; done
-	echo plain
-}
 
 _impl_desktop_mode_name() {
 	# Family fact (verified 2026-08-28, GTX 970, randr12 docs + live GTX 970):

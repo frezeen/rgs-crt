@@ -39,21 +39,11 @@ _impl_crt_active_truth() {
 	return 1 # the NAME match is the whole truth (desktop modes are named)
 }
 
-_impl_probe_periodic() {
-	echo 0 # glitch discipline: never a periodic forced probe on dce_v6
-}
 
-_impl_hotplug_poll() {
-	: # uevent-driven family: no polling transport
-}
 
 _impl_fingerprint() {
 	_sysfp_raw # sysfs truth channel
 }
-
-_impl_xorg_driver() { echo modesetting; }
-_impl_tearfree() { echo false; }              # direct pageflips (official v43 parity)
-_impl_monitor_variant() { echo "m640+m320"; } # modesetting exports conf modelines
 
 _impl_desktop_mode_name() {
 	# modesetting keeps conf Modeline names verbatim: the desktop is

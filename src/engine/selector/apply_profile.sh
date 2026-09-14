@@ -70,9 +70,18 @@ if ! python3 "$MERGE" apply "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT"
 fi
 
 # ── 3. Display switch — v2 thin sender over the SR-OWNER want-file (ADR 001) ──
-# Target display from spec, then delegate to SR-OWNER via want-file + flock.
-# The owner owns the display (two-step, primary, positions); this client is
-# ~10 lines, no direct xrandr, no fallback branch (zero debt).
+# RGS-15KHZ-EXT (single-topology pass-through, 2026-09-13): the per-launch
+# engine display work (the two-step primary/positions dance) is needed ONLY
+# in dual topology, where the stock flow cannot choose the primary. In any
+# single-display topology (CRT-only / LCD-only / none) the stock flow owns
+# the launch end to end: the boot ES apply lands the desktop, the patched
+# launcher's channel owns the game raster AND the gameStop restore (the
+# interlaced fallback lives in the hunks). Measured live (megadrive,
+# CRT-only 2026-09-13): the per-launch applies were no-op confirmations on
+# states the readbacks proved already correct. Stand down for the launch
+# cycle; the keys and the guard still run (steps 1-4). The BOOT apply (zz)
+# and any hotplug re-entry keep the full engine — the gate reads
+# detect-state each launch and follows the topology.
 TARGET_DISPLAY="$(
 	python3 - "$PROFILE_DIR" "$PKG_ROOT" <<'PYEOF' 2>/dev/null || echo crt
 import sys
@@ -87,23 +96,29 @@ except Exception:
 PYEOF
 )"
 TARGET_DISPLAY="${TARGET_DISPLAY:-crt}"
-WANT_FILE="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/want"
-WANT_LOCK="$WANT_FILE.lock"
-mkdir -p "$(dirname "$WANT_FILE")" 2>/dev/null || true
-printf '%s\n' "$TARGET_DISPLAY" >"$WANT_FILE" 2>/dev/null || true
-# Clear stale guard from previous cycle before sr-owner — otherwise sr-owner yields (no HDMI off) and game stays dual 480i not native (seen 15:46:39 guard active)
-rm -f /tmp/crt-dual-mode "$CRT_DUAL_STATE_DIR/profile" 2>/dev/null || true
-if command -v flock >/dev/null 2>&1; then flock -n "$WANT_LOCK" bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply 2>/dev/null || bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply 2>/dev/null || log "WARN: sr-owner apply failed"; else bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply 2>/dev/null || log "WARN: sr-owner apply failed"; fi
-# ── 4. RGS-15KHZ-EXT (per-game SwitchRes mode — DEFERRED to launch, EXT-13):
-# the profile-declared WxH@R wish lives in /tmp/crt-dual/display (written by
-# merge at gameStart). The PHYSICAL switch moved to the videoMode patcher in
-# sitecustomize (EXT-13 unit there): applying it here let stock configgen's
-# changeMode(global.videomode) stomp back to the desktop mode before spawn
-# (measured daytona/sm2 2026-09-09: apply 55.529 -> stomp 55.837), and
-# switchres-free emulators inherited the trampled mode. The launcher applies
-# exactly once, AFTER the last stock mode write, BEFORE the gameResolution
-# read. Here: nothing to do — the marker is the contract.
+_lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
+_crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
+if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then
+	log "stand-down: single-display topology — the stock launcher (patched) owns the display flow"
+else
+# Dual topology: ONE minimal verb — turn off the display the game will NOT
+# use, then stock (+ the patched launcher) manages the solo session. No
+# want-file write at gameStart (the gameStop restore = the watcher's
+# game-ended emitter). flock keeps the verb serialized against the
+# watcher; loud failure, no fallback chain (the single-call doctrine).
+WANT_LOCK="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/want.lock"
+if command -v flock >/dev/null 2>&1; then flock -n "$WANT_LOCK" bash "$PKG_ROOT/src/owner/sr-owner.sh" --solo-prep "$TARGET_DISPLAY" 2>/dev/null || log "WARN: solo-prep failed (display not prep'd — game runs anyway)"
+else bash "$PKG_ROOT/src/owner/sr-owner.sh" --solo-prep "$TARGET_DISPLAY" 2>/dev/null || log "WARN: solo-prep failed (display not prep'd — game runs anyway)"
+fi
+fi
+# ── 4. RGS-15KHZ-EXT (stock raster channel): the profile declares
+# per-game rasters as <system>.videomode keys (bare = preset-scaled into
+# arcade_15, dotted = exact); the PATCHED stock launcher (the
+# resolution-patch duty's hunks) announces + generates them natively and
+# stock setMode applies the mode inside its own resolution block — no
+# want file, no configgen patch, no stomp (the key IS the stock value).
+# Here: nothing to do — the marker is the contract.
 touch /tmp/crt-dual-mode
 log "game-active guard written (/tmp/crt-dual-mode)"
-log "profile '$NAME' applied (display=$TARGET_DISPLAY, via sr-owner)"
+log "profile '$NAME' applied (display=$TARGET_DISPLAY)"
 exit 0

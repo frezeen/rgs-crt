@@ -172,6 +172,22 @@ else
 	echo "  box keys skipped (seam test)"
 fi
 
+# ── 3c. launcher restore (the raster hunks: stock snapshot, byte-exact;
+#      snapshot-only, same rule as 3b: a foreign file is never destroyed) ──
+RES_BAK="${RGS15_RES_BAK:-$PKG/backups/stock-originals/batocera-resolution}"
+RES_DST="${RGS15_RES_TARGET:-/usr/bin/batocera-resolution}"
+if [ -f "$RES_BAK" ]; then
+	if grep -q "RGS-15KHZ-EXT (stock raster channel" "$RES_DST" 2>/dev/null; then
+		cp "$RES_BAK" "$RES_DST" \
+			&& echo "  launcher restored to stock (raster hunks removed)" \
+			|| echo "  WARN: launcher restore failed (verify flags it)" >&2
+	else
+		echo "  launcher already stock (hunks absent — nothing to restore)"
+	fi
+elif grep -q "RGS-15KHZ-EXT (stock raster channel" "$RES_DST" 2>/dev/null; then
+	echo "  WARN: launcher hunks present but NO stock snapshot found — left in place (never strand the box; reinstall to re-snapshot)" >&2
+fi
+
 # ── 7. Package + version marker (kills manifest + key backups) ──
 # The stock-originals snapshot is NOT layer data: it is the only local
 # copy of the stock batocera.conf (no rgs/fix copy exists and the RGS

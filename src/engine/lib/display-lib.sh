@@ -107,27 +107,6 @@ _edid_present() { # <xout> -> 0|1 : EDID evidence per the family oracle
 	_gpu_adapter || return 1
 	_impl_edid "$1"
 }
-_probe_periodic_allowed() { # echo 1|0 : may shared code force re-probes?
-	_gpu_adapter || echo 1
-	_impl_probe_periodic
-}
-_hotplug_poll() { # per-wake transport hook (NVIDIA poll; others no-op)
-	_gpu_adapter || return 0
-	_impl_hotplug_poll
-}
-_mode_inject() { # $1=out -> echo injected 480i name; empty-pool corner, ALL families
-	# The empty pool on a boot-time-disconnected analog is NOT a GPU-family
-	# fact: it follows from OUR conf ModeValidation keys (NoVesaModes /
-	# NoXServerModes) blocking synthesis on EVERY driver - verified live on
-	# GTX 970 AND R9 270X the same day. One shared default answer; a family
-	# may still override via _impl_mode_inject if one ever needs to.
-	_gpu_adapter || return 1
-	if command -v _impl_mode_inject >/dev/null 2>&1; then
-		_impl_mode_inject "$1"
-	else
-		_mode_inject_default "$1"
-	fi
-}
 _mode_inject_default() { # index-form API create + RandR attach, with read-back verify
 	# Source-confirmed (upstream master, custom_video_xrandr.cpp:470-536):
 	# the xrandr backend selects a display ONLY if connected AND holding a
@@ -152,20 +131,6 @@ _mode_inject_default() { # index-form API create + RandR attach, with read-back 
 	# depends on)
 	xrandr --current 2>/dev/null | sed -n "/^$target connected/,/^[^ ]/p" | grep -q "$out" || return 1
 	echo "$out"
-}
-_xorg_driver() { # echo the Xorg Driver string for the detected family
-	_gpu_adapter || {
-		echo modesetting
-		return 0
-	}
-	_impl_xorg_driver
-}
-_tearfree() {
-	_gpu_adapter || {
-		echo true
-		return 0
-	}
-	_impl_tearfree
 }
 _desktop_mode_name() {
 	# Runtime NAME of the 15kHz desktop mode (the persistent conf
@@ -213,13 +178,6 @@ _desktop_mode_spec() {
 	_r=$(grep -E '^crt-dual\.refresh[[:space:]]*=' /userdata/system/batocera.conf 2>/dev/null | head -1 | sed 's/.*=//' | tr -d '[:space:]')
 	[ -z "$_r" ] && _r=60
 	echo "$_dn $_r"
-}
-_monitor_variant() { # <out> -> m640 | plain | m640+m320 : which modelines embed
-	_gpu_adapter || {
-		echo "m640+m320"
-		return 0
-	}
-	_impl_monitor_variant "$1"
 }
 
 # Runtime state directory: /tmp/crt-dual by default (live box). The test

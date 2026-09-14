@@ -36,21 +36,11 @@ _impl_crt_active_truth() {
 	return 1 # the NAME match is the whole truth (patched i915 keeps names)
 }
 
-_impl_probe_periodic() {
-	echo 1 # glitch-free family like NVIDIA
-}
 
-_impl_hotplug_poll() {
-	: # uevent-driven family: no polling transport
-}
 
 _impl_fingerprint() {
 	_sysfp_raw # sysfs truth channel
 }
-
-_impl_xorg_driver() { echo modesetting; }
-_impl_tearfree() { echo true; }   # stock pageflip path unaffected (verified UHD 630)
-_impl_monitor_variant() { echo "m640+m320"; }
 
 _impl_desktop_mode_name() {
 	# modesetting family: conf names verbatim (480i certified on UHD 630,

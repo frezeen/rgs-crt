@@ -15,8 +15,6 @@
 #   _impl_drm_offset               -> echo DRM index offset vs X (0)
 #   _impl_crt_active_truth <xout>  -> 0|1 extra truth when the mode NAME
 #                                     did not match a 15kHz class name
-#   _impl_probe_periodic           -> echo 1|0: forced periodic re-probes ok?
-#   _impl_hotplug_poll             -> per-wake hotplug transport hook
 
 _impl_status() {
 	cat "$CRT_DUAL_SYSFS"/card*-"$(_drm_connector "$1")"/status 2>/dev/null | head -1
@@ -40,21 +38,11 @@ _impl_crt_active_truth() {
 	return 1 # the NAME match is the whole truth on generic families
 }
 
-_impl_probe_periodic() {
-	echo 1
-}
 
-_impl_hotplug_poll() {
-	:
-}
 
 _impl_fingerprint() {
 	_sysfp_raw # conservative default: sysfs channel
 }
-
-_impl_xorg_driver() { echo modesetting; }
-_impl_tearfree() { echo true; }
-_impl_monitor_variant() { echo "m640+m320"; }
 
 _impl_desktop_mode_name() {
 	# conservative: the conf name as written (modesetting-shaped families

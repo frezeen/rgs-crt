@@ -371,10 +371,6 @@ _layout_state_parse() { # "OUT|mode|primary|xpos" per output + "SCREEN|WxH" — 
 	'
 }
 
-_layout_xrandr_mode_map() { # "OUT:mode OUT:none ..." (settle-wait stability snapshots)
-	_layout_state_parse | awk -F'|' '{ print $1 ":" $2 }' | tr '\n' ' ' | sed 's/ $//'
-	echo
-}
 
 _layout_convergent() {
 	local _crt_outs _lcd_outs _rows _row _o _act _prim _xpos
@@ -515,71 +511,6 @@ layout_apply_if_changed() {
 	exec 9>&- 2>/dev/null || true
 	return 0
 }
-
-#
-#
-# Args:
-# profile_target_display <crt|lcd>
-#
-# no --auto, EDID garbage handled) + LCD off.
-# target=lcd: LCD native primary + CRT off.
-profile_target_display() {
-	local target="${1:-crt}"
-	# detect_outputs: the main dispatch ALWAYS pre-detects before calling
-	# (both call sites — want=crt/lcd branches) milliseconds earlier on the
-	# same sysfs; a second full detect here doubled the gameStart latency
-	# (up to ~1.2s debounce) for zero new information — removed 2026-08-30.
-	export DISPLAY="${DISPLAY:-:0}"
-
-	local crt lcd lmode
-	crt="${CRT_OUT:-}"
-	lcd="${LCD_OUT:-}"
-
-	case "$target" in
-	crt)
-		# CRTC stale on HDMI after hot-unplug: detect says LCD empty but X keeps HDMI CRTC 1 + 1920 pool on DVI (seen 21:27 HDMI disconnected CRTC 1 Transform 0.33). Must --off explicitly even if $lcd empty.
-		if [ -n "$lcd" ]; then
-			# NVIDIA clone ViewPortIn: batch CRT+off RC 0 but ignored at gameStart (verified 11:21:32 RC 0 no RRSet, 11:33:58 isolated same batch OK) — use 2 standalone writes with readback verify (AMD OK stays, NVIDIA pays no extra cost).
-			_spec=$(_owner_desktop_name 2>/dev/null) || _spec="" # _owner_desktop_name logs the adapter FAIL loudly
-			_r=60; case "$_spec" in *\ *) _r=${_spec#* } ;; esac
-			# Pool-resolved desktop name (_crt_desktop_ensure): the conf name
-			# is not pooled on a late-plugged output — the SR session mode is
-			# the attachable truth there. Loud when nothing is attachable,
-			# never a name fallback.
-			_dn=$(_crt_desktop_ensure "$crt" 2>/dev/null) || { _dn=""; echo "CRT-DUAL-CRT: $crt — no attachable 480i at gameStart (conf absent, no SR session mode, inject failed)" >&2; }
-			if [ -n "$_dn" ]; then
-				xrandr --display "$DISPLAY" --output "$crt" --primary --mode "$_dn" --rate "$_r" --pos 0x0 2>/dev/null || true
-			fi
-			xrandr --display "$DISPLAY" --output "$lcd" --off 2>/dev/null || true
-			if xrandr --display "$DISPLAY" --current 2>/dev/null | grep -A2 "^$lcd connected" | grep -q "\*"; then xrandr --display "$DISPLAY" --output "$lcd" --off 2>/dev/null || true; sleep 0.2; xrandr --display "$DISPLAY" --output "$lcd" --off 2>/dev/null || true; fi
-			echo "CRT-DUAL-PROFILE: target crt — LCD=$lcd off (2-step + verify, was batch)"
-		elif [ -n "$crt" ]; then
-			# Hotplug CRT-only: LCD already empty per detect, but HDMI may still own CRTC 1 from dual (X keeps it). Force HDMI/DP off to free CRTC + 1920 pool.
-			for _o in HDMI-1 HDMI-0 DP-1 DP-2 DVI-D-1; do xrandr --display "$DISPLAY" --output "$_o" --off 2>/dev/null || true; done
-			echo "CRT-DUAL-PROFILE: target crt — CRT=$crt already primary, HDMI/DP off (free stale CRTC/pool)"
-		fi
-		;;
-	lcd)
-		# One batch: CRT off + LCD native primary (1 W)
-		if [ -n "$lcd" ]; then
-			lmode=$(_lcd_native "$lcd" 2>/dev/null)
-			if [ -n "$crt" ]; then
-				xrandr --display "$DISPLAY" --output "$crt" --off --output "$lcd" --primary --mode "$lmode" --transform none --pos 0x0 2>/dev/null || true
-			else
-				xrandr --display "$DISPLAY" --output "$lcd" --primary --mode "$lmode" --transform none --pos 0x0 2>/dev/null || true
-			fi
-			echo "CRT-DUAL-PROFILE: target lcd — CRT=${crt:-none} off + LCD=$lcd $lmode primary (1 W batch)"
-		elif [ -n "$crt" ]; then
-			xrandr --display "$DISPLAY" --output "$crt" --off 2>/dev/null || true
-			echo "CRT-DUAL-PROFILE: target lcd — CRT=$crt off (LCD absent)"
-		fi
-		;;
-	*)
-		echo "CRT-DUAL-PROFILE: unknown display target '$target'" >&2
-		;;
-	esac
-	return 0
-}
 _owner_es_resize() {
 	local _wid _crt _lcd _mode _w _h
 	_wid=$(xdotool search --class emulationstation 2>/dev/null | head -1)
@@ -664,12 +595,11 @@ apply_via_engine() {
 if [[ "${BASH_SOURCE[0]:-}" != "${0:-}" ]]; then
 	return 0 2>/dev/null || true
 fi
-# Lib bootstrap — BEFORE the want dispatch. The gameStart target paths
-# (profile_target_display: _desktop_mode_spec/_crt_desktop_ensure/_lcd_native)
-# resolve mode names through the display lib; sourcing it only inside
-# apply_via_engine left the want=crt/lcd branches running on undefined
-# functions (rc 127 → empty names → the "--mode ''" lottery batch —
-# FAIL log artifact + black-screen risk; trace 2026-08-30 15:19:39).
+# Lib bootstrap — BEFORE the want dispatch. Every dispatch path
+# (_solo-prep takeover, apply_via_engine's layout apply) resolves mode
+# names through the display lib; sourcing it lazily left branches running
+# on undefined functions (rc 127 → empty names → the "--mode ''" lottery
+# batch — FAIL log artifact + black-screen risk; trace 2026-08-30 15:19:39).
 _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for _lib in "$_self_dir/../lib/gpu-lib.sh" "/userdata/system/crt-dual/src/lib/gpu-lib.sh" "$(dirname "$_self_dir")/lib/gpu-lib.sh"; do
 	[ -r "$_lib" ] && source "$_lib" 2>/dev/null && break
@@ -680,7 +610,8 @@ done
 want="dual"
 _no_detect=0
 _check_only=0
-for arg in "$@"; do case "$arg" in --want) shift; WANT_FILE="$1";; --state-dir) shift; STATE_DIR="$1";; --no-detect) _no_detect=1;; --check) _check_only=1;; esac done
+_solo_target=""
+for arg in "$@"; do case "$arg" in --want) shift; WANT_FILE="$1";; --state-dir) shift; STATE_DIR="$1";; --no-detect) _no_detect=1;; --check) _check_only=1;; --solo-prep) shift; _solo_target="$1";; esac done
 [ -f "$WANT_FILE" ] && want="$(cat "$WANT_FILE" 2>/dev/null | head -1 | tr -d ' \n' || echo dual)"
 [ -z "$want" ] && want="dual"
 if [ ! -f "$DETECT_STATE" ]; then
@@ -698,6 +629,37 @@ if [ "$_check_only" = "1" ]; then
 	export DISPLAY="${DISPLAY:-:0}"
 	if _layout_convergent 2>/dev/null; then exit 0; else exit 1; fi
 fi
+# RGS-15KHZ-EXT (solo-launch prep, 2026-09-13): per-launch engine work in
+# dual = ONLY turn off the display the game will NOT use, then stock (+ the
+# patched launcher) manages the solo session end to end. The gameStop
+# restore belongs to the WATCHER (game-ended emitter → want=dual →
+# apply_dual_layout), never to a launch hook. Loud rc, no fallback chain.
+if [ -n "$_solo_target" ]; then
+	command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true
+	export DISPLAY="${DISPLAY:-:0}"
+	CRT_OUT="$(_state_val CRT_OUT)"
+	LCD_OUT="$(_state_val LCD_OUT)"
+	if [ -z "$CRT_OUT" ] || [ -z "$LCD_OUT" ]; then
+		log "solo-prep: not dual (crt=${CRT_OUT:-none} lcd=${LCD_OUT:-none}) — nothing to do"
+		exit 0
+	fi
+	if [ "$_solo_target" = "crt" ]; then
+		xrandr --output "$LCD_OUT" --off || { log "solo-prep: LCD $LCD_OUT off FAILED"; exit 1; }
+		log "solo-prep: LCD $LCD_OUT off — CRT-only session (stock+patch own the launch)"
+	else
+		# Two calls, measured 2026-09-14 (AMD R9 270X): the X server can hold
+		# a stale mode record (star on 1920x1080) while the live framebuffer
+		# is still the dual-clone 640x480 — in that state the single
+		# "--primary --auto" call is a silent no-op (X believes the target is
+		# already active), configgen reads the 640x480 geometry and RA lowers
+		# the panel. Turning the LCD off frees the CRTC, the re-add from a
+		# clean state is a real reprogram at the EDID preferred mode.
+		_err=$(xrandr --output "$CRT_OUT" --off --output "$LCD_OUT" --off 2>&1) || { log "solo-prep: outputs off FAILED: $_err"; exit 1; }
+		_err=$(xrandr --output "$LCD_OUT" --primary --auto 2>&1) || { log "solo-prep: LCD takeover FAILED: $_err"; exit 1; }
+		log "solo-prep: CRT $CRT_OUT off, LCD $LCD_OUT primary native — LCD-only session (stock owns the launch)"
+	fi
+	exit 0
+fi
 CRT_OUT="$(_state_val CRT_OUT)"
 if [ -z "$CRT_OUT" ]; then
 	_lcd_tmp="$(_state_val LCD_OUT)"
@@ -713,24 +675,8 @@ if [ -f "$STATE_DIR/profile" ] || [ -f "/tmp/crt-dual-mode" ]; then
 fi
 case "$want" in
 dual|both|all) apply_via_engine; exit $? ;;
-crt)
-	# game on CRT — LCD off (profile_target_display owns the CRTCs, not dual)
-	# No PRESUMED fill here (removed 2026-08-30): the selector gate only
-	# offers crt profiles on a CONFIRMED CRT, and in LCD-only the fill made
-	# _owner_es_resize size ES 640x480 for the phantom port. Boot-time
-	# presumed targeting stays in apply_via_engine (crttag path) where it
-	# is load-bearing.
-	detect_outputs 2>/dev/null || true; command -v crt_probe >/dev/null 2>&1 && crt_probe 2>/dev/null || true
-	CRT_OUT="$(_state_val CRT_OUT)"
-	LCD_OUT="$(_state_val LCD_OUT)"
-	profile_target_display crt; _owner_es_resize || true; _owner_display_readback || true
-	;;
-lcd)
-	detect_outputs 2>/dev/null || true; command -v crt_probe >/dev/null 2>&1 && crt_probe 2>/dev/null || true
-	CRT_OUT="$(_state_val CRT_OUT)"
-	LCD_OUT="$(_state_val LCD_OUT)"
-	profile_target_display lcd; _owner_es_resize || true; _owner_display_readback || true
-	;;
-*) log "unknown want '$want' — treating as dual"; apply_via_engine; exit $? ;;
+*)
+	log "unknown want '$want' — treating as dual"
+	apply_via_engine; exit $? ;;
 esac
 exit 0

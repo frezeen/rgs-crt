@@ -174,7 +174,8 @@ def init_dummy_session(lib, ini_path, monitor_preset):
         die(11, "sr_init_disp failed (dummy display init)")
 
 
-def calc_modeline(width, height, refresh_arg, ini_path, monitor_preset):
+def calc_modeline(width, height, refresh_arg, ini_path, monitor_preset,
+                  name=None):
     """Compute one modeline via the library; return the Modeline line."""
     flags = 0
     refresh_text = str(refresh_arg)
@@ -239,6 +240,11 @@ def calc_modeline(width, height, refresh_arg, ini_path, monitor_preset):
         mode.hfreq / 1000.0,
         mode.vfreq,
     )
+    # RGS-15KHZ-EXT (stock raster channel): --name replaces the label with
+    # one single word (the caller's pool name — upstream helper parity,
+    # the PR's own --name flag); the timing fields stay untouched.
+    if name:
+        label = "%s %.6fKHz %.6fHz" % (name, mode.hfreq / 1000.0, mode.vfreq)
     params = " %.6f %d %d %d %d %d %d %d %d %s %s %s %s" % (
         mode.pclock / 1000000.0,
         mode.width,
@@ -370,6 +376,7 @@ def main(argv):
         args = []
         ini_path = None
         monitor_preset = None
+        name = None
         rest = argv[1:]
         while rest:
             arg = rest.pop(0)
@@ -381,15 +388,19 @@ def main(argv):
                 monitor_preset = rest.pop(0) if rest else None
                 if not monitor_preset:
                     die(2, "--monitor requires a preset name")
+            elif arg == "--name":
+                name = rest.pop(0) if rest else None
+                if not name:
+                    die(2, "--name requires a label")
             else:
                 args.append(arg)
         if len(args) != 3:
-            die(2, "usage: calc W H R[i] [--monitor PRESET] [--ini PATH]")
+            die(2, "usage: calc W H R[i] [--monitor PRESET] [--ini PATH] [--name LABEL]")
         try:
             width, height = int(args[0]), int(args[1])
         except ValueError:
             die(2, "W and H must be integers")
-        print(calc_modeline(width, height, args[2], ini_path, monitor_preset))
+        print(calc_modeline(width, height, args[2], ini_path, monitor_preset, name))
         return 0
 
     if cmd == "create":

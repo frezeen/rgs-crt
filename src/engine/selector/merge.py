@@ -87,7 +87,7 @@ def _is_section_header(header: str) -> bool:
 
 def parse_spec(profile_dir: Path):
     """Parse spec.conf -> (label, desc, display_target, batocera, patches, ...,
-    display_modes). display_modes: RGS-15KHZ-EXT, "mode" -> [(block, WxH@R)].
+    keypatch).
 
     batocera: dict key -> value (global batocera.conf keys, [batocera])
     patches: dict key -> value (RAM patches the profile activates, [patches])
@@ -126,7 +126,6 @@ def parse_spec(profile_dir: Path):
     configs = {}            # full-file configs: profile_rel_file -> target
     binaries = {}           # binary swap: profile_rel_binary -> target
     keypatch = {}           # RGS-15KHZ-EXT: per-key live patch: target -> [(block, line)]
-    display_modes = {}      # RGS-15KHZ-EXT: per-game SwitchRes want: "mode" -> [(block, value WxH@R)]
     blocks = set()          # blocks declared ([mame], [global], [system.mame]...)
     block_of = {}           # section -> block it belongs to (runtime filter)
     block_type = {}         # block name -> match kind: always/system/emulator/core
@@ -249,12 +248,6 @@ def parse_spec(profile_dir: Path):
         if in_display:
             if key == "target" and value in ("crt", "lcd"):
                 display_target = value
-            # RGS-15KHZ-EXT (display want): per-system [display] mode =
-            # WxH@R wish; SwitchRes (arcade_15) resolves the SAFE modeline
-            # at gameStart. Stored per block; filtered most-specific at
-            # apply, like batocera keys. Shape checked in do_validate.
-            elif key == "mode" and value:
-                display_modes.setdefault("mode", []).append((block, value))
             continue
         if in_batocera:
             if key:
@@ -300,8 +293,7 @@ def parse_spec(profile_dir: Path):
         # leniency for top-level label/description placement — not extended).
         continue
     return (label, desc, display_target, batocera, patches,
-            configs, binaries, blocks, block_of, block_type, keypatch,
-            display_modes)  # RGS-15KHZ-EXT: 12th element (display want)
+            configs, binaries, blocks, block_of, block_type, keypatch)
 
 
 def parse_mappings(profile_dir: Path):
@@ -811,44 +803,6 @@ def restore_patches(patches: dict) -> None:
     Path(PATCH_STATE).unlink(missing_ok=True)
 
 
-# RGS-15KHZ-EXT (display want): per-game SwitchRes wish (WxH@R) for the
-# hook's mode step. The profile declares WHAT geometry it wants; SwitchRes
-# (stock arcade_15 preset) resolves the SAFE modeline at gameStart — the
-# preset, not us, is the tube safety. Marker mirrors the patches pattern:
-# written at apply (this launch only), removed at gameStop.
-DISPLAY_WANT = "/tmp/crt-dual/display"
-
-
-def _pick_display_mode(display_modes: dict, system, block_type, emulator=None, core=None) -> str:
-    """Most-specific matching `mode` value (precedence core > system >
-    emulator > always — same rule as batocera keys), or "" when no block
-    declares one for this launch."""
-    best = None  # (precedence_index, value)
-    for blk, val in display_modes.get("mode", []):
-        if not _block_matches(blk, block_type, system, emulator, core):
-            continue
-        prec = _PRECEDENCE.index(_block_kind(blk, block_type))
-        if best is None or prec > best[0]:
-            best = (prec, val)
-    return best[1] if best else ""
-
-
-def apply_display(display_modes: dict, system, block_type, emulator=None, core=None) -> None:
-    """Write the ACTIVE display-want marker. Absent want -> marker absent
-    (hook keeps dual)."""
-    Path(DISPLAY_WANT).parent.mkdir(parents=True, exist_ok=True)
-    want = _pick_display_mode(display_modes, system, block_type, emulator, core)
-    if want:
-        Path(DISPLAY_WANT).write_text(want.strip() + "\n")
-    else:
-        Path(DISPLAY_WANT).unlink(missing_ok=True)
-
-
-def restore_display() -> None:
-    """Remove the display-want marker at gameStop (next launch = stock)."""
-    Path(DISPLAY_WANT).unlink(missing_ok=True)
-
-
 def _block_kind(block: str, block_type: dict | None) -> str:
     """The match kind of a block: global/system/emulator/core. Bare
     blocks and legacy flat sections are global."""
@@ -927,7 +881,7 @@ def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
     Resolution is called TWICE by do_apply (RGS-15KHZ-EXT post-pin):
     PRE-pin (stock config) for the file-based selections, whose emulator
     keys live in system blocks and must not feed back; POST-pin (after the
-    keys landed) for the runtime consumers — keypatch, display want and
+    keys landed) for the runtime consumers — keypatch and
     the resolve-record — matching what configgen reads at launch.
     do_remove prefers the apply-time record (RGS-15KHZ-EXT), live is
     fallback."""
@@ -1036,7 +990,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
-    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, display_modes = parse_spec(profile_dir)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
 
     # per-system filter (block syntax): apply only the launched system's
     # block (+ always + legacy). system=None -> everything (validate path).
@@ -1075,7 +1029,6 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
         _write_resolve(backup_root, name, system, emulator, core)  # RGS-15KHZ-EXT (resolve-record, POST)
     apply_keypatch(_filter_keypatch(keypatch, system, block_type, emulator, core),
                    target_root, backup_root, name)
-    apply_display(display_modes, system, block_type, emulator, core)  # RGS-15KHZ-EXT (display want)
     return True
 
 
@@ -1083,7 +1036,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
-    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, display_modes = parse_spec(profile_dir)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
 
     # per-system filter (mirror of do_apply): with the launched system
     # (gameStop passes it — first_script.sh remove_profile "$2"), only the
@@ -1102,7 +1055,6 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     restore_binaries(profile_dir, binaries, target_root, backup_root, name)
     restore_batocera(batocera, backup_root, name, remove_missing=bool(system))
     restore_patches(patches)
-    restore_display()  # RGS-15KHZ-EXT (display want): marker always cleaned
     _em, _co = (emulator, core) if system else (None, None)
     restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co),
                      target_root, backup_root, name)
@@ -1117,16 +1069,49 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     return True
 
 
+# RGS-15KHZ-EXT (stock raster channel): the static spec gate. Tube safety
+# is SwitchRes's OWN job — the stock preset (arcade_15, the same one MAME/
+# RetroArch and the patched launcher compute through) governs every modeline;
+# this gate only guards OUR spec's static consistency: the channel's value
+# shape and one-timing-per-pool-name (profile-discipline 4: spec errors
+# never reach gameStart). Owner decision 2026-09-13: no external veto above
+# the API — if a computed raster is wrong, the preset is wrong, and the
+# preset is the one place to fix it.
+_RASTER_SHAPE = re.compile(r"([0-9]+)x([0-9]+)(i)?(?:\.([0-9.]+))?$")
+
+
+def _validate_rasters(batocera: dict):
+    """Every literal raster videomode value must be shape-valid and map to a
+    UNIQUE pool name at one timing (two keys must never compete for one pool
+    entry at different rates). max-*/empty/auto pass untouched (stock
+    channels)."""
+    seen = {}  # pool name -> full value
+    for key, defs in batocera.items():
+        if not key.endswith(".videomode"):
+            continue
+        for _blk, val in defs:
+            v = (val or "").strip()
+            if not v or v.startswith("max-") or v == "auto":
+                continue
+            if not _RASTER_SHAPE.fullmatch(v):
+                raise SpecError(
+                    f"{key}: invalid raster '{v}' (the channel speaks "
+                    "WxH[i][.RATE] — max-* forms stay stock)")
+            pool_name = v.split(".", 1)[0]
+            if seen.setdefault(pool_name, v) != v:
+                raise SpecError(
+                    f"pool-name collision '{pool_name}': '{seen[pool_name]}' "
+                    f"vs '{v}' — one pool entry, one timing")
+
+
 def do_validate(profile_dir: Path, name: str, target_root: Path):
     """Static spec validation — called at install/verify, NEVER at gameStart."""
-    label, _desc, display_target, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, display_modes = parse_spec(profile_dir)
+    label, _desc, display_target, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
     if not label:
         raise SpecError("spec has no label")
     if display_target not in ("crt", "lcd"):
         raise SpecError(f"invalid [display] target: {display_target}")
-    for _blk, val in display_modes.get("mode", []):  # RGS-15KHZ-EXT (display want)
-        if not re.fullmatch(r"\d+x\d+@[\d.]+", (val or "").strip()):
-            raise SpecError(f"invalid [display] mode (want WxH@R): {val}")
+    _validate_rasters(batocera)
     configs, binaries = parse_mappings(profile_dir)
     for rel in configs:
         if not (profile_dir / "configs" / rel).is_file():

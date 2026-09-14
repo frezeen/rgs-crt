@@ -82,7 +82,7 @@ _prev_sysfp=""; _prev_xstate=""; _prev_desktop=""; _prev_espid=""
 _watch_iters="${CRT_DUAL_WATCH_ITERS:-0}"
 while true; do
 	if [ -n "${CRT_DUAL_WATCH_ITERS:-}" ]; then _watch_iters=$((_watch_iters - 1)); [ "$_watch_iters" -le 0 ] && break; fi
-	if [ -f "$MODE_FILE" ] || [ -f "$PROFILE_STATE" ]; then sleep "$POLL_SEC"; continue; fi
+	if [ -f "$MODE_FILE" ] || [ -f "$PROFILE_STATE" ]; then _prev_game="active"; sleep "$POLL_SEC"; continue; fi
 	_game_ended=0; [ "${_prev_game:-idle}" = "active" ] && _game_ended=1; _prev_game="idle"
 	_fired=0; _reason=""
 	if [ -f "$CRT_DUAL_STATE_DIR/udev-poke" ]; then rm -f "$CRT_DUAL_STATE_DIR/udev-poke" 2>/dev/null || true; _fired=1; _reason="${_reason} udev-poke"; fi

@@ -27,8 +27,6 @@ import contextlib
 import importlib.abc
 import logging
 import os  # RGS-15KHZ-EXT (genconfig-archive): CRT_DUAL_BACKUP_ROOT seam
-import re  # RGS-15KHZ-EXT (display-mode-last): want/modeline parsing
-import subprocess  # RGS-15KHZ-EXT (display-mode-last): switchres calc + xrandr
 import sys
 from pathlib import Path
 
@@ -104,112 +102,6 @@ def _patch_emulatorlauncher(module):
 
     module.start_rom = patched_start_rom
     _log.info("crt-dual: emulatorlauncher.start_rom monkey-patched (gameStart first)")
-    return True
-
-
-# ──────────────────────────────────────────────
-# PATCH: utils.videoMode — per-game profile mode LAST (RGS-15KHZ-EXT
-# "display-mode-last")
-# ──────────────────────────────────────────────
-# Stock flaw (measured daytona/sm2 2026-09-09): the profile's per-game mode
-# was switched by gameStart (apply_profile.sh), then configgen's own
-# changeMode(wantedGameMode) ran AFTER it and stomped back to the desktop
-# videomode (our global.videomode pin). SwitchRes-capable emulators survived
-# only because they re-switch themselves later; an emulator without switchres
-# (sm2) inherited the trampled mode. Fix at the entry point: gameStart now
-# only declares the want (marker), and we execute the switch EXACTLY ONCE per
-# launch right here — after every stock mode write inside the resolution
-# block, before the gameResolution truth read (so generators and bezels see
-# what the glass actually shows). Two triggers consume one flag:
-#   changeMode(...)          -> apply after the real call (stomp path)
-#   getCurrentResolution(...) -> apply before the read (stock-skip path)
-# No marker -> zero xrandr calls, wrappers pass through (stock-identical).
-# Any failure logs WARN and keeps the current mode: a mode step must NEVER
-# break a launch. SwitchRes ITSELF (stock arcade_15 preset) resolves the
-# modeline — never our math (tube safety).
-
-DISPLAY_WANT = Path('/tmp/crt-dual/display')
-DETECT_STATE = Path('/tmp/crt-dual/detect-state')
-SWITCHRES_API = Path('/userdata/system/crt-dual/src/api/switchres_api.py')
-_DISPLAY_APPLIED = [False]  # per-process = per-launch; seam resets
-
-
-def _apply_display_mode_once():
-    """Port of the former apply_profile.sh mode step (identical semantics)."""
-    if _DISPLAY_APPLIED[0]:
-        return
-    _DISPLAY_APPLIED[0] = True  # consume even on failure: never break a launch
-    try:
-        if not DISPLAY_WANT.is_file():
-            return
-        want = DISPLAY_WANT.read_text().strip()
-        if not want:
-            return
-        m = re.match(r'^([0-9]+)x([0-9]+)@([0-9.]+)$', want)
-        if not m:
-            _log.warning("crt-dual: bad display want '%s' (merge should have "
-                         "rejected) — staying dual", want)
-            return
-        calc = subprocess.run(
-            [sys.executable, str(SWITCHRES_API), 'calc', m.group(1),
-             m.group(2), m.group(3), '--monitor', 'arcade_15'],
-            capture_output=True, text=True, errors='replace', timeout=20)
-        lines = [ln for ln in calc.stdout.splitlines() if ln.startswith('Modeline ')]
-        if not lines:
-            _log.warning("crt-dual: switchres calc failed (want %s) — staying dual", want)
-            return
-        # Live SwitchRes labels are GM-style and CONTAIN SPACES:
-        #   Modeline "693x520_57i 16.193051KHz 57.524158Hz" 14.719483 693 ...
-        # Same contract as the former shell step: label = first space-free
-        # token inside the quotes (the pool name), params = everything
-        # after the closing quote.
-        label_m = re.match(r'^Modeline "([^ "]+)', lines[-1])
-        params_m = re.match(r'^Modeline "[^"]*"\s*(.+)$', lines[-1])
-        out = ''
-        if DETECT_STATE.is_file():
-            for ln in DETECT_STATE.read_text(errors='replace').splitlines():
-                if ln.startswith('CRT_OUT='):
-                    out = ln.split('=', 1)[1].strip()
-                    break
-        if not label_m or not params_m or not out:
-            _log.warning("crt-dual: per-game mode unparsable (want %s) — staying dual", want)
-            return
-        label, params = label_m.group(1), params_m.group(1).split()
-        env = dict(os.environ, DISPLAY=os.environ.get('DISPLAY', ':0'))
-        # newmode/addmode may fail if already present — that is fine (was `|| true`)
-        subprocess.run(['xrandr', '--newmode', label] + params,
-                       env=env, capture_output=True, timeout=10)
-        subprocess.run(['xrandr', '--addmode', out, label],
-                       env=env, capture_output=True, timeout=10)
-        res = subprocess.run(['xrandr', '--output', out, '--mode', label],
-                             env=env, capture_output=True, timeout=20)
-        if res.returncode == 0:
-            _log.info("crt-dual: per-game mode: %s on %s (want %s)", label, out, want)
-        else:
-            _log.warning("crt-dual: per-game mode switch failed (%s) — staying dual", label)
-    except Exception as e:  # never break configgen mid-launch
-        _log.warning("crt-dual: per-game mode step failed (%s) — staying dual", e)
-
-
-def _patch_videomode(module):
-    orig_change = getattr(module, 'changeMode', None)
-    orig_res = getattr(module, 'getCurrentResolution', None)
-    if not callable(orig_change) or not callable(orig_res):
-        _log.warning("crt-dual: videoMode.changeMode/getCurrentResolution not found")
-        return False
-
-    def patched_change_mode(*args, **kwargs):
-        out = orig_change(*args, **kwargs)
-        _apply_display_mode_once()  # LAST writer after the stock switch
-        return out
-
-    def patched_get_current_resolution(*args, **kwargs):
-        _apply_display_mode_once()  # covers the path where stock skips changeMode
-        return orig_res(*args, **kwargs)
-
-    module.changeMode = patched_change_mode
-    module.getCurrentResolution = patched_get_current_resolution
-    _log.info("crt-dual: videoMode patched (profile display mode applies last)")
     return True
 
 
@@ -506,7 +398,9 @@ def _patch_generic(module, short: str) -> bool:
 # modules are handled generically by _patch_generic (profile-driven).
 _PATCHERS = {
     'configgen.emulatorlauncher': _patch_emulatorlauncher,
-    'configgen.utils.videoMode': _patch_videomode,  # RGS-15KHZ-EXT (display-mode-last)
+    # utils.videoMode: NOT patched — the raster channel lives in the stock
+    # launcher (the applied resolution-crt-patch hunks announce+generate the
+    # declared keys natively; verify.sh 4d owns the drift check).
 }
 
 

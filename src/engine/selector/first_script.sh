@@ -38,8 +38,8 @@ mkdir -p "$STATE_DIR"
 
 log() { echo "CRT-DUAL-HOOK [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 
-# Shared libraries (display-lib: detect_outputs, layout_apply_if_changed,
-# profile_target_display). Sourced here so both hooks share one detection.
+# Shared libraries (display-lib: detect_outputs, layout_apply_if_changed).
+# Sourced here so both hooks share one detection.
 # shellcheck disable=SC1090  # source path is dynamic (system or PKG_ROOT candidate)
 for _lib in /usr/lib/gpu-lib.sh /usr/lib/display-lib.sh \
 	"$PKG_ROOT/src/lib/gpu-lib.sh" "$PKG_ROOT/src/lib/display-lib.sh"; do

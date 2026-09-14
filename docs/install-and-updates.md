@@ -28,11 +28,13 @@ At install the system:
 
 - records the RGS and Batocera versions it is being installed onto
   (this is the memory its later self-check compares against),
-- takes a whole-file snapshot of the two stock files it has no pristine
-  copy of anywhere else (the system config and the version record) —
-  install onto a fresh box is the one moment the untouched state
-  exists, and the layer keeps that insurance copy even after you
-  uninstall,
+- takes a whole-file snapshot of the stock files it has no pristine
+  copy of anywhere else (the system config and the version record,
+  plus the launcher's mode script, which the layer adjusts to
+  understand the per-game video-mode keys — the adjustment carries the
+  stock behavior untouched wherever the layer is absent, the insurance
+  copy makes the uninstall restore byte-exact, and the boot service
+  re-applies the adjustment after every system update),
 - backs up the value of every setting it will own before setting it,
 - places its hook so it is consulted at every game start and stop, and
   its boot service so it runs late, after RGS's own boot setup.
