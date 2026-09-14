@@ -329,6 +329,43 @@ else
 	fi
 fi
 
+# ── 4e. GPU dotclock decide (dotclock-decide plan 2026-09-14): same
+#      discipline as 4b-4d (NOT counted in PRESENT — owns its verdict).
+#      ONE truth source — the boot probe (owner 2026-09-14: the ati0dot
+#      whitelist is DELETED). Expected INSTALLED: knob (when present) is
+#      a valid number or `off`; the RA config-dir switchres.ini exists
+#      with the floor (born by the decide) — unless the knob is off or
+#      /etc/switchres.ini is missing. Expected STOCK: RA-dir ini absent.
+#      Env seams: RGS15_RA_SWITCHRES / RGS15_SYS_SWITCHRES / RGS15_CONF.
+if [ "$PRESENT" -gt 0 ]; then
+	RA_SWITCHRES="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
+	_V_CONF="${RGS15_CONF:-/userdata/system/batocera.conf}"
+	_v_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$_V_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"')"
+	if [ -n "$_v_knob" ] && [ "$_v_knob" != "off" ] && ! printf '%s' "$_v_knob" | grep -qE '^[0-9]+([.][0-9]+)?$'; then
+		bad "rgs-15khz.dotclock_min invalid value '$_v_knob' (number or off) — fix by hand (decide falls back to the safe 25.0 meanwhile)"
+	fi
+	if [ "$_v_knob" = "off" ]; then
+		[ -e "$RA_SWITCHRES" ] \
+			&& bad "dotclock decide is OFF but the RA config-dir switchres.ini is still present ($RA_SWITCHRES — remove it, uninstall or by hand)" \
+			|| ok "dotclock decide off (knob) — RA config-dir ini absent"
+	elif [ ! -f "${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}" ]; then
+		echo "WARN: dotclock decide skipped (/etc/switchres.ini missing — no switchres on this install?)" >&2
+	elif [ ! -f "$RA_SWITCHRES" ]; then
+		bad "dotclock decide NOT applied ($RA_SWITCHRES missing — run install.sh or the service dotclock-decide one-shot)"
+	else
+		_v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}')"
+		[ -n "$_v_dc" ] && ok "dotclock decide applied (RA ini dotclock_min=$_v_dc, knob=${_v_knob:-unset — probe first measure pending})" \
+			|| bad "RA config-dir switchres.ini present but WITHOUT a dotclock_min line ($RA_SWITCHRES — decide incomplete)"
+	fi
+else
+	_v_stk="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
+	if [ -e "$_v_stk" ]; then
+		bad "dotclock decide pieces LEFT OVER in stock state ($_v_stk)"
+	else
+		ok "dotclock decide absent (stock state)"
+	fi
+fi
+
 # ── 5. Services: engine shim + ours + VNC (file + registration) ──
 if [ -e "$SVCDIR/$ENGINE_SVC" ]; then
 	have

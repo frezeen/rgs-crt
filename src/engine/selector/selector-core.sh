@@ -54,7 +54,7 @@ log() {
 }
 
 # ── 1. Display detection (CONFIRMED only) ──
-# Both libs: gpu-lib (detect_gpu -> GPU_VENDOR/GPU_DOTCLOCK) is the
+# Both libs: gpu-lib (detect_gpu -> GPU_VENDOR/GPU_MODEL) is the
 # display-lib prerequisite (2026-08-12: sourcing display-lib alone left
 # GPU_VENDOR unset, which opened the --prop fallback gate -> 3 G per
 # gameStart).

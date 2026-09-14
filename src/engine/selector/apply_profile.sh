@@ -50,7 +50,7 @@ PROFILE_DIR="$PROFILES_ROOT/$NAME"
 }
 
 # Display layer: BOTH libs — gpu-lib (detect_gpu -> GPU_VENDOR/
-# GPU_DOTCLOCK) is the display-lib prerequisite; without it the --prop
+# GPU_MODEL) is the display-lib prerequisite; without it the --prop
 # fallback gate opened (2026-08-12: 3 G per gameStart).
 [ -r "$LIB" ] && source "$LIB" 2>/dev/null
 [ -r "$PKG_ROOT/src/lib/gpu-lib.sh" ] && source "$PKG_ROOT/src/lib/gpu-lib.sh" 2>/dev/null

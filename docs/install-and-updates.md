@@ -54,6 +54,18 @@ RGS update to a kernel at 6.19 or later lifts it on its own). The choice
 is yours: `rgs-15khz.amdgpu-legacy=off` in `batocera.conf` keeps the
 modern stack and the layer will not touch the choice again.
 
+## The lowest clock your chain can produce (dotclock)
+
+Some GPU/adapter combinations cannot produce the very low video clocks
+that a few consoles' native resolutions need — asking for them shows a
+black screen instead of a game. At the first boot after install, the
+layer measures the real limit of your chain (a few quick mode changes
+on the tube, once) and from then on asks each emulator for the game's
+native resolution only when the chain can produce it; below the limit
+the picture is widened instead — same game, full screen, never black.
+`rgs-15khz.dotclock_min=off` in `batocera.conf` keeps the emulators'
+own behavior and stops the measuring.
+
 ## Intel machines and the display patch
 
 On Intel gen9 integrated graphics (most desktop Intel chips from roughly

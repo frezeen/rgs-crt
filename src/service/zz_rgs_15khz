@@ -46,7 +46,7 @@ LOG="${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}"
 LOGS_DIR="$(dirname "$LOG")"
 # Explicit truncation list — OUR files only (service log + engine runtime
 # log the game path appends to; stock display.log/es_launch_* NEVER touched).
-TRUNCATE_LIST="rgs-15khz.log selector-core.log"
+TRUNCATE_LIST="rgs-15khz.log selector-core.log dotclock-probe.log"
 RGS_FIX="/userdata/system/rgs/fix"
 MANIFEST="$PKG/overlay-manifest"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
@@ -240,6 +240,114 @@ resolution_patch_decide() {
 	else
 		log "resolution-patch: WARN hunks not applied (anchor drift or write refused) — verify flags it, launches run stock-safe"
 	fi
+	return 0
+}
+
+# ── GPU dotclock decide (dotclock-decide plan, 2026-09-14) ──────────
+# WHY: RA/GroovyMAME run NATIVE (RA super="0", mame.ini dotclock_min 0).
+# A GPU/encoder/convertitor chain that cannot produce a native mode's
+# dotclock would go BLACK — not detectable at runtime. The dotclock
+# capability is a property of the CHAIN, decided A PRIORI at boot
+# (libretro CRTSwitchRes doctrine; old-box docs/07): native pure where
+# the chain holds, SwitchRes dynamic super width ONLY where a native
+# mode would need less dotclock. This duty (single logic copy, same
+# shape as amdgpu-legacy) writes the floor into BOTH ini consumers:
+#   /etc/switchres.ini                                 (MAME CLI, engine calc)
+#   /userdata/system/configs/retroarch/switchres.ini   (RA 1.22 reads the
+#     ini from ITS CONFIG DIR — /etc is irrelevant for libretro games,
+#     old-box proof CRT_KEYS.sh:88-95; absent in stock → born here as a
+#     copy of the system ini)
+# The inies STAY patched (this is the wanted state, not session data):
+# an RGS update restores stock inies and the next boot re-decides —
+# self-healing identical to the rest of this service. No restore, no
+# state file: the ini content IS the state.
+# Value precedence (ONE truth source — the boot probe, owner
+# 2026-09-14): rgs-15khz.dotclock_min (probe-measured / manual) >
+# safe 25.0 fallback (pre-measurement only). The per-family whitelist
+# (ati0dot.txt) is DELETED with this decide: measurement > tables.
+# `rgs-15khz.dotclock_min=off` disables the decide (inies untouched).
+# mame.ini keeps its inline dotclock_min 0 (GroovyMAME path native-pure;
+# its arcade dotclocks are proven >= 6 MHz on this tube) — the decide
+# governs the RA path (all console/computer libretro systems).
+# First measurement lifecycle: the probe runs at the FIRST boot with no
+# knob (certification persists); a later GPU change = uninstall + install
+# (install-discipline model) OR delete the knob to re-certify by hand.
+dotclock_ini_write() {
+	# $1 = ini path, $2 = normalized value. Idempotent: rewrite only on
+	# drift; append when the key is absent. Atomic (tmp+mv).
+	local _ini="$1" _val="$2" _line _tmp
+	[ -f "$_ini" ] || return 1
+	_line="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_ini" | head -1 || true)"
+	local _want
+	if [ -n "$_line" ]; then
+		# keep the file's own key column (its whitespace) on rewrite
+		_want="$(printf '%s' "$_line" | sed -E 's/^([[:space:]]*dotclock_min[[:space:]]+).*/\1'"$_val"'/')"
+		if [ "$_line" = "$_want" ]; then
+			return 0
+		fi
+	else
+		_want="$(printf 'dotclock_min              %s' "$_val")"
+	fi
+	_tmp="${_ini}.tmp.$$"
+	if [ -n "$_line" ]; then
+		awk -v line="$_line" -v want="$_want" '
+			{ if ($0 == line && !done) { print want; done = 1 } else print }' \
+			"$_ini" >"$_tmp" || return 1
+	else
+		cat "$_ini" "$_want" 2>/dev/null >"$_tmp" || { printf '%s\n' "$_want" | cat "$_ini" - >"$_tmp" || return 1; }
+	fi
+	mv "$_tmp" "$_ini" || return 1
+	return 0
+}
+
+dotclock_normalize() {
+	# $1 = raw value -> 0 (for zero) or one-decimal float; empty on invalid
+	awk -v v="$1" 'BEGIN { if (v !~ /^[0-9]+([.][0-9]+)?$/) exit 1
+		f = v + 0; if (f == 0) print "0"; else printf "%.1f", f }'
+}
+
+dotclock_decide() {
+	local _knob="" _val="" _src=""
+	_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"')"
+	if [ "$_knob" = "off" ]; then
+		log "dotclock-decide: off (rgs-15khz.dotclock_min=off) — inies untouched"
+		return 0
+	fi
+	if [ -n "$_knob" ]; then
+		_val="$(dotclock_normalize "$_knob")"
+		if [ -z "$_val" ]; then
+			log "dotclock-decide: WARN invalid rgs-15khz.dotclock_min='$_knob' — GPU class fallback"
+			_val=""
+		else
+			_src="measured/manual (rgs-15khz.dotclock_min=$_knob)"
+		fi
+	fi
+	if [ -z "$_val" ]; then
+		# pre-measurement fallback: the safe 25.0 floor for EVERY GPU. The
+		# measured value lands at the first probe (boot duty) and wins from
+		# the next decide — no per-family table, the probe is the one truth
+		# source (owner 2026-09-14: the ati0dot whitelist is DELETED).
+		_val="25.0"
+		_src="safe default (pre-measurement)"
+	fi
+	local _ra_ini="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
+	local _sys_ini="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+	mkdir -p "$(dirname "$_ra_ini")" 2>/dev/null || true
+	[ -f "$_ra_ini" ] || cp "$_sys_ini" "$_ra_ini" 2>/dev/null || true # RA ini is absent in stock: born as the system shape
+	local _changed=0 _ini
+	for _ini in "$_sys_ini" "$_ra_ini"; do
+		local _before=""
+		[ -f "$_ini" ] && _before="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_ini" | head -1 | awk '{print $NF}')"
+		if [ "$_before" != "$_val" ]; then
+			if dotclock_ini_write "$_ini" "$_val"; then
+				log "dotclock-decide: $_ini dotclock_min -> $_val ($_src)"
+				_changed=1
+			else
+				log "dotclock-decide: WARN could not write $_ini"
+			fi
+		fi
+	done
+	[ "$_changed" = "0" ] && log "dotclock-decide: converged (dotclock_min=$_val, $_src)"
 	return 0
 }
 
@@ -482,6 +590,32 @@ do_start() {
 		resolution_patch_decide
 	fi
 
+	# 3d-bis. dotclock decide (switchres.ini floors; self-healing at every
+	#     boot like 3d — an RGS update restores stock inies, the next boot
+	#     re-decides). Guard-hold skips it: system-level state is not
+	#     recomputed while held. The first-measure probe (3d-ter) runs
+	#     AFTER the decide so a first boot both applies the GPU-class
+	#     fallback AND starts measuring.
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: dotclock decide skipped (guard hold)"
+	else
+		dotclock_decide
+	fi
+
+	# 3d-ter. dotclock probe (first measurement only — knob absent):
+	#     backgrounded, one-shot, logs to its own file. Never blocks boot.
+	if [ "$_guard_hold" = "1" ]; then
+		log "start: dotclock probe skipped (guard hold)"
+	else
+		_probe_log="$LOGS_DIR/dotclock-probe.log"
+		_knob_present=0
+		grep -qE '^rgs-15khz\.dotclock_min[[:space:]]*=' "$GUARD_CONF" 2>/dev/null && _knob_present=1
+		if [ "$_knob_present" = "0" ] && [ -f "$PKG/src/service/dotclock-probe.sh" ]; then
+			nohup bash "$PKG/src/service/dotclock-probe.sh" >>"$_probe_log" 2>&1 &
+			log "start: dotclock probe started (first measurement — log: $_probe_log)"
+		fi
+	fi
+
 	# 4. Re-deploy manifest overlay files (cmp||cp; save IFF drifted).
 	if [ "$_guard_hold" = "1" ]; then
 		log "start: re-deploy skipped (guard hold)"
@@ -635,6 +769,12 @@ resolution-patch)
 	resolution_patch_decide
 	exit 0
 	;;
+dotclock-decide)
+	# One-shot decide (install.sh calls it at install; the boot duty
+	# recomputes every boot). Log-only errors: never blocks.
+	dotclock_decide
+	exit 0
+	;;
 tool-check)
 	# the rgs_crt_check pygame tool: verdict line for the UI (first word),
 	# same watch logic; PASS restores held profiles + adopts
@@ -648,7 +788,7 @@ tool-check)
 	fi
 	exit 0
 	;;*)
-	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch}" >&2
+	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-decide}" >&2
 	exit 1
 	;;
 esac

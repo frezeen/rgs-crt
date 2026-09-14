@@ -259,6 +259,15 @@ bash "$SVCDIR/$OUR_SVC" gamelist-ensure \
 	&& echo "  gamelist entry + tile ensured" \
 	|| echo "  WARN: gamelist ensure failed (entry skipped)"
 
+# ── 7e. GPU dotclock decide — one-shot decide (the boot service
+#    recomputes the inies at every boot, self-healing; this one-shot
+#    makes the FIRST launches already correct). The probe (first
+#    measurement) deploys with the engine service tree and runs at the
+#    FIRST boot without the knob (single truth source — no whitelist,
+#    owner 2026-09-14).
+bash "$SVCDIR/$OUR_SVC" dotclock-decide || echo "  WARN: dotclock decide failed (see $LOG)"
+echo "  dotclock decide recomputed (service log: $LOG)"
+
 # ── 8. udev hotplug rule (overlay, manifest-tracked) ──
 cp "$UDEV_SRC" "$UDEV_DST" || fail "udev rule deploy failed"
 manifest_add "$UDEV_DST"

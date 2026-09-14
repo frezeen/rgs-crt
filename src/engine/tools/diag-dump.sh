@@ -40,7 +40,7 @@ if [ -r "$PACKAGE_DIR/lib/gpu-lib.sh" ]; then
 fi
 if command -v detect_gpu >/dev/null 2>&1; then
 	detect_gpu 2>/dev/null
-	echo "  GPU_VENDOR=$GPU_VENDOR  GPU_MODEL=$GPU_MODEL  GPU_DOTCLOCK=${GPU_DOTCLOCK:-25}"
+	echo "  GPU_VENDOR=$GPU_VENDOR  GPU_MODEL=$GPU_MODEL"
 else
 	echo "  gpu-lib.sh not available"
 fi

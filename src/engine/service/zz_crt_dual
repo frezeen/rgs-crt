@@ -66,8 +66,10 @@ set -uo pipefail
 		CRT_OUTS="${CRT_OUTS:-}"
 		CRT_PRESUMED_OUTS="${CRT_PRESUMED_OUTS:-}"
 		LCD_OUTS="${LCD_OUTS:-}"
-		command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true # libs may be absent; default GPU_DOTCLOCK=25 applies
-		echo "GPU: ${GPU_VENDOR:-unknown} (${GPU_MODEL:-unknown}, dotclock: ${GPU_DOTCLOCK:-25})"
+		command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true # libs may be absent; classification best-effort
+		# RGS-15KHZ-EXT (dotclock-decide): the GPU_DOTCLOCK print REMOVED
+		# with the whitelist — the floor is the probe knob (dotclock-decide).
+		echo "GPU: ${GPU_VENDOR:-unknown} (${GPU_MODEL:-unknown})"
 
 		# AMD power: avoid 300MHz downclock glitch/lag in LCD-only when analog poll becomes active (seen 2026-08-25: balanced/auto → 300MHz, ES lag + glitch storm on 1s probe). Force high when analog will be watched (LCD-only).
 		if [ "${GPU_VENDOR:-}" = "amd" ]; then

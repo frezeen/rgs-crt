@@ -9,7 +9,6 @@
 # Exported variables:
 #   GPU_VENDOR    — nvidia|amd|intel|unknown
 #   GPU_MODEL     — GPU model string
-#   GPU_DOTCLOCK  — 0 if a dotclock fix is needed, 25 otherwise
 #
 # Shell contract: safe under `set -u` and `set -o pipefail`; the caller
 # enables those options (see display-lib.sh header).
@@ -20,8 +19,7 @@ _gpu_line() {
 	lspci -nn 2>/dev/null | grep -iE "VGA|3D|Display controller" | head -1
 }
 
-# GPU model string from the lspci line (shared by detect_gpu and
-# check_dotclock's ati0dot lookup).
+# GPU model string from the lspci line (detect_gpu's model field).
 _gpu_model() {
 	echo "$1" | sed 's/.*controller //' | sed 's/\[[^]]*\]//g' | xargs
 }
@@ -47,29 +45,12 @@ detect_gpu() {
 	fi
 }
 
-check_dotclock() {
-	local gpu_line
-	gpu_line=$(_gpu_line)
-
-	# NVIDIA Maxwell/Kepler
-	if echo "$gpu_line" | grep -qiE "GM10[0-9]|GM20[0-6]|GK[0-9]{3}|GTX (750|950|960|970|980|TI|650|660|670|680|690|760|770|780|TI)"; then
-		GPU_DOTCLOCK=0
-		return 0
-	fi
-
-	# AMD via ati0dot.txt
-	if echo "$gpu_line" | grep -qiE "\b(AMD|ATI)\b" && [ -f "/etc/ati0dot.txt" ]; then
-		local model
-		model=$(_gpu_model "$gpu_line")
-		if echo "$model" | grep -qiFf /etc/ati0dot.txt 2>/dev/null; then
-			GPU_DOTCLOCK=0
-			return 0
-		fi
-	fi
-
-	GPU_DOTCLOCK=25
-	return 1
-}
+# RGS-15KHZ-EXT (dotclock-decide, 2026-09-14): check_dotclock REMOVED —
+# the GPU-class whitelist (Maxwell regex + /etc/ati0dot.txt) is deleted
+# with the ati0dot list; the dotclock decide reads the PROBE's measured
+# knob (rgs-15khz.dotclock_min) with the safe 25.0 pre-measurement
+# fallback. ONE truth source, no tables (owner order; backport entry =
+# this block + the two log-line call sites below).
 
 # Correct X name from DRM name (e.g. DVI-I-1 -> DVI-I-0)
 # REMOVED 2026-08-12 (audit finding M2): zero callers — the DRM->X
