@@ -71,11 +71,13 @@ echo "  service files removed"
 rm -f "$VNC1" "$VNC2"
 echo "  VNC symlinks removed"
 
-# ── 2b. GPU dotclock decide pieces: the RA config-dir switchres.ini WE
-#      created (stock has none; restoring stock = removing it).
-#      /etc/switchres.ini is STOCK — the duty edited one line in place:
-#      restore the stock default (dotclock_min 0) only when it differs.
-#      (The ati0dot whitelist is DELETED from the design — probe-only.)
+# ── 2b. GPU dotclock floor pieces: the RA config-dir switchres.ini WE
+#      created (stock has none; restoring stock = removing it) + the
+#      measurement cache ($PKG/state/dotclock — removed with the package
+#      tree below). /etc/switchres.ini is NEVER written by the current
+#      architecture (read-only base + measurement math); the restore
+#      below stays for LEGACY installs (older duties edited that one
+#      line in place) and is idle when the file is already stock.
 RA_SWITCHRES="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
 SYS_SWITCHRES="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
 rm -f "$RA_SWITCHRES" && echo "  RA config-dir switchres.ini removed (stock has none)"
@@ -176,7 +178,7 @@ rm -f /userdata/roms/rgs/media/images/rgs_crt_check.png
 BOX_KEYS_BACKUP="$PKG/backups/box-keys"
 if [ -z "${RGS15_SKIP_KEYS:-}" ]; then
 	sed -i '/^rgs-15khz\.dotclock_min[[:space:]]*=/d' /userdata/system/batocera.conf 2>/dev/null || true
-	echo "  our key rgs-15khz.dotclock_min removed (measurement was ours; a manual value can be re-set after install)"
+	echo "  our key rgs-15khz.dotclock_min removed (a manual floor can be re-set after install)"
 	for _key in es.resolution global.videomode global.videooutput splash.screen.resize global.videooutput2; do
 		_bak="$BOX_KEYS_BACKUP/$_key"
 		[ -f "$_bak" ] || continue

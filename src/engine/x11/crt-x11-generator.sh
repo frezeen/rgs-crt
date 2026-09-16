@@ -26,9 +26,13 @@ echo "=== CRT-DUAL CRT X11 Config Generator ==="
 source "$PACKAGE_DIR/lib/gpu-lib.sh" 2>/dev/null || true # libs may be absent (dev tree); fallbacks below handle it
 source "$PACKAGE_DIR/lib/display-lib.sh" 2>/dev/null || true
 detect_gpu
-# RGS-15KHZ-EXT (dotclock-decide): the check_dotclock call REMOVED with
-# the whitelist — the dotclock floor is decided by the boot service's
-# dotclock-decide duty (probe knob), not here.
+# RGS-15KHZ-EXT (dotclock): the check_dotclock call REMOVED with the
+# whitelist — the floor is measured at the first CRT game launch and
+# feeds the GAME consumers only (RA config-dir override). The DESKTOP
+# modelines below are ALWAYS floor-free (PR rule: 480i is the boot mode
+# by definition; /etc/switchres.ini stays stock and is never written),
+# so this generator never calls the duty and no floor can bake into the
+# conf.
 
 echo "GPU: $GPU_VENDOR ($GPU_MODEL)"
 echo "Note: X11 config generated for the detected GPU. apply_dual_layout in display-lib.sh uses"
@@ -110,10 +114,12 @@ else
 fi
 
 # ──────────────────────────────────────────────
-# Modeline — ONE 480i + ONE 240p, ONLY from SwitchRes
+# Modeline — ONE 480i + ONE 240p, ONLY from SwitchRes, ALWAYS native
 # ──────────────────────────────────────────────
-# Single source: switchres with the system ini (/etc/switchres.ini — not a
-# package ini: at boot the system one may be stock and give different timings).
+# Single source: switchres with a floor-neutral copy of the system ini
+# (floor forced to 0 — the desktop never follows the decided floor, PR
+# rule; the source is still /etc/switchres.ini, not a package ini: same
+# monitor preset, same math).
 # Mode name: "640x480i" — the UNIQUE official Batocera interlace name
 # (batocera-and-crt wiki: --newmode "640x480i" 13.10 ... interlace). Unique
 # = no collision with the kernel-synthesized "640x480" (54MHz DoubleScan,
@@ -139,7 +145,13 @@ echo "CRT refresh: ${CRT_DUAL_REFRESH}Hz (crt-dual.refresh in batocera.conf)"
 echo ""
 echo "--- Modeline ---"
 
-SR_INI="/etc/switchres.ini"
+# Floor-neutral BY INVARIANT: /etc/switchres.ini is stock (floor 0) and
+# NOTHING in this layer ever writes it (the PR rule) — the desktop calc
+# reads it directly, same as the official script. The decided floor feeds
+# the GAME consumers only (RA config-dir override). Seam (source ini):
+# RGS15_SYS_SWITCHRES (default = live path, used by tests/seams).
+SR_INI="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+# (seam above is the one source)
 # Switchres API bridge (data-plane): timings from the STOCK
 # libswitchres.so via ctypes — no CLI shell-out, no stdout parsing beyond
 # the Modeline shape. The helper computes ONLY (screen=dummy); the conf

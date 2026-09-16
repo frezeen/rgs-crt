@@ -58,13 +58,15 @@ modern stack and the layer will not touch the choice again.
 
 Some GPU/adapter combinations cannot produce the very low video clocks
 that a few consoles' native resolutions need — asking for them shows a
-black screen instead of a game. At the first boot after install, the
-layer measures the real limit of your chain (a few quick mode changes
-on the tube, once) and from then on asks each emulator for the game's
-native resolution only when the chain can produce it; below the limit
-the picture is widened instead — same game, full screen, never black.
-`rgs-15khz.dotclock_min=off` in `batocera.conf` keeps the emulators'
-own behavior and stops the measuring.
+black screen instead of a game. At the **first game you launch on a CRT**
+the layer measures the real limit of your chain (a few quick mode changes
+on the tube, once, before the game starts) and from then on asks each
+emulator for the game's native resolution only when the chain can produce
+it; below the limit the picture is widened instead — same game, full
+screen, never black. The desktop (480i) never depends on this: it boots
+the same on every machine. `rgs-15khz.dotclock_min=off` in `batocera.conf`
+keeps the emulators' own behavior and stops the measuring; a number
+(e.g. `rgs-15khz.dotclock_min=25`) pins the floor by hand.
 
 ## Intel machines and the display patch
 

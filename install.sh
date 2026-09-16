@@ -259,12 +259,11 @@ bash "$SVCDIR/$OUR_SVC" gamelist-ensure \
 	&& echo "  gamelist entry + tile ensured" \
 	|| echo "  WARN: gamelist ensure failed (entry skipped)"
 
-# ── 7e. GPU dotclock decide — one-shot decide (the boot service
-#    recomputes the inies at every boot, self-healing; this one-shot
-#    makes the FIRST launches already correct). The probe (first
-#    measurement) deploys with the engine service tree and runs at the
-#    FIRST boot without the knob (single truth source — no whitelist,
-#    owner 2026-09-14).
+# ── 7e. GPU dotclock floor — one-shot decide (the boot service
+#    recomputes the RA override at every boot, self-healing). With no
+#    knob and no measurement cache yet this is a no-op: the floor is
+#    measured at the FIRST CRT game launch (dotclock-ensure, the
+#    first_script hook) and feeds the games only. /etc is never written.
 bash "$SVCDIR/$OUR_SVC" dotclock-decide || echo "  WARN: dotclock decide failed (see $LOG)"
 echo "  dotclock decide recomputed (service log: $LOG)"
 

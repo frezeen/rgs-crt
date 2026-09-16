@@ -57,6 +57,15 @@ gameStart)
 	# compares the fingerprint -> identical = zero xrandr (no cost).
 	command -v layout_apply_if_changed >/dev/null 2>&1 && layout_apply_if_changed 2>/dev/null || true # best-effort; empty layout = stock
 
+	# dotclock floor (owner 2026-09-16): the FIRST CRT game launch
+	# measures the chain once (synchronous, cached) — any system, any
+	# emulator — BEFORE the emulator starts, so the RA floor is in place
+	# when the game reads its switchres ini. Later launches: the fast
+	# path (cache read + no-op refresh). LCD-only boots: the duty
+	# self-gates and nothing exists. gameStop NEVER runs this (the probe
+	# cycles the tube; a game owns the display then).
+	bash "${RGS15_SVC:-/userdata/system/services/zz_rgs_15khz}" dotclock-ensure >>"${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}" 2>&1 || true
+
 	# Selector decision (gate display × profiles — the picker appears only
 	# when a real choice exists; empty output = stock default, no profile).
 	_CHOICE="$(bash "$ENGINE_DIR/selector-core.sh" 2>/dev/null)"

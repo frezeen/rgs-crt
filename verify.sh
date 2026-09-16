@@ -329,32 +329,50 @@ else
 	fi
 fi
 
-# ── 4e. GPU dotclock decide (dotclock-decide plan 2026-09-14): same
-#      discipline as 4b-4d (NOT counted in PRESENT — owns its verdict).
-#      ONE truth source — the boot probe (owner 2026-09-14: the ati0dot
-#      whitelist is DELETED). Expected INSTALLED: knob (when present) is
-#      a valid number or `off`; the RA config-dir switchres.ini exists
-#      with the floor (born by the decide) — unless the knob is off or
-#      /etc/switchres.ini is missing. Expected STOCK: RA-dir ini absent.
-#      Env seams: RGS15_RA_SWITCHRES / RGS15_SYS_SWITCHRES / RGS15_CONF.
+# ── 4e. GPU dotclock floor (architecture 2026-09-16): same discipline as
+#      4b-4d (NOT counted in PRESENT — owns its verdict). ONE truth
+#      source — the measurement (state cache) or the manual knob; NO
+#      fallback is ever written; /etc/switchres.ini must stay STOCK
+#      (floor 0 — the layer never writes it). Expected INSTALLED: /etc
+#      stock; RA config-dir ini may be absent pre-first-launch (measured
+#      at the first CRT game launch) or carry the floor; knob valid or
+#      off (off => RA floor 0). Expected STOCK: RA-dir ini absent.
+#      Env seams: RGS15_RA_SWITCHRES / RGS15_SYS_SWITCHRES / RGS15_CONF /
+#      RGS15_STATE.
 if [ "$PRESENT" -gt 0 ]; then
 	RA_SWITCHRES="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
 	_V_CONF="${RGS15_CONF:-/userdata/system/batocera.conf}"
-	_v_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$_V_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"')"
+	_V_SYS_INI="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+	_v_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$_V_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"\r')"
 	if [ -n "$_v_knob" ] && [ "$_v_knob" != "off" ] && ! printf '%s' "$_v_knob" | grep -qE '^[0-9]+([.][0-9]+)?$'; then
-		bad "rgs-15khz.dotclock_min invalid value '$_v_knob' (number or off) — fix by hand (decide falls back to the safe 25.0 meanwhile)"
+		bad "rgs-15khz.dotclock_min invalid value '$_v_knob' (number or off) — fix by hand (the measurement path stays)"
+	fi
+	if [ -f "$_V_SYS_INI" ]; then
+		_v_sys_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_V_SYS_INI" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+		[ "$_v_sys_dc" = "0" ] \
+			&& ok "system switchres.ini stays stock (dotclock_min=0 — never written by the layer)" \
+			|| bad "$_V_SYS_INI dotclock_min=$_v_sys_dc (must stay stock 0 — the layer never writes /etc)"
+	else
+		echo "WARN: dotclock check partial (/etc/switchres.ini missing — no switchres on this install?)" >&2
 	fi
 	if [ "$_v_knob" = "off" ]; then
-		[ -e "$RA_SWITCHRES" ] \
-			&& bad "dotclock decide is OFF but the RA config-dir switchres.ini is still present ($RA_SWITCHRES — remove it, uninstall or by hand)" \
-			|| ok "dotclock decide off (knob) — RA config-dir ini absent"
-	elif [ ! -f "${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}" ]; then
-		echo "WARN: dotclock decide skipped (/etc/switchres.ini missing — no switchres on this install?)" >&2
+		_v_dc=""
+		[ -f "$RA_SWITCHRES" ] && _v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+		[ -z "$_v_dc" ] || [ "$_v_dc" = "0" ] \
+			&& ok "dotclock off (knob) — RA floor ${_v_dc:-absent} (games run the library default)" \
+			|| bad "dotclock off (knob) but RA floor is $_v_dc (expected 0/absent — rerun the decide)"
 	elif [ ! -f "$RA_SWITCHRES" ]; then
-		bad "dotclock decide NOT applied ($RA_SWITCHRES missing — run install.sh or the service dotclock-decide one-shot)"
+		# pre-first-launch state is legitimate now: nothing is written
+		# until the first CRT game launch measures (or the knob is set).
+		if [ -n "$_v_knob" ]; then
+			bad "dotclock knob='$_v_knob' but $RA_SWITCHRES missing (run: zz_rgs_15khz dotclock-decide)"
+		else
+			ok "dotclock not measured yet — RA ini absent by design (first CRT game launch measures)"
+		fi
 	else
-		_v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}')"
-		[ -n "$_v_dc" ] && ok "dotclock decide applied (RA ini dotclock_min=$_v_dc, knob=${_v_knob:-unset — probe first measure pending})" \
+		_v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+		_v_st="$(sed -n 's/^value=//p' "${RGS15_STATE:-$PKG/state/dotclock}" 2>/dev/null | head -1)"
+		[ -n "$_v_dc" ] && ok "dotclock floor in RA ini (dotclock_min=$_v_dc, knob=${_v_knob:-unset}, measured-cache=${_v_st:-none})" \
 			|| bad "RA config-dir switchres.ini present but WITHOUT a dotclock_min line ($RA_SWITCHRES — decide incomplete)"
 	fi
 else

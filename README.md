@@ -158,13 +158,14 @@ its dependencies and reports loudly.
   the flat panel lit up. If you prefer the modern stack regardless,
   set `rgs-15khz.amdgpu-legacy=off` in `batocera.conf` — the layer
   re-checks the choice at every boot.
-- Every boot the layer also decides the lowest video clock your chain
-  can produce (measured once at first boot, or per GPU family) and
-  writes it where the emulators read it: games then run at their native
+- The first time you launch a game on a CRT the layer measures the
+  lowest video clock your chain can produce (a few quick mode changes on
+  the tube, once) and remembers it: games then run at their native
   resolution when the chain supports it, and are gently widened when it
-  does not — a screen that would go black shows the game instead. Set
+  does not — a screen that would go black shows the game instead. The
+  desktop and the boot never depend on this. Set
   `rgs-15khz.dotclock_min=off` in `batocera.conf` to keep the emulators'
-  own values untouched.
+  own values untouched, or a number (e.g. `25`) to pin the floor yourself.
 - Live screen re-plugging was used through weeks of testing and works;
   across the whole test period the box crashed two or three times
   around a plug event, every time recovered by a reboot (the setups
