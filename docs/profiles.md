@@ -19,7 +19,7 @@ it, take it off when the game is over.
 
 | Profile | What it does |
 | --- | --- |
-| **RGS 15 kHz CRT** | The tube experience. Games launch at their native signal, CRT-emulation filters are switched off (the tube is the filter), and each supported system carries its own tested settings — which emulator to use, how it should output, what to leave at its defaults. |
+| **RGS 15 kHz CRT** | The tube experience. Games launch at their native signal, CRT-emulation filters are switched off (the tube is the filter). The systems with their own tuning carry it; the rest ride the common base plus their emulator family — the compatibility map shows which is which. |
 | **RGS stock (compat)** | **It changes nothing.** A game launched under it runs exactly as plain RGS runs it. Its purpose is to be the proof: the layer can be told to step aside completely, and "completely" is measured, not promised — the compatibility run produced the same modes, the same logs and the same settings as an untouched system. |
 
 ## Where you meet profiles
@@ -86,17 +86,19 @@ rules — is **[Writing and maintaining profiles](writing-profiles.md)**.
 
 Guarantees you get from the framework, not from the individual profile:
 
-- **Errors surface early.** A malformed profile is rejected at install
-  time — it never reaches a game launch.
+- **Errors surface early.** A malformed profile is a loud, listed
+  failure in `./verify.sh` — and if a launch meets one anyway, it falls
+  back to stock behavior instead of using it.
 - **Nothing permanent.** Whatever the profile changes at game start,
   the exit gives back — values, files, the works.
 - **Nothing invisible.** `./verify.sh` fails if any session ever
   stranded a trace of a profile behind.
+- **A hard stop is cleaned.** If the box loses power mid-game, the
+  next boot removes the session's leftovers by itself.
 
 ## Switching between profiles
 
 You choose at the prompt when both experiences fit your hardware.
 Changing your mind mid-session is not how profiles work: they belong to
 the game boundary — a new game, a new choice. Removing or adding a
-profile folder takes effect at the next install/verify check, not
-mid-game.
+profile folder takes effect at the next game launch, not mid-game.

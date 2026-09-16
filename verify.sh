@@ -3,8 +3,9 @@
 #
 # Exactly TWO states are clean (anything mixed = FAIL with a listing):
 #   INSTALLED — every deployed piece present and byte-identical to the
-#     repo, specs valid, monkey-patch patterns matched, owned keys set,
-#     RGS version unchanged since install, zero residue;
+#     repo, specs valid, monkey-patch patterns matched, box keys never
+#     written (backup-only), RGS version unchanged since install, zero
+#     residue;
 #   STOCK — nothing of ours left (pre-install or post-uninstall).
 # An RGS update restores stock files (install-discipline.md §8): a
 # version mismatch FAILS closed — recovery is uninstall.sh + install.sh
@@ -37,7 +38,6 @@ UDEV_SRC="$REPO/src/engine/udev/99-crt-dual-hotplug.rules"
 UDEV_DST="${RGS15_UDEV:-/etc/udev/rules.d/99-crt-dual-hotplug.rules}"
 VNC1="${RGS15_VNC1:-/usr/bin/vnc}"
 VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
-CRT_BOX_KEY_MODE="auto"
 MERGE="$REPO/src/engine/selector/merge.py"
 MARK="# --- CRT-DUAL PROFILE:"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
@@ -66,16 +66,32 @@ is_registered() {
 	batocera-settings-get system.services 2>/dev/null | tr ' ' '\n' | grep -qx "$1"
 }
 
-# ── 0. Spec validation (repo specs must always parse) ──
+# ── 0. Spec validation (repo specs AND the package copies — the package
+#      is what the selector actually runs; user-added profiles included,
+#      merge.py WARNs surfaced with their real paths) ──
 for _spec in "$REPO"/src/profiles/*/spec.conf; do
 	[ -f "$_spec" ] || continue
 	_name="$(basename "$(dirname "$_spec")")"
 	if python3 "$MERGE" validate "$(dirname "$_spec")" "$_name" /userdata/system >/dev/null 2>&1; then
-		ok "spec valid: $_name"
+		ok "repo spec valid: $_name"
 	else
-		bad "spec invalid: $_name (fix the spec — never reaches gameStart)"
+		bad "repo spec invalid: $_name (fix the spec — never reaches gameStart)"
 	fi
 done
+if [ -d "$PKG/profiles" ]; then
+	for _spec in "$PKG"/profiles/*/spec.conf; do
+		[ -f "$_spec" ] || continue
+		_name="$(basename "$(dirname "$_spec")")"
+		_out="$(python3 "$MERGE" validate "$(dirname "$_spec")" "$_name" /userdata/system 2>&1)"; _rc=$?
+		if [ "$_rc" = "0" ]; then
+			ok "package spec valid: $_name"
+			printf '%s\n' "$_out" | grep "WARN" || true
+		else
+			bad "package spec invalid: $_name (fix it — a game launch would hit it)"
+			printf '%s\n' "$_out" | tail -3 >&2
+		fi
+	done
+fi
 
 # ── 1. Package (dir + byte-identity + marker) ──
 if [ -d "$PKG/src" ]; then
@@ -104,9 +120,23 @@ if [ -d "$PKG/src" ]; then
 	# vendoring contract (STATE re-vendor entry) — a slip must fail HERE.
 	[ -e "$REPO/src/engine/src" ] && bad "repo: nested src/engine/src present (re-vendor must flatten to src/engine/)"
 	[ -e "$REPO/src/engine/profiles" ] && bad "repo: engine demo profiles present (re-vendor must delete them)"
-	diff -r "$REPO/src/profiles" "$PKG/profiles" >/dev/null 2>&1 \
-		&& ok "package profiles byte-identical" \
-		|| bad "package profiles DRIFT ($PKG/profiles differs from repo)"
+	# Repo profiles must be byte-identical in the package; user-added
+	# profile folders are legitimate (documented on-box authoring) — they
+	# are validated in section 0, never drift.
+	_pkg_drift=""
+	for _d in "$REPO"/src/profiles/*/; do
+		_b="$(basename "$_d")"
+		if [ ! -d "$PKG/profiles/$_b" ] || ! diff -r "$_d" "$PKG/profiles/$_b" >/dev/null 2>&1; then
+			_pkg_drift="$_pkg_drift $_b"
+		fi
+	done
+	[ -n "$_pkg_drift" ] \
+		&& bad "package profiles DRIFT (repo copy differs:$_pkg_drift)" \
+		|| ok "repo profiles byte-identical in the package"
+	for _d in "$PKG"/profiles/*/; do
+		_b="$(basename "$_d")"
+		[ -d "$REPO/src/profiles/$_b" ] || ok "user profile present: $_b (validated above)"
+	done
 	[ -f "$PKG_VERSION_FILE" ] && [ "$(cat "$PKG_VERSION_FILE" 2>/dev/null)" = "$PKG_VERSION" ] \
 		&& ok "version marker" \
 		|| bad "version marker missing/wrong ($PKG_VERSION_FILE)"
@@ -453,23 +483,21 @@ done
 #      read live keys — key logic is reviewed + tube-deployed instead) ──
 if [ -z "${RGS15_SKIP_KEYS:-}" ]; then
 if [ "$PRESENT" -gt 0 ]; then
+	# Backup-only since 2026-09-17: the layer pins NO boot key (stock ES
+	# owns them; auto = 640x480i *current on the CRT and native on
+	# LCD-only, verbose-proven 2026-09-14). Values are reported, never
+	# judged; what IS checked: the backups uninstall needs to restore.
 	for _key in es.resolution global.videomode; do
 		_val="$(batocera-settings-get "$_key" 2>/dev/null || true)"
-		# Permanently auto (2026-09-14, AMD R9 270X, two verbose-proven boots:
-		# auto = the standalone ES picks 640x480i *current on the CRT itself
-		# and native on LCD-only). Install owns the keys as auto; nothing
-		# rewrites them after install — any other value is drift (the
-		# unresolved videomode-deleter WATCH closes: the 480i value our
-		# install used to pin no longer exists to be deleted).
-		# Absent counts as owned too: absence and "auto" are the SAME branch
-		# in the stock launcher (no global setting or it's 'auto' ->
-		# re-initialize with --auto), so fresh-stock absent = the owned state.
-		if [ -z "$_val" ] || [ "$_val" = "$CRT_BOX_KEY_MODE" ]; then
-			ok "box key $_key=${_val:-absent}"
-		else
-			bad "box key $_key: expected absent or $CRT_BOX_KEY_MODE, got '$_val' (post-install rewrite — drift; re-run install.sh)"
-		fi
+		ok "box key $_key=${_val:-absent} (informational)"
 	done
+	_missing=""
+	for _key in es.resolution global.videomode global.videooutput splash.screen.resize global.videooutput2; do
+		[ -f "$PKG/backups/box-keys/$_key" ] || _missing="$_missing $_key"
+	done
+	[ -n "$_missing" ] \
+		&& bad "box-key backups missing:$_missing (uninstall cannot restore byte-exact)" \
+		|| ok "box-key backups present (uninstall can restore)"
 	_vo2="$(batocera-settings-get global.videooutput2 2>/dev/null || true)"
 	# GPU family, re-derived from the kernel's own boot lines (the same
 	# facts channel as 4b/4c): the generator writes videooutput2=none on
@@ -501,7 +529,7 @@ if [ "$PRESENT" -gt 0 ]; then
 	elif [ "$_vo2" = "none" ]; then
 		ok "box key global.videooutput2=none (stock second-screen opt-out on $_v_gpu)"
 	else
-		bad "box key global.videooutput2: expected none on $_v_gpu, got '${_vo2:-absent}' (stock would pick a backglass output onto the CRT; re-run install.sh)"
+		bad "box key global.videooutput2: expected none on $_v_gpu, got '${_vo2:-absent}' (stock would pick a backglass output onto the CRT; the BOOT generator writes it — reboot once after a fresh install)"
 	fi
 	for _key in es.resolution global.videomode global.videooutput splash.screen.resize global.videooutput2; do
 		if [ -f "$PKG/backups/box-keys/$_key" ]; then

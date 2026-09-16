@@ -51,12 +51,13 @@ The full, honest picture, because this manual tells you everything:
 - after a plug or unplug, the new arrangement is applied when you are
   back in the menu — your next game launch sees it, chooser included;
 - on the machines tested here — NVIDIA and AMD — plugging and
-  unplugging either screen is picked up automatically, in every
-  direction, with exactly one exception stated below;
-- the one exception: **unplugging the CRT on an AMD machine** is the
-  only event that hardware cannot capture on its own. For that single
-  case a connected controller carries the trigger: **Select + L1**
-  re-scans the connections and the change is applied. Everywhere else
+  unplugging either screen is picked up automatically, with exactly
+  one exception stated below;
+- the one exception: on the AMD machine's **analog port**, connecting
+  or disconnecting the CRT is the one event that hardware cannot
+  capture on its own. For that single case a connected controller
+  carries the trigger: **Select + L1** re-scans the connections and
+  the change is applied. Everywhere else
   the re-scan simply never needs to be used;
 - Intel hardware was last exercised on an older revision: until the
   re-test lands, no claim in either direction about its detection;
@@ -71,7 +72,7 @@ The full, honest picture, because this manual tells you everything:
 | --- | --- |
 | You plug the tube in between games | The desktop adapts; the next game launch offers the tube experience. |
 | You unplug the LCD | Same box, now a pure tube machine: no prompts, everything on the CRT. |
-| You unplug the CRT — on an AMD machine | The one manual case: press Select + L1 on a controller; the re-scan applies it. |
+| You plug or unplug the CRT — on the AMD machine's analog port | The one manual case: press Select + L1 on a controller; the re-scan applies it. |
 | A change looks ignored (any other case) | Reboot — always correct. |
 | It happens mid-game | Nothing — intentionally. The change is picked up once you are back in the menu. |
 

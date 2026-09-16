@@ -501,7 +501,22 @@ def _keypatch_key(line: str) -> str:
 def _filter_keypatch(keypatch: dict, system: str | None, block_type: dict | None,
                      emulator: str | None = None, core: str | None = None) -> dict:
     """Keep only the entries whose block matches this launch (global and
-    legacy-flat always; typed blocks on match — same rule as batocera)."""
+    legacy-flat always; typed blocks on match — same rule as batocera).
+
+    RGS-15KHZ-EXT (crash-clean restore, 2026-09-16): system None/"" is the
+    rollback / boot-recovery path (merge.py remove without a launch) — keep
+    EVERY entry, the same contract _filter_for_system documents for the
+    other sections. The ARCHIVE is the truth there: a key never applied to
+    a game has no archive and restore_keypatch skips it, so keeping
+    everything is safe (skip-if-no-prev), while filtering it out stranded
+    applied keys. Pre-fix the typed blocks ([emulator.*] / [core.*] /
+    [system.*]) never matched without a launch, so the boot crash-clean left
+    the [emulator.libretro] keypatch live: crt_switch_resolution="1" stayed
+    in retroarchcustom.cfg and an LCD-only libretro launch applied a 15 kHz
+    raster to the panel (black; measured 2026-09-16 R9 270X).
+    """
+    if not system:
+        return keypatch
     out: dict = {}
     for target, entries in keypatch.items():
         kept = [(b, ln) for b, ln in entries

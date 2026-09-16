@@ -21,8 +21,9 @@ measured — a glance is never a verdict.
 
 ## Measured on the tube (TESTED)
 
-The "settings" column is exactly what the tube profile declares for
-that system — nothing hidden, nothing more. Two shorthands:
+The "settings" column is a faithful summary of what the tube profile
+declares for that system; the profile folder itself is the complete
+source. Two shorthands:
 **common** = the every-launch base (480i desktop mode, smoothing off,
 shaders off, bezels off); **RA family** = the RetroArch family keys
 (the emulator switches the tube resolution itself, no super-resolutions,
@@ -38,7 +39,7 @@ per-system tuning at all — its result comes from the pipeline alone.
 | Game Boy Advance | Its native 240x160@60 is too rare a signal for a tube; runs fullscreen at an even 3x on a clean interlaced signal instead — authentic handheld colors | common + RA family + core-native aspect (ratio=core) | TESTED 2026-09-06 |
 | Naomi / Dreamcast / Atomiswave family | Native 640x480i arcade signal. Expect a brief re-sync in the first seconds of a Dreamcast-family launch (the core announces its display size after boot; the tube settles on the true native mode) — safe at arcade frequency the whole time | common + RA family + 640x480 internal render, anisotropic filtering off (Atomiswave: the resolution key only) | TESTED 2026-09-04 (Naomi); family extension proven 2026-09-07 |
 | Arcade — MAME (standalone and RetroArch core) | Each game gets its own board's native mode; measured Virtua Fighter at 693x520@57.52i and R-Type at 384x256@55.02, both full-bleed with the smallest text legible. The standalone path runs on **GroovyMAME**, an arcade binary **you procure** (never shipped — see install & updates). Audio stable on the current binary | common + stand-alone arcade redirection (switchres on, artwork crop, accelerated video) + authored ini files + the binary swap + the launcher's hardcoded audio override dropped | TESTED 2026-09-04, re-measured clean 2026-09-07 and 2026-09-10 |
-| Sega Model 2 (model2) | Native Model 2 raster at 693x520@57.52i, full-bleed, correct aspect; runs the RGS Model 2 emulator (the JammASD cabinet wiring talks straight to the board emulation) | common + native 1:1 render | TESTED 2026-09-10 (Daytona USA); re-verdicted on the stock raster channel 2026-09-13 — same native raster, full-bleed 99.8% measured |
+| Sega Model 2 (model2) | Native Model 2 raster at 693x520@57.52i, full-bleed, correct aspect; runs the RGS Model 2 emulator (the JammASD cabinet wiring talks straight to the board emulation) | common + native 1:1 render + the declared raster (693x520i.57.524160) | TESTED 2026-09-10 (Daytona USA); re-verdicted on the stock raster channel 2026-09-13 — same native raster, full-bleed 99.8% measured |
 | Arcade — Neo Geo / FBNeo | Native 320x240@60 progressive, fullscreen | common + RA family | TESTED 2026-09-06 |
 | Sega Saturn | Correct proportions at 660x224@59.83, with ~7% black bands top and bottom kept ON PURPOSE: stretching the signal to fill would trade correctness for vanity | common + RA family | TESTED 2026-09-06 |
 | Nintendo DS | Both screens stacked (Top/Bottom) at 661x496i filling the whole tube — owner-chosen after comparing side-by-side layout too (both work; the stacked one fills the glass) | common + RA family | TESTED 2026-09-06 |
@@ -48,7 +49,7 @@ per-system tuning at all — its result comes from the pipeline alone.
 | DOS | Signal follows the content's native mode; measured 320x200@65 | common + RA family | TESTED 2026-09-06 |
 | PS2 | 640x480i as designed, authentic hardware-style texture filtering, no fake scanlines. Attract-mode footage carries its own letterbox (the game's frame, not bars). Gameplay-HUD fill was waived on the test, noted honestly | common + vsync on, Vulkan backend, PS2-authentic texture filtering + dithering + mipmapping, 4:3 FMV ratio | TESTED-with-note 2026-09-07 |
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
-| BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only — including the shared arcade ini files, the binary swap and the audio-override drop, which live in the every-launch base | TESTED 2026-09-06 |
+| BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
 | Doom (PrBoom), Mr. Boom | Native 320x200, full HUD, all edges | common + RA family | TESTED 2026-09-06 |
 | Ports & tools (Od Commander, RetroTrivia, Prince of Music) | Run stock on the tube's 480i desktop signal, crisp | common only | TESTED 2026-09-06 |
 | Commander X16 (commanderx16) | The machine's boot screen fills the tube with pixel-crisp 1:1 text. The X16's native signal is 640x480@60 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive), so the tube shows the same untouched pixel grid **interlaced** at 640x480i 15.69kHz — no scaling, all 480 lines. The machine also has a 320x240@60 (40-column) mode that stays 15kHz-safe; not proven on the tube yet (needs a program that switches to it). Launching a .bas program from the list: the stock loader carried only the last of its two program files (the boot banner proved the emulator, mode and text rendering; the program quirk is upstream's) | common + native 1:1 rendering (the stock renderer's 2x upscale disabled) | TESTED-with-note 2026-09-10 |

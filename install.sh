@@ -44,8 +44,6 @@ UDEV_SRC="$REPO/src/engine/udev/99-crt-dual-hotplug.rules"
 UDEV_DST="${RGS15_UDEV:-/etc/udev/rules.d/99-crt-dual-hotplug.rules}"
 VNC1="${RGS15_VNC1:-/usr/bin/vnc}"
 VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
-CRT_BOOT_MODE="640x480i.60.00"
-CRT_PIN_MODE="max-640x480"
 LOG="${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}"
 MANIFEST="$PKG/overlay-manifest"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
@@ -294,7 +292,8 @@ else
 	echo "  service registration skipped (seam test)"
 fi
 
-# ── 11. Box keys (owned: set; splash trio: backup-only, generator-owned) ──
+# ── 11. Box keys (backup-only: the layer pins NO boot key; uninstall
+#        restores the recorded values byte-exact) ──
 BOX_KEYS_BACKUP="$PKG/backups/box-keys"
 if [ -z "${RGS15_SKIP_KEYS:-}" ]; then
 	mkdir -p "$BOX_KEYS_BACKUP"
@@ -308,21 +307,7 @@ if [ -z "${RGS15_SKIP_KEYS:-}" ]; then
 				printf '%s\n' "$_old" >"$_bak"
 			fi
 		fi
-		case "$_key" in
-		global.videooutput|splash.screen.resize|global.videooutput2)
-			echo "  box key $_key backup-only (backup: $(cat "$_bak"))"
-			continue
-			;;
-		esac
-		# global.videomode is a max-form PIN (gate passes, setMode no-ops on
-		# dual); es.resolution keeps the real boot mode name. See spec: all
-		# *.videomode keys are max-640x480 since 2026-09-06 (gate-dead
-		# specific forms error-noised every launch).
-		_val="$CRT_BOOT_MODE"
-		[ "$_key" = "global.videomode" ] && _val="$CRT_PIN_MODE"
-		batocera-settings-set "$_key" "$_val" >/dev/null 2>&1 \
-			|| fail "batocera-settings-set $_key failed"
-		echo "  box key $_key=$_val (backup: $(cat "$_bak"))"
+		echo "  box key $_key backup-only (backup: $(cat "$_bak"))"
 	done
 else
 	echo "  box keys skipped (seam test)"

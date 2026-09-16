@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-17 — after a hard stop, and settings that stay yours
+
+### Fixed
+- **A session that ends without a clean exit can no longer leave the
+  next start black.** If a game is killed by a power cut or a forced
+  stop, the layer now hands back every screen setting it borrowed on the
+  next boot — previously a following start on an LCD-only setup could
+  come up dark.
+
+### Changed
+- **The installer no longer writes screen settings of its own.** It
+  records the values your box uses (so the uninstall can hand them back
+  exactly) and leaves your own settings in charge — nothing was pinned,
+  so nothing needs reverting.
+
+### Improved
+- **The self-check now validates the profile folders on the box,
+  including the ones you write yourself.** A broken profile is a loud,
+  listed failure before it can affect a launch, and your own folders are
+  recognized as legitimate — never reported as drift.
+- **Clearer manual**: installing and the first start after it, the
+  remote-access server that ships with the layer, and the profiles you
+  maintain on the box.
+
 ## 2026-09-16 — measurement at your first game launch, native desktop always
 
 ### Fixed
@@ -17,28 +41,7 @@
   `rgs-15khz.dotclock_min=off` still disables the measuring; a manual
   number (e.g. `25`) still pins the value yourself.
 - **Your system's own clock configuration file is never touched.** The
-  remembered value lives only in the emulators' settings, so it cannot
-  leak into the desktop or other tools; the system file stays exactly
-  as shipped.
+  remembered value is kept by this layer and read when a game config is
+  written, so it cannot leak into the desktop or other tools; the
+  system file stays exactly as shipped.
 
-## 2026-09-14 — the lowest clock your chain can produce (dotclock decide)
-
-### Added
-- **The layer now measures your machine and steers the emulators
-  accordingly.** At the first boot it measures, with a handful of quick
-  mode changes on the tube, the lowest video clock your GPU + adapter
-  chain can actually produce, and remembers it. From then on, at every
-  boot, the emulators are asked for a game's native resolution only
-  when the chain can produce it; below that limit the picture is
-  widened instead — same game, full screen, never a black screen. This
-  protects consoles whose native modes need very low clocks (a class
-  that would otherwise come up dark on some hardware combinations).
-  The decision is persistent: it is re-taken only if the setting is
-  removed (or the layer re-installed, e.g. after a hardware change).
-- **One switch to keep the emulators' own behavior.** Setting
-  `rgs-15khz.dotclock_min=off` in `batocera.conf` leaves their settings
-  untouched and stops the measuring.
-
-### Removed
-- The old per-model clock whitelist: the on-box measurement replaces
-  tables — one source of truth, per machine, not per card family.

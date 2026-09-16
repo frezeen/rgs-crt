@@ -12,7 +12,7 @@ removes itself back to the exact stock state at any time.
 
 | | What you see on the screen |
 | --- | --- |
-| Native signals | A SNES game outputs a SNES signal, a Dreamcast game a 480i arcade signal, an arcade board its own native mode — crisp pixels, correct refresh, no stretch. Where a system's native signal is outside what a tube can show, it runs fullscreen at the best quality alternative instead, and the compatibility map says which is which. |
+| Native signals | A SNES game outputs a SNES signal, a Dreamcast game a 480i arcade signal, an arcade board its own native mode — crisp pixels and correct refresh. Where a system's native signal is outside what a tube can show, it runs fullscreen at the best quality alternative instead; for a few HD consoles that alternative is a deliberate full-bleed stretch, and the compatibility map marks exactly which systems those are. |
 | No fake CRT effects | Smoothing and scanline-style filters are switched off on the tube. The tube is the filter. |
 | The menu keeps working | Between games the desktop runs on the tube, on a connected LCD, or on both. Pick whichever you plugged in. |
 | It always gives things back | Every setting a game needed is reverted the moment the game exits. The desktop, the values, everything returns to what it was. |
@@ -30,8 +30,9 @@ Plugging or unplugging a screen while the machine runs is detected
 between games — never during one, because touching the display mid-game
 is the one thing that could disturb the tube. On the NVIDIA and AMD
 machines tested this is automatic in every direction with a single
-documented exception (CRT unplug on AMD, solved with one controller
-press — the setups page has the exact words). Rebooting is always the
+documented exception: on the AMD machine's analog port, plugging or
+unplugging the CRT is caught with one controller press — the setups
+page has the exact words. Rebooting is always the
 fresh, correct state. And a word of sense: this is a powerful, complex
 feature meant for real moments — wire the screens you want before you
 boot, and reach for the hot path when you genuinely need it, not as a
@@ -75,12 +76,13 @@ copy it to the box, extract, then from the extracted folder:
 
 ```
 ./install.sh      # onto a stock box only
-./verify.sh       # exit 0 = clean; the gate for everything else
 ./uninstall.sh    # back to exact stock
+./verify.sh       # exit 0 = clean; the gate for everything else
 ```
 
-After `install.sh`: connect the CRT and reboot once. The first tube
-session begins.
+After `install.sh`: connect the CRT and reboot once — the first boot
+completes one display setting; run `./verify.sh` after the reboot and
+expect green. The first tube session begins.
 
 Details — what the install owns, what an RGS update does to it, how the
 check tool decides green vs red: **[docs/install-and-updates.md](docs/install-and-updates.md)**
@@ -222,18 +224,21 @@ with the LCD and CRT plugged in the way you want reported:
    ```
 
 2. **One command, run from the folder you extracted this project
-   into:**
+   into (as root — over SSH you already are; without root the bundle
+   may miss system state):**
 
    ```
    ./report.sh
    ```
 
-   It collects everything we need in one pass: the engine diagnostic
-   snapshot (connectors, EDID, GPU, live mode timings), the gate's
-   verdict, every service/display/launch/boot log, the package state
-   and the kernel display lines — and zips it all. Deleted the folder
-   after installing? Re-download the ZIP: `report.sh` only reads, it
-   changes nothing.
+   It collects everything we need in one pass: a diagnostic snapshot of
+   the display (which screens are connected, what they report, the GPU,
+   live mode timings), the gate's verdict, every relevant log, the
+   installed state and the display lines from the system log — and zips
+   it all. Deleted the folder
+   after installing? Re-download the ZIP. `report.sh` writes only its
+   own report folder and zip; the snapshot inside it looks at the
+   display while gathering — nothing on the box is modified.
 
 3. **Send the printed `rgs-crt-report-….zip`.** Everything inside is
    complete by design — just add to your message which GPU you have,

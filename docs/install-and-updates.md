@@ -35,9 +35,11 @@ At install the system:
   stock behavior untouched wherever the layer is absent, the insurance
   copy makes the uninstall restore byte-exact, and the boot service
   re-applies the adjustment after every system update),
-- backs up the value of every setting it will own before setting it,
-- places its hook so it is consulted at every game start and stop, and
-  its boot service so it runs late, after RGS's own boot setup.
+- records your boot-display settings before touching anything (the layer
+  pins none of them — your box keeps its own values),
+- is consulted at every game start and stop, and its boot service —
+  order-independent against RGS's own boot setup by design, so neither
+  can wait for the other.
 
 When it finishes there is no automatic reboot: you connect the CRT,
 reboot once, and the first tube session begins.
@@ -60,10 +62,11 @@ Some GPU/adapter combinations cannot produce the very low video clocks
 that a few consoles' native resolutions need — asking for them shows a
 black screen instead of a game. At the **first game you launch on a CRT**
 the layer measures the real limit of your chain (a few quick mode changes
-on the tube, once, before the game starts) and from then on asks each
-emulator for the game's native resolution only when the chain can produce
-it; below the limit the picture is widened instead — same game, full
-screen, never black. The desktop (480i) never depends on this: it boots
+on the tube, once, before the game starts). On the RetroArch path it then
+asks for the game's native resolution only when the chain can produce it;
+below the limit the picture is widened instead — same game, full screen,
+never black. The standalone arcade path keeps its own authored settings
+and is not touched by the measurement. The desktop (480i) never depends on this: it boots
 the same on every machine. `rgs-15khz.dotclock_min=off` in `batocera.conf`
 keeps the emulators' own behavior and stops the measuring; a number
 (e.g. `rgs-15khz.dotclock_min=25`) pins the floor by hand.
@@ -83,9 +86,10 @@ display patch from the community project
 (GPL-2.0, credited below and in the main page). It fetches the ready-made
 patch for the exact system the box runs — **this requires the box to be
 on the network at install time**. If that is not possible, place the
-patch file yourself in `src/service/i915/binaries/` inside the project
-folder before installing; the verifier warns, without failing, while it
-is missing.
+patch file yourself — the verifier prints the exact name it expects
+(`i915-patched-<your-kernel>.ko`) and the folder
+(`src/service/i915/binaries/`, inside the project folder) — before
+installing; it warns, without failing, while the file is missing.
 
 The patch survives an RGS update the same way the rest of the layer's
 boot work does: it is checked against the running system at every boot,
@@ -128,8 +132,9 @@ mixed between them fails with a listing:
 
 - **INSTALLED** — every piece the install placed is present and
   byte-identical to what it should be, the profiles are valid, the
-  settings the layer owns are set, the recorded RGS version still
-  matches the live one, and no trace of any game session is stranded.
+  recorded setting backups are present (the layer pins no boot
+  setting), the recorded RGS version still matches the live one, and no
+  trace of any game session is stranded.
 - **STOCK** — nothing of the layer is left (before any install, or
   after a complete uninstall).
 
@@ -139,7 +144,8 @@ ones and where they go, so you can test everything that does not need
 them.
 
 Run it after install, after uninstall, and whenever something looks
-wrong. It is also what the check tool and the update self-check agree
+wrong. One timing note: on an AMD machine, run it **after the first
+reboot** — the first boot completes one display setting. It is also what the check tool and the update self-check agree
 with — a green `verify.sh` is the definition of "this system is fine".
 
 When something needs reporting to the developers, `./report.sh` (the
@@ -182,9 +188,9 @@ the layer either re-qualifies against it or gets out of the way.
 ## The check tool
 
 An entry in the "Batocera config" menu (the same list as RGS's own
-tools) shows the verdict for every active screen:
+tools) shows one verdict for the box:
 
-| Screen | Meaning | Your options |
+| Verdict | Meaning | Your options |
 | --- | --- | --- |
 | **GREEN** | Everything is aligned with what was installed. | Nothing to do. |
 | **RED** | An RGS update changed the system and the self-check could not vouch for it. | ESC — keep playing, games run exactly like stock while held. ENTER — uninstall the layer and reboot: pure stock RGS, one press. |
@@ -194,6 +200,18 @@ the very place where RGS's own update scripts live in the menu — is
 designed to fetch a new version of this layer and apply it as a clean
 uninstall + install of the fresh package, one press, same guarantee.
 Deliberately built as a slot for that future; not wired today.
+
+## Remote access (VNC)
+
+The layer ships a VNC server (x11vnc) for test and tuning sessions. It
+starts at boot and serves port **5900 without a password** — a
+documented limitation for local-network use. Handy to watch the
+machine's output from another screen; keep the box on a trusted network,
+or stop it when you do not need it:
+
+```
+batocera-services stop zz_crt_dual_vnc
+```
 
 ## Known noise (harmless, ours, by design)
 

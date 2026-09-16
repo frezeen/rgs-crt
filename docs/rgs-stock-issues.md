@@ -55,8 +55,9 @@ accusation against the platform this project is a gift to.
 - Demonstrated alternative while upstream decides: the mechanism this
   project uses for exactly this case — a session-scoped setting
   (`mame.integerscale = 0`, applied when the game starts, given back
-  when it exits, shipped as a commented one-liner in the stock-compat
-  profile so users can opt in without editing anything). Measured
+  when it exits, shipped commented in the stock-compat profile (a
+  block header plus the setting) so users can opt in without editing
+  anything). Measured
   effect: portrait art self-fills, 2767/2835 landscape artworks fill
   their holes exactly under the 4:3 full fit, the remaining 68 keep
   reduced side bars only — never worse than the integer-scaled state.

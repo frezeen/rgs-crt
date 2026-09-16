@@ -177,9 +177,9 @@ or places it at the nearest safe refresh by its own rules. The launcher
 switches to it on its own, computed with the same safety rules the rest
 of the layer uses, and returns to the desktop signal at exit; a refusal
 leaves the launch on the standard signal instead of breaking it.
-Advanced: the shipped tube profile does not need it (it lets each
-emulator choose its native mode) — reach for it only for a system you
-have measured and know better than the defaults.
+Advanced: the shipped tube profile uses this key for the systems it
+has measured (the compatibility map shows which ones) — reach for it
+for another system only after you have measured it yourself.
 
 ## Recipes that do the rounds
 
@@ -197,8 +197,10 @@ the keypatch (2) — nothing on disk survives the session.
 
 **"Adopt the one-line bezel fix":** the stock-compat profile ships a
 commented corrective (the black-border case described in
-[Stock RGS notes](rgs-stock-issues.md) §2) — uncomment two lines, run
-`./verify.sh`, done. That is profile maintenance in one move.
+[Stock RGS notes](rgs-stock-issues.md) §2). Copy that profile folder
+to a name of your own, uncomment the two lines there, run `./verify.sh`
+(your folder is validated, never drift) — done. That is profile
+maintenance in one move.
 
 ## Maintenance rules that keep you safe
 
