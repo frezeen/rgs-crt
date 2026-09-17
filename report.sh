@@ -27,6 +27,12 @@
 #                      layer must hand back), held profiles, $PKG/logs
 #   engine-tmp/        /tmp/crt-dual* markers (engine-owned, read here
 #                      for consultation only — never written)
+#   boot/              /boot CRT pieces (Intel i915 480i patch): the hook
+#                      copy (written by install.sh + zz_rgs_15khz) + a
+#                      listing with sha256 + vermagic of i915-patched.ko
+#                      (the binary itself is NOT zipped — MBs) + the
+#                      tmpfs swap log (written by the /boot hook)
+#   xorg/              complete X server log (stock, current boot)
 #   dmesg-display.txt  kernel display lines (drm/gpu drivers), bounded
 #   metadata.txt       host, dates, free space, our version marker
 #
@@ -90,6 +96,36 @@ for _m in /tmp/crt-dual /tmp/crt-dual-mode /tmp/crt-dual*; do
 		find "$_m" -maxdepth 1 -type f -exec cp -a {} "$STAGE/engine-tmp/" \; 2>/dev/null || true
 	fi
 done
+
+# 5b. /boot CRT pieces (Intel i915 480i patch) + the swap-hook log. The
+#     2026-09-12 tester bundle left these out, which blocked the
+#     confirmation that the module was ever deployed (writers: install.sh
+#     + zz_rgs_15khz i915-patch for both /boot files; the boot hook writes
+#     the tmpfs swap log). The module binary is NOT zipped (MBs): listing
+#     + sha256 + vermagic answer the deployment question.
+mkdir -p "$STAGE/boot"
+{
+	echo "== /boot CRT pieces (rgs-15khz layer) =="
+	for _f in /boot/boot-custom.sh /boot/i915-patched.ko; do
+		if [ -e "$_f" ]; then
+			ls -l "$_f" 2>&1
+			sha256sum "$_f" 2>/dev/null || true
+		else
+			echo "$_f: ABSENT"
+		fi
+	done
+	if [ -f /boot/i915-patched.ko ]; then
+		echo "module vermagic: $(modinfo -F vermagic /boot/i915-patched.ko 2>/dev/null || echo unreadable)"
+	fi
+	echo "running kernel:  $(uname -r)"
+} >"$STAGE/boot/listing.txt"
+[ -f /boot/boot-custom.sh ] && cp -a /boot/boot-custom.sh "$STAGE/boot/boot-custom.sh" 2>/dev/null || true
+[ -f /tmp/i915-boot-swap.log ] && cp -a /tmp/i915-boot-swap.log "$STAGE/boot/i915-boot-swap.log" 2>/dev/null || true
+
+# 5c. Complete X server log (stock; diag-dump keeps only its error tail).
+#     Absent/unreadable is benign (same contract as the log copies above).
+mkdir -p "$STAGE/xorg"
+[ -f /var/log/Xorg.0.log ] && cp -a /var/log/Xorg.0.log "$STAGE/xorg/Xorg.0.log" 2>/dev/null || true
 
 # 6. Kernel display truth, bounded.
 dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \

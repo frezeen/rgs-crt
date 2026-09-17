@@ -545,7 +545,7 @@ amdgpu_legacy_decide() {
 # so a later boot redeploys it without re-downloading.
 i915_patch_decide() {
 	local _kernel _dmesg_ok _repo _hook_src _hook_dst _mod_dst _mod_name
-	local _hook_ok _mod_src _vm _want_fetch
+	local _hook_ok _mod_src _vm _want_fetch _dmesg_txt
 	_kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
 	_hook_dst="${RGS15_BOOT_HOOK:-/boot/boot-custom.sh}"
 	_mod_dst="${RGS15_BOOT_MOD:-/boot/i915-patched.ko}"
@@ -557,11 +557,21 @@ i915_patch_decide() {
 		_repo="$(cat "$PKG/install-source" 2>/dev/null || true)"
 	fi
 	_hook_src="$_repo/src/service/i915/boot-custom.sh"
+	# Read the boot log ONCE and match with case — never `dmesg | grep -q`
+	# under pipefail: grep -q exits at the first match, a >64 KiB dmesg
+	# dies on SIGPIPE, the pipeline reports 141 and the &&/|| idiom reads
+	# "no i915 this boot" on an Intel box (tester HD 530 bundle,
+	# 2026-09-12: the module was removed and never re-deployed -> black
+	# tube; seam test_intel_i915_patch case 9).
 	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
-		grep -q "Initialized i915" "$RGS15_DMESG_SRC" 2>/dev/null && _dmesg_ok=1 || _dmesg_ok=0
+		_dmesg_txt="$(cat "$RGS15_DMESG_SRC" 2>/dev/null || true)"
 	else
-		dmesg 2>/dev/null | grep -q "Initialized i915" && _dmesg_ok=1 || _dmesg_ok=0
+		_dmesg_txt="$(dmesg 2>/dev/null || true)"
 	fi
+	case "$_dmesg_txt" in
+	*"Initialized i915"*) _dmesg_ok=1 ;;
+	*) _dmesg_ok=0 ;;
+	esac
 	if [ "$_dmesg_ok" = "0" ]; then
 		# not an Intel-iGPU boot: the pieces must NOT linger (leftover hook
 		# would run a stale module check forever). OUR module is removed;

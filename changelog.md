@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-17 — Intel machines: the 480i patch is applied and kept; reports show its state
+
+### Fixed
+- **On Intel gen9 machines the 480i display patch could be skipped — or
+  even removed at the next start — because the machine was misread as
+  non-Intel, leaving both screens dark.** The check now reads the boot
+  information reliably, so an Intel box is recognized as one: the patch
+  is placed at install time (downloaded automatically when the box is
+  online) and stays in place.
+
+### Improved
+- **The problem report now also shows the installed state of that
+  display patch — present or not, and whether it matches the running
+  system — together with the complete graphics log.** An Intel problem
+  can now be closed with a single report instead of follow-up
+  questions.
+
 ## 2026-09-17 — after a hard stop, and settings that stay yours
 
 ### Fixed

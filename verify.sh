@@ -288,11 +288,21 @@ fi
 if [ "$PRESENT" -gt 0 ]; then
 	_v_i915="${RGS15_I915_PRESENT:-}"
 	if [ -z "$_v_i915" ]; then
+		# Read the boot log ONCE and match with case — never `dmesg |
+		# grep -q` under pipefail: grep -q exits at the first match, a
+		# >64 KiB dmesg dies on SIGPIPE, the pipeline reports 141 and the
+		# &&/|| idiom reads "no i915" while the boot line IS present
+		# (tester Intel HD 530 bundle, 2026-09-12: verify said "non-Intel
+		# GPU"). Same shape as 4b above; seam test_intel_i915_patch case 9.
 		if [ -n "${RGS15_DMESG_SRC:-}" ]; then
-			grep -q "Initialized i915" "$RGS15_DMESG_SRC" 2>/dev/null && _v_i915=1 || _v_i915=0
+			_v_dmesg="$(cat "$RGS15_DMESG_SRC" 2>/dev/null || true)"
 		else
-			dmesg 2>/dev/null | grep -q "Initialized i915" && _v_i915=1 || _v_i915=0
+			_v_dmesg="$(dmesg 2>/dev/null || true)"
 		fi
+		case "$_v_dmesg" in
+		*"Initialized i915"*) _v_i915=1 ;;
+		*) _v_i915=0 ;;
+		esac
 	fi
 	BOOT_HOOK="${RGS15_BOOT_HOOK:-/boot/boot-custom.sh}"
 	BOOT_MOD="${RGS15_BOOT_MOD:-/boot/i915-patched.ko}"
