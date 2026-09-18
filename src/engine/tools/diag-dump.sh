@@ -14,14 +14,12 @@
 #
 # Output: stdout, tabulated sections. Share the full file.
 
+set -u
+
 export DISPLAY="${DISPLAY:-:0}"
-# RGS-15KHZ-EXT (2026-09-10, tester-report H9 — backport entry in STATE):
-# the vendored tree is FLATTENED (src/engine/tools + src/engine/lib), so
-# the engine root is ONE level up from tools/ and the libs sit at lib/
-# (the pre-vendor engine repo had src/tools + src/lib as siblings —
-# upstream hunk: PACKAGE_DIR="$(dirname)/../.." + "$PACKAGE_DIR/src/lib/").
-# Upstream fix goes here first at the next re-vendor; do not rename paths
-# beyond the marked hunks.
+# RGS-15KHZ-EXT (2026-09-10, tester-report H9): the tree is FLATTENED
+# (src/engine/tools + src/engine/lib), so the engine root is ONE level up
+# from tools/ and the libs sit at lib/.
 PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 sep() {
@@ -34,26 +32,32 @@ echo "  CRT-DUAL: $(cat /userdata/system/crt-dual.version 2>/dev/null || echo 'u
 echo "  Date:     $(date '+%F %T')"
 
 sep "GPU (full lspci lines)"
-lspci 2>/dev/null | grep -iE "VGA|3D|Display controller" | sed 's/^/  /' || echo "  lspci not available"
+if command -v lspci >/dev/null 2>&1; then
+	lspci 2>/dev/null | grep -iE "VGA|3D|Display controller" | sed 's/^/  /'
+else
+	echo "  lspci not available"
+fi
 if [ -r "$PACKAGE_DIR/lib/gpu-lib.sh" ]; then
 	source "$PACKAGE_DIR/lib/gpu-lib.sh" 2>/dev/null
 fi
 if command -v detect_gpu >/dev/null 2>&1; then
 	detect_gpu 2>/dev/null
-	echo "  GPU_VENDOR=$GPU_VENDOR  GPU_MODEL=$GPU_MODEL"
+	echo "  GPU_VENDOR=${GPU_VENDOR:-unknown}  GPU_MODEL=${GPU_MODEL:-unknown}"
 else
 	echo "  gpu-lib.sh not available"
 fi
 
 sep "XORG (recent errors)"
 if [ -r /var/log/Xorg.0.log ]; then
-	grep -iE "\(EE\)|error|fail" /var/log/Xorg.0.log 2>/dev/null | tail -15 | sed 's/^/  /' || echo "  no errors found"
+	_xerr=$(grep -iE "\(EE\)|error|fail" /var/log/Xorg.0.log 2>/dev/null | tail -15)
+	[ -n "$_xerr" ] && printf '%s\n' "$_xerr" | sed 's/^/  /' || echo "  no errors found"
 else
 	echo "  /var/log/Xorg.0.log not present"
 fi
 
 sep "XRANDR (FULL — all outputs, disconnected included)"
-xrandr --current 2>/dev/null | sed 's/^/  /' || echo "  xrandr not available (X down or wrong DISPLAY)"
+_xr=$(xrandr --current 2>/dev/null) || true
+[ -n "$_xr" ] && printf '%s\n' "$_xr" | sed 's/^/  /' || echo "  xrandr not available (X down or wrong DISPLAY)"
 
 sep "EDID PER OUTPUT (sysfs on amd/intel; xrandr --prop on nvidia)"
 # --prop is GLITCH-class (force re-probe, measured 2026-08-12) and it
@@ -61,7 +65,8 @@ sep "EDID PER OUTPUT (sysfs on amd/intel; xrandr --prop on nvidia)"
 # verified visually at boot). On amd/intel the sysfs edid is the same DDC
 # block, glitch-free; --prop is only needed on nvidia (sysfs edid 0 bytes).
 if [ "${GPU_VENDOR:-}" != "amd" ] && [ "${GPU_VENDOR:-}" != "intel" ]; then
-	xrandr --prop 2>/dev/null | grep -iE "^[A-Za-z0-9-]+ (connected|disconnected)|EDID:" | sed 's/^/  /' || echo "  no EDID exposed"
+	_prop=$(xrandr --prop 2>/dev/null | grep -iE "^[A-Za-z0-9-]+ (connected|disconnected)|EDID:") || true
+	[ -n "$_prop" ] && printf '%s\n' "$_prop" | sed 's/^/  /' || echo "  no EDID exposed"
 else
 	for _e in /sys/class/drm/card*/edid; do
 		[ -s "$_e" ] && echo "  $(basename "$(dirname "$_e")"): EDID $(wc -c <"$_e") bytes (sysfs)"
@@ -103,7 +108,8 @@ else
 fi
 
 sep "crt-dual.* KEYS (batocera.conf)"
-grep -E "^crt-dual\." /userdata/system/batocera.conf 2>/dev/null | sed 's/^/  /' || echo "  no crt-dual.* keys"
+_cfg=$(grep -E "^crt-dual\." /userdata/system/batocera.conf 2>/dev/null) || true
+[ -n "$_cfg" ] && printf '%s\n' "$_cfg" | sed 's/^/  /' || echo "  no crt-dual.* keys"
 
 sep "MODE FILE (/tmp/crt-dual-mode)"
 if [ -f /tmp/crt-dual-mode ]; then

@@ -7,7 +7,7 @@
 # Centralizes video output classification (by CONNECTOR TYPE, never by port
 # name) and the runtime dual-output layout. Single source shared by:
 # - crt-x11-generator.sh  (per-output mapping in the X config, 99-crt.conf)
-# - zz_crt_dual       (runtime layout at boot, apply_dual_layout)
+# - zz_crt_dual       (runtime layout at boot, layout_apply_if_changed)
 #
 # Exported variables (after detect_outputs):
 # CRT_OUTS            — confirmed analog CRT outputs (connected, no EDID)
@@ -22,7 +22,7 @@
 # digital connected -> LCD | analog + EDID -> LCD | analog connected
 # without EDID -> CRT | analog disconnected -> CRT_PRESUMED (test = crt_probe).
 #
-# Prerequisite: detect_gpu (gpu-lib.sh) must have run before apply_dual_layout.
+# Prerequisite: detect_gpu (gpu-lib.sh) must have run before layout_apply_if_changed.
 #
 # Shell contract: this library is written to be safe under `set -u` and
 # `set -o pipefail` (every possibly-unset variable has an explicit default,
@@ -34,7 +34,7 @@
 # - NEVER `--auto` on the CRT. The DP->VGA converter's fake EDID advertises
 # VESA 31kHz modes (640x480@59.94 preferred); --auto would pick it and
 # put the tube out of lock (risk of damage). 15kHz modes are set by name
-# only (_crt_set_15khz_direct).
+# only (src/owner/sr-owner.sh _crt_set_15khz_direct).
 # - 60.00 vs 59.94 matters: the refresh field distinguishes OUR 480i
 # (60.00) from the VESA EDID 640x480@59.94 (31kHz). layout-watch uses it
 # to detect a gameStop collision and restore the desktop mode.
@@ -84,7 +84,7 @@ CRT_DUAL_SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
 # pure-X, AMD/Intel are sysfs-truth families with their documented
 # quirks; generic.sh = conservative fallback (pre-detection calls).
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# v2 slim: detection pure helpers in display-detect.sh (T15.1)
+# detection pure helpers live in display-detect.sh
 [ -r "$LIB_DIR/display-detect.sh" ] && source "$LIB_DIR/display-detect.sh" 2>/dev/null || true
 GPU_ADAPTER_FILE=""
 _gpu_adapter() { # source the family adapter exactly once per process
@@ -175,7 +175,7 @@ _desktop_mode_spec() {
 	# time (universal-cross-gpu §3). One spec source for every apply path.
 	local _dn _r
 	_dn=$(_desktop_mode_name) || return 1
-	_r=$(grep -E '^crt-dual\.refresh[[:space:]]*=' /userdata/system/batocera.conf 2>/dev/null | head -1 | sed 's/.*=//' | tr -d '[:space:]')
+	_r=$(grep -E '^crt-dual\.refresh[[:space:]]*=' "$CRT_DUAL_BATOCERA_CONF" 2>/dev/null | tail -1 | sed 's/.*=//' | tr -d '[:space:]')
 	[ -z "$_r" ] && _r=60
 	echo "$_dn $_r"
 }
@@ -195,27 +195,30 @@ _desktop_mode_spec() {
 # (watcher, service, selector, diag).
 mkdir -p "${CRT_DUAL_STATE_DIR}" 2>/dev/null || true # best-effort; /tmp may be read-only in exotic setups
 
-# ── Timing constants (named — the numbers measure LATENCY/DEBOUNCE on
+# batocera.conf path (test seam: point it at a fixture; live default).
+# NOTE: CRT_DUAL_CONF is the X11 generator's OUTPUT path — never reuse it.
+: "${CRT_DUAL_BATOCERA_CONF:=/userdata/system/batocera.conf}"
+
+# ── Timing constant (named — the number measures LATENCY/DEBOUNCE on
 # dce_v6's broken analog path, not performance: the board has no analog
 # HPD (shared pin), a driver poll ~10 min late, a load-sense that can
 # flake, and a latch that accepts modesets into an empty port. The
-# defensive values are WHY the code can read as "over-fitted to AMD" —
-# they ARE: dce_v6 is the only GPU whose analog path needs this; the
-# mechanism they protect (kernel-truth + live-evidence) is universal.
-# Re-verify on the real hardware before changing any. ──
-CRT_VERIFY_ATTEMPTS=2        # _crt_set_15khz_direct: outer set+verify rounds
-CRT_VERIFY_RETRIES=10        # per attempt: mode-reads apart (NVIDIA async modesets settle <1s)
-CRT_VERIFY_POLL_SEC=0.5      # gap between verify reads (--current, glitch-free)
+# defensive value is WHY the code can read as "over-fitted to AMD" —
+# it IS: dce_v6 is the only GPU whose analog path needs this; the
+# mechanism it protects (kernel-truth + live-evidence) is universal.
+# Re-verify on the real hardware before changing it. ──
 DEMOTE_DEBOUNCE_SEC=1        # demote debounce: two disconnected reads apart (probe-race)
-export SYSFS_CONFIRM_SEC=0.5 # layout-watch hotplug: flip-confirm re-read — exported: consumed cross-file by the watcher (sources this lib)
 
 # Explicit override: crt-dual.analog_lcd=1 in batocera.conf -> analog ports
 # (VGA/DVI-I) are treated as LCD. Escape hatch for an LCD on VGA at pre-X
 # boot, where EDID is unreadable (NVIDIA sysfs = 0 bytes) and 99-crt.conf
 # (HorizSync 15-17) would reject the LCD's EDID modes.
 _crt_dual_analog_lcd() {
-	[ -f /userdata/system/batocera.conf ] || return 1
-	grep -qE "^crt-dual\.analog_lcd[[:space:]]*=[[:space:]]*1([[:space:]]|$)" /userdata/system/batocera.conf 2>/dev/null
+	local _v
+	[ -f "$CRT_DUAL_BATOCERA_CONF" ] || return 1
+	# The LAST occurrence is the effective value (batocera-settings APPENDS).
+	_v=$(grep -E "^crt-dual\.analog_lcd[[:space:]]*=" "$CRT_DUAL_BATOCERA_CONF" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "[:space:]')
+	[ "$_v" = "1" ]
 }
 
 # Explicit override: crt-dual.crt_output=<port> in batocera.conf -> that
@@ -226,9 +229,10 @@ _crt_dual_analog_lcd() {
 # CRT_DUAL_CRT_OUTPUT = port (or empty). Not in CRT_KEYS -> persists.
 _crt_dual_crt_output() {
 	CRT_DUAL_CRT_OUTPUT=""
-	[ -f /userdata/system/batocera.conf ] || return 1
+	[ -f "$CRT_DUAL_BATOCERA_CONF" ] || return 1
 	local v
-	v=$(grep -E "^crt-dual\.crt_output[[:space:]]*=" /userdata/system/batocera.conf 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' "')
+	# The LAST occurrence is the effective value (batocera-settings APPENDS).
+	v=$(grep -E "^crt-dual\.crt_output[[:space:]]*=" "$CRT_DUAL_BATOCERA_CONF" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' "')
 	[ -n "$v" ] || return 1
 	CRT_DUAL_CRT_OUTPUT="$v"
 	return 0
@@ -557,46 +561,7 @@ _sysfp_raw() {
 	echo "$_out" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/^ //'
 }
 
-# Analog demote truth with a probe-race debounce. The driver's own
-# re-probe (forced by the hotplug udevadm trigger) can present a transient
-# 'connected' right after a real unplug — verified 2026-08-12 on this box:
-# the settle re-classify 2s after the flip saw the sysfs flapping and
-# skipped the demote, leaving the LCD clamped at the dual 640x480. The
-# demote needs DISCONNECTED on two reads ~1s apart; the extra second is
-# paid only on the demote path (first read must already be disconnected).
-# Full sysfs connector-status fingerprint ("card0-DVI-I-1:connected
-# card0-HDMI-A-1:connected ...") — the watcher's hotplug change signal
-# and the fixed-cadence probe bookkeeping (layout-fp-sysfs). Single
-# single source for the fp read (no duplicated loop). Reads via
-# the CRT_DUAL_SYSFS test seam (default /sys/class/drm).
-_sysfs_fp() {
-	local _f _fp="" _crt_out _lcd_out
-	_crt_out=$(sed -n 's/^CRT_OUT=//p' "$CRT_DUAL_STATE_DIR/detect-state" 2>/dev/null | head -1 | awk '{print $1}')
-	_lcd_out=$(sed -n 's/^LCD_OUT=//p' "$CRT_DUAL_STATE_DIR/detect-state" 2>/dev/null | head -1 | awk '{print $1}')
-	for _f in "$CRT_DUAL_SYSFS"/card*-*/status; do
-		[ -f "$_f" ] || continue
-		if [ -n "$_crt_out" ] && [ -n "$_lcd_out" ]; then
-			# dual (CRT+LCD lit) → watch digital only (analog DVI-I never flips without probe, so unplug does nothing → manual trigger)
-			_drm=$(basename "$(dirname "$_f")")
-			_drm=${_drm#card*-}
-			_x=$(_drm_to_x "$_drm" 2>/dev/null) || continue
-			if _output_is_analog "$_x" 2>/dev/null; then
-				continue
-			fi
-		fi
-		_fp="$_fp $(basename "$(dirname "$_f")"):$(cat "$_f" 2>/dev/null):$(wc -c <"$(dirname "$_f")/edid" 2>/dev/null | tr -d ' '):$(cat "$(dirname "$_f")/enabled" 2>/dev/null | tr -d ' ')"
-	done
-	echo "$_fp"
-}
-
 # (moved to the family adapters: src/lib/gpu/*.sh — _impl_fingerprint)
-
-# Dot clock (MHz) of the active mode, VERBOSE truth — the compact query
-# has no timings, and the driver's synthesized modes share the NAME and
-# the ~refresh (synthesized "640x480" 25.175MHz @59.94 vs our "640x480i"
-# 13.038MHz @60.00, GTX 970 2026-08-10 — xrandr --rate 60 tolerance
-# matches 59.94). Our mode name is unique; the apply's verify loop
-# checks the active mode NAME from --current (see _crt_set_15khz_direct).
 
 # Active mode of an X output from xrandr --current (glitch-free: the
 # old --query forced a connector re-probe and blipped the dce_v6 tube,
@@ -677,19 +642,12 @@ crt_probe() {
 	fi
 	return 0
 }
-# Direct version for dual output: activates 640x480 (480i) on $target.
-# Needed because batocera-resolution does not accept a target output and
-# picks the first connected one — in dual mode after LCD gaming, the first
-# connected output is the LCD (the only one on).
-# Preference to the already-attached mode (from 99-crt.conf): ONE modeline.
-# Runtime newmode ONLY as fallback (same name, same system ini
-# -> same timings as the X11 conf).
 # ──────────────────────────────────────────────
-# _switchres_api_path — THE one resolver for the ctypes bridge path
-# (single source). Env override CRT_DUAL_API first (test
-# seam), package-relative layout second (src/lib -> ../api).
+# _switchres_api_path — resolved in src/owner/sr-owner.sh (THE one
+# resolver: env override CRT_DUAL_API first, package-relative second);
+# sr-owner sources this lib before any inject call.
 # ──────────────────────────────────────────────
 
-# v2 PURE: application moved to SR-OWNER (src/owner/sr-owner.sh, A letterale, 1 cervello = 1 file).
-# This lib is DYNAMIC EDGE only — detection cascade + pure helpers (charter §1).
-# Ownership of application is SR-OWNER — no sourcing here (tests that need apply source sr-owner.sh directly).
+# DYNAMIC EDGE: this lib is the detection cascade + pure helpers; mode
+# application is owned by SR-OWNER (src/owner/sr-owner.sh, 1 cervello = 1 file).
+# No sourcing here (tests that need apply source sr-owner.sh directly).

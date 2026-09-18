@@ -2,19 +2,16 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
 # Part of crt-dual — https://github.com/frezeen
-# layout-watch.sh — CRT-DUAL thin watcher (v2, T14)
+# layout-watch.sh — CRT-DUAL thin watcher
 #
 # THIN ARBITER: every wake-up source is a dumb bell; the single decision
-# is delegated to SR-OWNER via want-file+flock (ADR 001 A, charter §1-§4).
-# Deleted: state machine ~400 lines (light-retry/restore/pending-fix),
-# fingerprint bookkeeping, separate udev actor merged. Owner now owns
-# mode generation + application (display-lib converge-or-apply with
-# verification and primary/ES handover, T13.1). This file only emits
-# requests over the IPC channel — zero direct xrandr writes.
+# is delegated to SR-OWNER via want-file+flock (ADR 001 A). This file
+# only emits requests over the IPC channel — zero direct xrandr writes;
+# the owner carries mode generation, application and verification.
 #
 # Emitters (charter §2, all file/process reads, zero display contact in
 # steady state except the 2s X poll on NVIDIA — glitch-free there):
-#   sysfs flip (_sysfs_fp), X state (_xrandr_query_all), udev-poke,
+#   sysfs flip (_sysfp_raw), X state (NVIDIA only), udev-poke,
 #   manual trigger, desktop-mode change, ES pid change, game-guard clear,
 #   boot first pass.
 #
@@ -37,12 +34,12 @@
 #   $CRT_DUAL_STATE_DIR/probe-ok        crt_probe (via owner) writes+drops; detect_outputs reads
 #   $CRT_DUAL_STATE_DIR/crt-desktop-mode _save_crt_desktop_mode (via owner) writes; watcher reads
 #   $CRT_DUAL_STATE_DIR/layout-fp       owner (layout_apply_if_changed) writes (debug)
-#   $CRT_DUAL_STATE_DIR/layout-fp-sysfs watcher writes+reads (flip detection, kept for debug)
-#   $CRT_DUAL_STATE_DIR/hotplug-trigger hotplug.sh writes; watcher consumes (then udevadm trigger for AMD dce_v6)
+#   $CRT_DUAL_STATE_DIR/hotplug-trigger hotplug.sh + gamepad-reprobe.py write; watcher consumes (then udevadm trigger for AMD dce_v6)
 #   $CRT_DUAL_STATE_DIR/udev-poke       udev rule writes; watcher consumes (mute wake-up)
 #   $CRT_DUAL_STATE_DIR/want            watcher/game clients write; owner reads
 #   $CRT_DUAL_STATE_DIR/want.lock       flock target for owner IPC
 #   $CRT_DUAL_STATE_DIR/layout.lock     flock target held by owner apply
+#   $CRT_DUAL_STATE_DIR/gpu-is-amd      xrandr-shared _xrandr_is_amd writes (per-boot family cache); wrappers read
 set -uo pipefail
 export DISPLAY="${DISPLAY:-:0}"
 : "${CRT_DUAL_STATE_DIR:=/tmp/crt-dual}"
@@ -56,7 +53,7 @@ MANUAL_HOTPLUG_FILE="${CRT_DUAL_STATE_DIR}/hotplug-trigger"
 PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 log() { echo "WATCH-THIN [$(date +%H:%M:%S.%3N)]: $*" | tee -a "$LOG" 2>/dev/null || true; }
-# libs for adapter trampolines (_sysfs_fp, _xrandr_query_all if available)
+# libs for the adapter trampolines used below (with inline fallbacks if absent)
 for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh" "$PKG_ROOT/src/lib/display-lib.sh" "$(dirname "$0")/../lib/gpu-lib.sh" "$(dirname "$0")/../lib/display-lib.sh"; do [ -r "$_lib" ] && source "$_lib" 2>/dev/null || true; done
 command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true
 _request_owner() {
@@ -64,7 +61,7 @@ _request_owner() {
 	printf '%s\n' "dual" >"$WANT_FILE" 2>/dev/null || true
 	# One path only: busy lock = NOT converged = retry (the old unlocked
 	# `|| bash sr-owner` fallback was a double-writer behind flock, and
-	# its trailing `|| true` pinned rc=0 so nothing ever retried — the
+	# its trailing `|| true` forced rc=0 so nothing ever retried — the
 	# silent-swallow that ate the 2026-09-01 boot failure).
 # Settle window (2026-09-03, AMD CRT-replug): retry-on-rc covers a FAILED
 # apply, not a CONVERGED one that stock breaks afterwards (standalone
@@ -72,7 +69,7 @@ _request_owner() {
 # `_settle_polls` re-probes read-only for 3 polls after every request.
 	flock -n "$WANT_LOCK" bash "$PKG_ROOT/src/owner/sr-owner.sh" --apply
 }
-log "watcher-thin started (v2, owner stateless, want-file+flock) — POLL $POLL_SEC sec gpu=$GPU_VENDOR"
+log "watcher-thin started (owner stateless, want-file+flock) — POLL $POLL_SEC sec gpu=$GPU_VENDOR"
 _first_pass=1
 _pending_retry=0
 _settle_polls=0

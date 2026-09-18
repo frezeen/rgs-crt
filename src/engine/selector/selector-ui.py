@@ -36,7 +36,6 @@ Exit codes: 0 with the chosen profile name on stdout (or the default),
 """
 import contextlib
 import os
-import re
 import sys
 
 # pygame prints its support banner to STDOUT on import unless this env
@@ -238,25 +237,16 @@ def main():
                 running = False
                 break
             if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_UP,):
+                if event.key in (pygame.K_UP, pygame.K_LEFT):
                     selected = (selected - 1) % len(candidates)
-                elif event.key in (pygame.K_DOWN,):
-                    selected = (selected + 1) % len(candidates)
-                elif event.key in (pygame.K_LEFT,):
-                    selected = (selected - 1) % len(candidates)
-                elif event.key in (pygame.K_RIGHT,):
+                elif event.key in (pygame.K_DOWN, pygame.K_RIGHT):
                     selected = (selected + 1) % len(candidates)
                 elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
                     log_event(f"confirm KEYDOWN selected={selected} -> {candidates[selected]}")
                     print(candidates[selected])
                     return 0
-            if event.type == pygame.JOYAXISMOTION and event.axis == 1:
-                if event.value < -0.3:
-                    selected = (selected - 1) % len(candidates)
-                elif event.value > 0.3:
-                    selected = (selected + 1) % len(candidates)
-            elif event.type == pygame.JOYAXISMOTION and event.axis == 0:
-                # legacy: the old cabinet stick responded to axis 0 only
+            if event.type == pygame.JOYAXISMOTION and event.axis in (0, 1):
+                # axis 1 = current cabinet stick; axis 0 = legacy stick
                 if event.value < -0.3:
                     selected = (selected - 1) % len(candidates)
                 elif event.value > 0.3:

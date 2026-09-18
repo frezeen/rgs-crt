@@ -116,10 +116,10 @@ if [ -d "$PKG/src" ]; then
 	[ -n "$_engine_drift" ] \
 		&& bad "package src DRIFT ($_engine_drift)" \
 		|| ok "package src byte-identical"
-	# re-vendor tripwire: flattening + demo-profile removal are part of the
-	# vendoring contract (STATE re-vendor entry) — a slip must fail HERE.
-	[ -e "$REPO/src/engine/src" ] && bad "repo: nested src/engine/src present (re-vendor must flatten to src/engine/)"
-	[ -e "$REPO/src/engine/profiles" ] && bad "repo: engine demo profiles present (re-vendor must delete them)"
+	# engine layout tripwire: the tree is deployed flat (src/engine/*) and
+	# carries no demo profiles — a slip must fail HERE.
+	[ -e "$REPO/src/engine/src" ] && bad "repo: nested src/engine/src present (engine tree must stay flat)"
+	[ -e "$REPO/src/engine/profiles" ] && bad "repo: engine demo profiles present (not part of the product)"
 	# Repo profiles must be byte-identical in the package; user-added
 	# profile folders are legitimate (documented on-box authoring) — they
 	# are validated in section 0, never drift.

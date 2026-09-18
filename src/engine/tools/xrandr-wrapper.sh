@@ -9,7 +9,7 @@
 # --verbose/--prop/--list* are G, --current + all writes are silent).
 # Stock Batocera (batocera-resolution, S65values4boot, emulatorlauncher)
 # bursts G calls at boot and at gameStart/Stop — the boot shows many
-# glitches even when crt-dual itself is 0G (verified via xrandr-trace).
+# glitches even when crt-dual itself is 0G (verified via the gated call log).
 # This wrapper translates the G family to the glitch-free --current path
 # ONLY on AMD (GPU display-class check in lspci, never the chipset), ONLY for
 # the stock callers that need
@@ -29,16 +29,22 @@
 # --list* family  -> --current --list* (if stock supports it, else passthrough)
 # Bare xrandr (no args) -> --current (same as --query)
 set -uo pipefail
-STOCK="/overlay/base/usr/bin/xrandr"
-[ -x "$STOCK" ] || STOCK="/usr/bin/xrandr.stock"
-[ -x "$STOCK" ] || exec /usr/bin/xrandr "$@"  # fallback if no backup
+# Stock binary: the immutable overlay lower (same /overlay/base* glob the
+# pre-X hook uses). xrandr.stock is the legacy backup name; if neither
+# exists, fail LOUD — exec'ing /usr/bin/xrandr here would be THIS wrapper
+# again (infinite self-exec; audit 2026-09-19).
+STOCK=""
+for _b in /overlay/base*/usr/bin/xrandr; do [ -x "$_b" ] && { STOCK="$_b"; break; }; done
+[ -n "$STOCK" ] || STOCK="/usr/bin/xrandr.stock"
+[ -x "$STOCK" ] || { echo "xrandr-wrapper: no stock xrandr found (overlay lower missing) — refusing to self-exec" >&2; exit 1; }
 
 # ── shared translation core (AMD gate + desktop-name rewrite + _TRANS) ──
 # The translation logic lives in src/tools/xrandr-shared.sh, ONE source of
-# truth ALSO sourced by the display-trace wrapper (unified 2026-08-28:
-# the 5-case _TRANS block was byte-identical in both files — divergence
-# would make trace-on-AMD unfaithful to prod). If the shared file is
-# missing, degrade to plain stock passthrough — never a broken xrandr.
+# truth. Since the 2026-08-31 merge this file is ALSO the trace instrument
+# (the separate display-trace wrapper was retired): the 5-case _TRANS block
+# lives here only, so divergence cannot make trace-on-AMD unfaithful to
+# prod. If the shared file is missing, degrade to plain stock passthrough —
+# never a broken xrandr.
 if [ -r /userdata/system/crt-dual/src/tools/xrandr-shared.sh ]; then
 	# shellcheck source=/dev/null
 	source /userdata/system/crt-dual/src/tools/xrandr-shared.sh
@@ -48,9 +54,9 @@ fi
 
 # ── gated FULL logging (merged instrument, 2026-08-31 owner directive) ──
 # ONE wrapper: the prod dispatch + the display-trace logging, active only
-# while /tmp/crt-dual/display-trace-on exists. Toggled by
-# display-trace.sh start/stop (CLI) and by the PRE-X hook when the package
-# root has BOOT_TRACE (boot-burst debug). Marker off = zero cost beyond
+# while /tmp/crt-dual/display-trace-on exists. Toggled by the PRE-X hook
+# when the package root has BOOT_TRACE (boot-burst debug) or manually
+# (touch/rm the marker — no CLI tool ships). Marker off = zero cost beyond
 # one [ -f ]. The logging sits BEFORE the AMD gate on purpose: the gate's
 # own failure (it returned 0 on a real AMD GPU for three days — bug found
 # 2026-08-31) is exactly the kind of behavior the instrument must see.

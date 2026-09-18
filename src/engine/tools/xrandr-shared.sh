@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
 # Part of crt-dual — https://github.com/frezeen
-# xrandr-shared.sh — translation core shared by BOTH xrandr wrappers
-# (prod src/tools/xrandr-wrapper.sh + diag src/tools/display-trace.sh).
+# xrandr-shared.sh — translation core of the xrandr wrapper
+# (src/tools/xrandr-wrapper.sh — since the 2026-08-31 merge the ONE file is
+# both prod dispatch and trace instrument).
 #
 # ONE source of truth for the batocera-patched option replies and the
 # desktop-name rewrite (unified 2026-08-28: the 5-case _TRANS block was
@@ -20,9 +21,9 @@
 #                                       when the C-contract rewrite applies,
 #                                       exit 0; empty + exit 1 = no match
 #
-# NOT shared (by design): the G-family -> --current translation stays
-# prod-only — the trace wrapper must SEE the original --query calls to
-# log the glitch source.
+# NOT in the shared core (by design): the G-family -> --current translation
+# stays in the wrapper, AFTER the gated logging — the log must SEE the
+# original --query calls to record the glitch source.
 
 # _xrandr_is_amd — family gate shared by BOTH wrappers (cached: lspci once
 # per boot, then /tmp file; per-call lspci would add ~5ms ×45 at boot).

@@ -4,9 +4,10 @@
 # Part of crt-dual — https://github.com/frezeen
 """Switchres library bridge — ctypes over the STOCK libswitchres.so.
 
-Who creates/reads this: called by src/x11/crt-x11-generator.sh (boot-time
-X11 conf generation) and src/lib/display-lib.sh (_crt_set_15khz_direct,
-runtime mode application data). No other consumer. Not persistent state.
+Who creates/reads this: the generator (calc — boot-time X11 conf
+modelines), sr-owner.sh (create — converter 240p path), the patched
+stock launcher hunks (calc --name), diag-dump.sh / verify.sh (version,
+calc smoke). No other consumer. Not persistent state.
 
 Why a ctypes bridge and not the `switchres` CLI:
   - Same engine, zero text parsing: the modeline arrives STRUCTURED in the
@@ -99,6 +100,84 @@ def die(code: int, message: str) -> NoReturn:
     sys.exit(code)
 
 
+def _soname_version(path: str) -> Tuple[int, ...]:
+    """Version tuple parsed out of libswitchres.so[.N...]; (0,) when the
+    soname carries none."""
+    found = re.search(r"libswitchres\.so((?:\.\d+)+)$", path)
+    return tuple(int(x) for x in found.group(1).strip(".").split(".")) if found else (0,)
+
+
+def _parse_refresh(refresh_arg) -> Tuple[float, int]:
+    """(refresh_float, interlace_flags) — CLI parity: a trailing "i" forces
+    interlace (scan_mode check in switchres_main.cpp)."""
+    flags = 0
+    text = str(refresh_arg)
+    if text.endswith("i"):
+        flags |= SR_MODE_INTERLACED
+        text = text[:-1]
+    try:
+        return float(text), flags
+    except ValueError:
+        die(2, "invalid refresh '%s'" % refresh_arg)
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr():
+    """Redirect fd 1 -> stderr for the duration of the library calls.
+
+    The library logs through C-level printf (not wrappable from ctypes).
+    Flush the C streams WHILE fd 1 still points at stderr — otherwise the
+    buffered chatter drains at process exit, after the restore, back onto
+    our structured stdout."""
+    saved = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        yield
+        ctypes.CDLL(None).fflush(None)
+    finally:
+        os.dup2(saved, 1)
+        os.close(saved)
+
+
+def _format_modeline(mode: "SrMode", name=None) -> str:
+    """One Xorg-style Modeline line, formatted EXACTLY like the CLI's
+    log_info("Switchres: Modeline %s\\n") line (modeline_print with
+    MS_LABEL|MS_PARAMS, modeline.cpp v2.2.1) so the CLI stays a
+    byte-for-byte test oracle. Empty flag fields keep their placeholder
+    spaces (the CLI's sprintf emits them too). NOTE: sr_mode carries the
+    actives as width/height (modeline_to_sr_mode maps
+    modeline.hactive/vactive into them)."""
+    label = "%dx%d_%d%s %.6fKHz %.6fHz" % (
+        mode.width,
+        mode.height,
+        mode.refresh,
+        "i" if mode.interlace else "",
+        mode.hfreq / 1000.0,
+        mode.vfreq,
+    )
+    # RGS-15KHZ-EXT (stock raster channel): --name replaces the label with
+    # one single word (the caller's pool name — upstream helper parity,
+    # the PR's own --name flag); the timing fields stay untouched.
+    if name:
+        label = "%s %.6fKHz %.6fHz" % (name, mode.hfreq / 1000.0, mode.vfreq)
+    params = " %.6f %d %d %d %d %d %d %d %d %s %s %s %s" % (
+        mode.pclock / 1000000.0,
+        mode.width,
+        mode.hbegin,
+        mode.hend,
+        mode.htotal,
+        mode.height,
+        mode.vbegin,
+        mode.vend,
+        mode.vtotal,
+        "interlace" if mode.interlace else "",
+        "doublescan" if mode.doublescan else "",
+        "+hsync" if mode.hsync else "-hsync",
+        "+vsync" if mode.vsync else "-vsync",
+    )
+    return 'Modeline "%s"%s' % (label, params)
+
+
 def load_library() -> Tuple[ctypes.CDLL, str]:
     """Load the STOCK libswitchres.so (never bundled, never compiled).
 
@@ -117,10 +196,6 @@ def load_library() -> Tuple[ctypes.CDLL, str]:
         sdl = ctypes.CDLL("libSDL2-2.0.so.0", mode=os.RTLD_GLOBAL | os.RTLD_NOW)
         del sdl  # held alive by the loader's global namespace; no SDL2 present is only fatal if the switchres build needs it
 
-    def soname_version(path):
-        found = re.search(r"libswitchres\.so((?:\.\d+)+)$", path)
-        return tuple(int(x) for x in found.group(1).strip(".").split(".")) if found else (0,)
-
     candidates = []
     for pattern in (
         "/usr/lib64/libswitchres.so*",
@@ -131,7 +206,7 @@ def load_library() -> Tuple[ctypes.CDLL, str]:
         candidates.extend(glob.glob(pattern))
     # Newest version first; dedupe merged-/usr realpath aliases.
     unique = {}
-    for path in sorted(set(candidates), key=soname_version, reverse=True):
+    for path in sorted(set(candidates), key=_soname_version, reverse=True):
         unique[os.path.realpath(path)] = path
     candidates = list(unique.values())
 
@@ -177,90 +252,34 @@ def init_dummy_session(lib, ini_path, monitor_preset):
 def calc_modeline(width, height, refresh_arg, ini_path, monitor_preset,
                   name=None):
     """Compute one modeline via the library; return the Modeline line."""
-    flags = 0
-    refresh_text = str(refresh_arg)
-    if refresh_text.endswith("i"):
-        # CLI parity: trailing "i" forces interlace (scan_mode check in
-        # switchres_main.cpp).
-        flags |= SR_MODE_INTERLACED
-        refresh_text = refresh_text[:-1]
-    try:
-        refresh = float(refresh_text)
-    except ValueError:
-        die(2, "invalid refresh '%s'" % refresh_arg)
+    refresh, flags = _parse_refresh(refresh_arg)
     if width <= 0 or height <= 0 or refresh <= 0.0:
         die(2, "invalid mode request %dx%d@%s" % (width, height, refresh_arg))
 
     lib, lib_path = load_library()
 
-    # The library logs through C-level printf (log.h defaults). Redirect
-    # fd 1 to stderr for the duration of the library calls so its chatter
-    # can never pollute our structured stdout (callbacks are printf-style
-    # varargs — not wrappable from ctypes).
-    saved_stdout = os.dup(1)
-    try:
-        os.dup2(2, 1)
-        init_dummy_session(lib, ini_path, monitor_preset)
+    with _stdout_to_stderr():
+        try:
+            init_dummy_session(lib, ini_path, monitor_preset)
 
-        mode = SrMode()
-        result = lib.sr_add_mode(
-            ctypes.c_int(width),
-            ctypes.c_int(height),
-            ctypes.c_double(refresh),
-            ctypes.c_int(flags | SR_MODE_DONT_FLUSH),  # compute, never attach
-            ctypes.byref(mode),
-        )
-        if not result or mode.width == 0:
-            die(
-                12,
-                "library produced no modeline for %dx%d@%s (lib: %s)"
-                % (width, height, refresh_arg, lib_path),
+            mode = SrMode()
+            result = lib.sr_add_mode(
+                ctypes.c_int(width),
+                ctypes.c_int(height),
+                ctypes.c_double(refresh),
+                ctypes.c_int(flags | SR_MODE_DONT_FLUSH),  # compute, never attach
+                ctypes.byref(mode),
             )
+            if not result or mode.width == 0:
+                die(
+                    12,
+                    "library produced no modeline for %dx%d@%s (lib: %s)"
+                    % (width, height, refresh_arg, lib_path),
+                )
+        finally:
+            lib.sr_deinit()
 
-        # Flush the C streams WHILE fd 1 still points at stderr — otherwise
-        # the library's buffered chatter drains at process exit, after the
-        # restore, back onto our structured stdout.
-        ctypes.CDLL(None).fflush(None)
-    finally:
-        lib.sr_deinit()
-        os.dup2(saved_stdout, 1)
-        os.close(saved_stdout)
-
-    # Format EXACTLY like the CLI's log_info("Switchres: Modeline %s\n")
-    # line (modeline_print with MS_LABEL|MS_PARAMS, modeline.cpp v2.2.1)
-    # so the CLI stays a byte-for-byte test oracle. Empty flag fields keep
-    # their placeholder spaces (the CLI's sprintf emits them too).
-    # NOTE: sr_mode carries the actives as width/height (modeline_to_sr_mode
-    # maps modeline.hactive/vactive into them).
-    label = "%dx%d_%d%s %.6fKHz %.6fHz" % (
-        mode.width,
-        mode.height,
-        mode.refresh,
-        "i" if mode.interlace else "",
-        mode.hfreq / 1000.0,
-        mode.vfreq,
-    )
-    # RGS-15KHZ-EXT (stock raster channel): --name replaces the label with
-    # one single word (the caller's pool name — upstream helper parity,
-    # the PR's own --name flag); the timing fields stay untouched.
-    if name:
-        label = "%s %.6fKHz %.6fHz" % (name, mode.hfreq / 1000.0, mode.vfreq)
-    params = " %.6f %d %d %d %d %d %d %d %d %s %s %s %s" % (
-        mode.pclock / 1000000.0,
-        mode.width,
-        mode.hbegin,
-        mode.hend,
-        mode.htotal,
-        mode.height,
-        mode.vbegin,
-        mode.vend,
-        mode.vtotal,
-        "interlace" if mode.interlace else "",
-        "doublescan" if mode.doublescan else "",
-        "+hsync" if mode.hsync else "-hsync",
-        "+vsync" if mode.vsync else "-vsync",
-    )
-    return 'Modeline "%s"%s' % (label, params)
+    return _format_modeline(mode, name)
 
 
 def create_mode(
@@ -289,75 +308,61 @@ def create_mode(
     Prints the resulting X mode NAME on stdout (single line) so the bash
     layer can select it without any name bookkeeping of its own.
     """
-    flags = 0
-    refresh_text = str(refresh_arg)
-    if refresh_text.endswith("i"):
-        flags |= SR_MODE_INTERLACED
-        refresh_text = refresh_text[:-1]
-    try:
-        refresh = float(refresh_text)
-    except ValueError:
-        die(2, "invalid refresh '%s'" % refresh_arg)
+    refresh, flags = _parse_refresh(refresh_arg)
     if width <= 0 or height <= 0 or refresh <= 0.0 or not output:
         die(2, "invalid create request %dx%d@%s on '%s'" % (width, height, refresh_arg, output))
 
     lib, lib_path = load_library()
 
-    saved_stdout = os.dup(1)
-    try:
-        os.dup2(2, 1)
-        # Real-display session (NOT dummy): the X server connection comes
-        # from DISPLAY via the library's own XOpenDisplay.
-        lib.sr_init()
-        if ini_path:
-            lib.sr_load_ini(ini_path.encode())
-        if monitor_preset:
-            lib.sr_set_monitor(monitor_preset.encode())
-        # Safety rails: both features DISABLE other CRTCs
-        # when enabled (set_timing issues XRRSetCrtcConfig(... None) on
-        # outputs outside the requested ones). Defaults are already off;
-        # assert them so an upstream default change fails HERE, loudly.
-        lib.sr_set_option(b"screen_reordering", b"0")
-        lib.sr_set_option(b"screen_compositing", b"0")
-        lib.sr_set_option(b"keep_changes", b"1")  # teardown owns nothing
+    with _stdout_to_stderr():
+        try:
+            # Real-display session (NOT dummy): the X server connection comes
+            # from DISPLAY via the library's own XOpenDisplay.
+            lib.sr_init()
+            if ini_path:
+                lib.sr_load_ini(ini_path.encode())
+            if monitor_preset:
+                lib.sr_set_monitor(monitor_preset.encode())
+            # Safety rails: both features DISABLE other CRTCs
+            # when enabled (set_timing issues XRRSetCrtcConfig(... None) on
+            # outputs outside the requested ones). Defaults are already off;
+            # assert them so an upstream default change fails HERE, loudly.
+            lib.sr_set_option(b"screen_reordering", b"0")
+            lib.sr_set_option(b"screen_compositing", b"0")
+            lib.sr_set_option(b"keep_changes", b"1")  # teardown owns nothing
 
-        lib.sr_init_disp.restype = ctypes.c_int
-        idx = lib.sr_init_disp(output.encode(), None)
-        if idx < 0:
-            die(11, "sr_init_disp failed on output '%s'" % output)
+            lib.sr_init_disp.restype = ctypes.c_int
+            idx = lib.sr_init_disp(output.encode(), None)
+            if idx < 0:
+                die(11, "sr_init_disp failed on output '%s'" % output)
 
-        mode = SrMode()
-        result = lib.sr_add_mode(
-            ctypes.c_int(width),
-            ctypes.c_int(height),
-            ctypes.c_double(refresh),
-            ctypes.c_int(flags),  # no DONT_FLUSH: add+flush = generate+attach
-            ctypes.byref(mode),
-        )
-        if not result or mode.width == 0:
-            die(
-                12,
-                "library could not create/attach %dx%d@%s on '%s' (lib: %s)"
-                % (width, height, refresh_arg, output, lib_path),
+            mode = SrMode()
+            result = lib.sr_add_mode(
+                ctypes.c_int(width),
+                ctypes.c_int(height),
+                ctypes.c_double(refresh),
+                ctypes.c_int(flags),  # no DONT_FLUSH: add+flush = generate+attach
+                ctypes.byref(mode),
             )
+            if not result or mode.width == 0:
+                die(
+                    12,
+                    "library could not create/attach %dx%d@%s on '%s' (lib: %s)"
+                    % (width, height, refresh_arg, output, lib_path),
+                )
+        finally:
+            lib.sr_deinit()
 
-        # The attach name is built by custom_video_xrandr.cpp::add_mode as
-        # SR-<timing-id>_<w>x<h>@<vfreq>[i] with the timing id starting at
-        # 1 within this single-display session; vfreq formatted %.2f.
-        name = "SR-%d_%dx%d@%.2f%s" % (
-            1,
-            mode.width,
-            mode.height,
-            mode.vfreq,
-            "i" if mode.interlace else "",
-        )
-
-        ctypes.CDLL(None).fflush(None)  # drain C chatter to stderr first
-    finally:
-        lib.sr_deinit()
-        os.dup2(saved_stdout, 1)
-        os.close(saved_stdout)
-
+    # The attach name is built by custom_video_xrandr.cpp::add_mode as
+    # SR-<timing-id>_<w>x<h>@<vfreq>[i] with the timing id starting at
+    # 1 within this single-display session; vfreq formatted %.2f.
+    name = "SR-%d_%dx%d@%.2f%s" % (
+        1,
+        mode.width,
+        mode.height,
+        mode.vfreq,
+        "i" if mode.interlace else "",
+    )
     return name
 
 

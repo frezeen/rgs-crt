@@ -126,16 +126,16 @@ set -uo pipefail
 		# CRT itself and native on LCD-only — the value the 480i pins used
 		# to force). NO service writer: a stale key cannot exist because
 		# nothing rewrites these keys after install; verify.sh owns drift.
-		# RGS-15KHZ-EXT (early-apply function ownership, 2026-09-15): the v2
-		# owner moved layout_apply_if_changed to src/owner/sr-owner.sh
-		# (display-lib is pure detection since the rewrite); this call site
+		# RGS-15KHZ-EXT (early-apply function ownership, 2026-09-15): the
+		# owner lives in src/owner/sr-owner.sh
+		# (display-lib is pure detection); this call site
 		# was left unqualified -> rc 127 "command not found" at every boot
 		# (captured live 2026-09-15: this line, service.log; the watcher's
 		# first pass covered the apply). Source the owner lib in a SUBSHELL —
 		# the lib sets its own LOG/STATE_DIR at source time and the subshell
 		# keeps the service's own untouched; a missing owner lib degrades to
 		# the previous WARN behavior (never kills the boot).
-		# Re-vendor replay: keep this block at the early-apply step
+		# Keep this block at the early-apply step
 		# (docs/BOOT-SEQUENCE.md §6).
 		if ( source "$PKG_ROOT/src/owner/sr-owner.sh" 2>/dev/null; layout_apply_if_changed ); then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — watcher retry (convergence contract) owns it"; fi
 

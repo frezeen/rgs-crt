@@ -62,6 +62,11 @@ log() {
 	echo "zz_rgs_15khz [$(date +%FT%T)]: $*" >>"$LOG" 2>/dev/null || true
 }
 
+# Effective batocera.conf value: stock batocera-settings-set APPENDS (the
+# LAST occurrence wins — same semantics the selector merge uses); reading
+# the first line returns a stale value after any in-ES edit.
+conf_get() { grep -E "^$1[[:space:]]*=" "$GUARD_CONF" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]"'; }
+
 # manifest line -> package source path. Manifest stores installed overlay
 # DSTs; the source is derived: DST under /etc|/usr/lib must equal the
 # package file with the same identifying basename, mapped here explicitly
@@ -123,15 +128,17 @@ guard_run() {
 			# must never live there.
 			_tun="$(grep -n 'RGS TUNING' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d: -f1 || true)"
 			_end="$(grep -n 'END RGS' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+			# The LAST occurrence is the effective value (batocera-settings
+			# appends); its position decides whether the update rewrites it.
 			if [ -n "$_tun" ] && [ -n "$_end" ]; then
 				for _key in es.resolution global.videomode global.videooutput2; do
-					_line="$(grep -n "^${_key}=" "$GUARD_CONF" | head -1 | cut -d: -f1 || true)"
+					_line="$(grep -n "^${_key}=" "$GUARD_CONF" | tail -1 | cut -d: -f1 || true)"
 					if [ -n "$_line" ] && [ "$_line" -gt "$_tun" ] && [ "$_line" -lt "$_end" ]; then
 						log "$_where GUARD FAIL: $_key sits INSIDE the RGS TUNING zone — an update would rewrite it (move after END RGS)"
 						_ok=0
 					fi
 				done
-				_sline="$(grep -n '^system\.services=' "$GUARD_CONF" | head -1 | cut -d: -f1 || true)"
+				_sline="$(grep -n '^system\.services=' "$GUARD_CONF" | tail -1 | cut -d: -f1 || true)"
 				if [ -n "$_sline" ] && [ "$_sline" -gt "$_tun" ] && [ "$_sline" -lt "$_end" ]; then
 					log "$_where GUARD FAIL: system.services INSIDE the RGS TUNING zone — an update would unregister our services (move before RGS TUNING)"
 					_ok=0
@@ -237,10 +244,10 @@ resolution_patch_decide() {
 	_bak="${RGS15_RES_BAK:-$PKG/backups/stock-originals/batocera-resolution}"
 	if python3 "$PKG/src/service/resolution-crt-patch.py" apply "$_tgt" "$_bak" >>"$LOG" 2>&1; then
 		log "resolution-patch: launcher raster channel applied (hunks verified)"
-	else
-		log "resolution-patch: WARN hunks not applied (anchor drift or write refused) — verify flags it, launches run stock-safe"
+		return 0
 	fi
-	return 0
+	log "resolution-patch: WARN hunks not applied (anchor drift or write refused) — verify flags it, launches run stock-safe"
+	return 1
 }
 
 # ── GPU dotclock floor — chain property, measured ONCE at the first CRT
@@ -379,7 +386,7 @@ dotclock_decide() {
 		return 0
 	fi
 	local _knob="" _val="" _src="" _before=""
-	_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"')"
+	_knob="$(conf_get 'rgs-15khz\.dotclock_min')"
 	if [ "$_knob" = "off" ]; then
 		_before=""
 		[ -f "$dotclock_ra_ini" ] && _before="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$dotclock_ra_ini" | head -1 | awk '{print $NF}' | tr -d "\r")"
@@ -433,7 +440,7 @@ dotclock_ensure() {
 		return 0
 	fi
 	local _knob="" _val="" _probe=""
-	_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"')"
+	_knob="$(conf_get 'rgs-15khz\.dotclock_min')"
 	if [ "$_knob" = "off" ]; then
 		dotclock_decide # the knob owns it: refresh, never measure
 		return 0
@@ -466,7 +473,7 @@ dotclock_ensure() {
 amdgpu_legacy_decide() {
 	local _kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
 	local _knob _pci _d _id _hit=0
-	_knob="$(grep -E '^rgs-15khz\.amdgpu-legacy[[:space:]]*=' "$GUARD_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]')"
+	_knob="$(conf_get 'rgs-15khz\.amdgpu-legacy')"
 	if [ -n "${RGS15_PCI_SYS:-}" ]; then _pci="$RGS15_PCI_SYS"; else _pci="/sys/bus/pci/devices"; fi
 	for _d in "$_pci"/*; do
 		[ -r "$_d/vendor" ] || continue
@@ -724,7 +731,7 @@ do_start() {
 		dotclock_decide
 	fi
 
-	# 3d. dotclock floor: NO boot measurement (owner 2026-09-16 — the
+	# 3d-ter. dotclock floor: NO boot measurement (owner 2026-09-16 — the
 	#     chain is measured at the FIRST CRT game launch, dotclock-ensure
 	#     via the first_script hook; ES boots clean at 480i, /etc
 	#     untouched). The boot decide only re-heals the RA override.
@@ -796,9 +803,12 @@ tool-uninstall)
 	_src="$(cat "$PKG/install-source" 2>/dev/null || true)"
 	if [ -n "$_src" ] && [ -f "$_src/uninstall.sh" ]; then
 		log "tool: uninstall requested (deliberate, from rgs_crt_check) — running $_src/uninstall.sh then reboot"
-		bash "$_src/uninstall.sh" >>"$LOG" 2>&1 \
-			|| log "tool: uninstall returned non-zero — reboot ABORTED (inspect the log)"
-		reboot
+		if bash "$_src/uninstall.sh" >>"$LOG" 2>&1; then
+			log "tool: uninstall complete — rebooting into stock RGS"
+			reboot
+		else
+			log "tool: uninstall returned non-zero — reboot ABORTED (inspect the log)"
+		fi
 	else
 		log "tool: uninstall requested but no install-source recorded ($PKG/install-source) — run uninstall.sh from the project folder"
 	fi
@@ -878,9 +888,9 @@ i915-patch)
 resolution-patch)
 	# One-shot apply of the launcher raster hunks (install.sh 7c + the boot
 	# duty). rc 1 = anchor drift (the applier logged it loudly; install.sh
-	# echoes the WARN and continues).
+	# reports the WARN and continues; the boot duty ignores rc).
 	resolution_patch_decide
-	exit 0
+	exit $?
 	;;
 dotclock-decide)
 	# One-shot decide (install.sh calls it at install; the boot duty

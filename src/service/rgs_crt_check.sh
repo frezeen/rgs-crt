@@ -16,7 +16,7 @@
 # and adopts the version (service side).
 #
 # Update feed (download a newer rgs-crt automatically): DEFERRED until
-# the project repo goes public (ROADMAP phase 14) — this tool is written
+# the project repo goes public — this tool is written
 # so the feed check slots into the RED screen.
 #
 # Test seams: RGS15_SVCDIR (+ the service seams for tool-check/tool-uninstall).

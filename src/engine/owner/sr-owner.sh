@@ -1,11 +1,10 @@
 #!/bin/bash
-# sr-owner.sh — CRT-DUAL v2 SR-OWNER (1 cervello = 1 file, A letterale)
+# sr-owner.sh — CRT-DUAL SR-OWNER, the single applier (1 cervello = 1 file)
 
 set -uo pipefail
 
 STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 WANT_FILE="${CRT_DUAL_WANT_FILE:-$STATE_DIR/want}"
-WANT_LOCK="${WANT_FILE}.lock"
 DETECT_STATE="$STATE_DIR/detect-state"
 LOG="${CRT_DUAL_SR_OWNER_LOG:-/userdata/system/logs/sr-owner.log}"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
@@ -15,6 +14,17 @@ log() {
 }
 
 _state_val() { sed -n "s/^$1=//p" "$DETECT_STATE" 2>/dev/null | head -1 | awk '{print $1}'; }
+
+# Roles from detect-state. A PRESUMED CRT is a target only when no LCD
+# exists at all (boot behind a converter wall); sets the CRT_OUT/LCD_OUT
+# globals used by the apply paths.
+_load_roles_from_state() {
+	CRT_OUT="$(_state_val CRT_OUT)"
+	LCD_OUT="$(_state_val LCD_OUT)"
+	if [ -z "$CRT_OUT" ] && [ -z "$LCD_OUT" ]; then
+		CRT_OUT="$(_state_val CRT_PRESUMED_OUT)"
+	fi
+}
 
 _switchres_api_path() {
 	echo "${CRT_DUAL_API:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../api" 2>/dev/null && pwd)/switchres_api.py}"
@@ -55,6 +65,55 @@ _owner_desktop_transform_guard() {
 	log "WARN: CRT transform leak ($_t) after layout batch — repairing standalone"
 	xrandr --output "$target" --transform none 2>/dev/null || log "FAIL: transform repair on $target"
 }
+
+# (audit 2026-09-18: the verify/fallback/converter helpers moved here from
+# lib/display-detect.sh — application code lives in the applier; the lib is
+# pure classification.)
+# Direct version for dual output: activates 640x480 (480i) on $target.
+# Needed because batocera-resolution does not accept a target output and
+# picks the first connected one — in dual mode after LCD gaming, the first
+# connected output is the LCD (the only one on).
+# Preference to the already-attached mode (from 99-crt.conf): ONE modeline.
+# Runtime newmode ONLY as fallback (same name, same system ini
+# -> same timings as the X11 conf).
+# CRT verify helpers — slim _crt_set_15khz_direct (T15.2)
+_crt_handle_fallback() { local target="$1" _want_name="$2" _cur="$3"; if [ "$_cur" != "$_want_name" ]; then if [ -n "$_cur" ]; then if _output_is_analog "$target"; then echo "CRT-DUAL-CRT: $target — 480i mode $_want_name not effective (active $_cur) — analog port: transient, left as-is, next trigger retries" >&2; else xrandr --display "${DISPLAY:-:0}" --output "$target" --mode "320x240" --scale 2x2 2>/dev/null || true; echo "CRT-DUAL-CRT: $target — 480i mode $_want_name not effective (active $_cur) -> 240p fallback (320x240, full desktop)" >&2; fi; else echo "CRT-DUAL-CRT: $target — 480i verify read no mode (X busy?) — left as-is, next trigger retries" >&2; fi; fi; }
+# Primary fallback — powers off others, re-marks primary, restores others (used by _crt_set_primary)
+_crt_primary_fallback() { # restore own prior mode (_cm) or the family desktop name — no literals in shared code
+	local target="$1" _cm="$2" _other _m
+	local _dspec _desktop _drate
+	_dspec=$(_desktop_mode_spec 2>/dev/null); _desktop=${_dspec% *}; _drate=${_dspec#* }
+	for _other in $CRT_OUTS $LCD_OUTS; do [ -z "$_other" ] && continue; [ "$_other" = "$target" ] && continue; xrandr --display "${DISPLAY:-:0}" --output "$_other" --off 2>/dev/null || true; done
+	if [ "$_cm" = "320x240" ]; then
+		xrandr --display "${DISPLAY:-:0}" --output "$target" --primary --mode "320x240" --scale 2x2 --pos 0x0 2>/dev/null || true
+	else
+		_m="${_cm:-$_desktop}"
+		local _rate=""
+		[ "$_m" = "$_desktop" ] && _rate="$_drate" # desktop restores carry the tube refresh (replug @75 lesson, 2026-08-10)
+		[ -n "$_m" ] && xrandr --display "${DISPLAY:-:0}" --output "$target" --primary --mode "$_m" ${_rate:+--rate $_rate} --transform none --pos 0x0 2>/dev/null || true
+	fi
+	for _other in $CRT_OUTS $LCD_OUTS; do [ -z "$_other" ] && continue; [ "$_other" = "$target" ] && continue
+		if echo " $LCD_OUTS " | grep -q " $_other "; then
+			local _lcd_n; _lcd_n=$(_lcd_native "$_other" 2>/dev/null)
+			xrandr --display "${DISPLAY:-:0}" --output "$_other" --mode "$_lcd_n" --scale-from 640x480 --pos 0x0 2>/dev/null || true
+		elif [ -n "$_desktop" ]; then
+			xrandr --display "${DISPLAY:-:0}" --output "$_other" --mode "$_desktop" ${_drate:+--rate $_drate} --transform none --pos 0x0 2>/dev/null || true
+		fi
+	done
+}
+# Converter 240p helper — DP->VGA converter can expose fake EDID with VESA 31kHz modes
+# (640x480@59.94 preferred, 1024x768, 800x600, 848x480 — verified HP 800 G5 2026-08-09).
+# On this port: 480i IMPOSSIBLE (interlace over DP -> ENOENT, verified), so 240p direct.
+# Garbage->converter meaningful ONLY on a DIGITAL port (DP/HDMI/DVI-D). Bare ANALOG CRT
+# (DVI-I/VGA/CRT) has NO EDID so X synthesizes the VESA list identical in shape — treating
+# a real analog CRT as a converter made this function refuse 480i on ES/batocera-resolution
+# --auto (verified 2026-08-19 R9 270X: 1024x768 + "non-desktop -> restore pending" ad infinitum).
+# On an analog port 480i is always physically possible -> 480i path; 240p is digital-only.
+# Scale 2x2 stays on RandR BY DOCUMENTED LIMIT: Switchres API has no transform control.
+# EDID modes CANNOT be removed (RRDeleteOutputMode BadAccess, i915 owns them) — stay
+# dormant: no --auto/--mode "640x480i" touches them anymore (the name "320x240" is ours).
+# Returns: 0 if handled (digital converter -> 240p), 1 if not converter, 2 if API broken.
+_crt_handle_converter() { local target="$1" SR_API="$2" SR_INI="$3"; local _garbage; _garbage=$(xrandr --display "${DISPLAY:-:0}" --current 2>/dev/null | sed -n "/^$target connected/,/^[^ ]/p" | awk '$1 ~ /^[0-9]+x[0-9]+$/ && $1 != "640x480" && $1 != "320x240" {print $1}' | sort -u | tr '\n' ' '); if [ -n "$_garbage" ] && ! _output_is_analog "$target"; then local _p240; _p240=$("$SR_API" create 320 240 60 "$target" --ini "$SR_INI") || { echo "CRT-DUAL-CRT: $target — API could not create the 240p mode (loud failure, no fallback)" >&2; return 2; }; xrandr --display "${DISPLAY:-:0}" --output "$target" --mode "$_p240" --scale 2x2 2>/dev/null || true; _save_crt_desktop_mode "$target"; echo "CRT-DUAL-CRT: $target — converter with VESA EDID (31kHz ignored, dormant modes) -> 240p full desktop" >&2; return 0; fi; return 1; }
 
 _crt_set_15khz_direct() {
 	local target="${1:-${CRT_OUT:-}}"
@@ -98,7 +157,7 @@ _crt_set_15khz_direct() {
 	return 0
 }
 
-# (SR-*: transform none) or a VESA collision (batocera-resolution
+# Persist the effective CRT desktop mode (watcher emitter + convergence oracle read it).
 _save_crt_desktop_mode() {
 	local _t="${1:-${CRT_OUT:-}}"
 	[ -z "$_t" ] && return 0
@@ -155,7 +214,7 @@ _ensure_fb_640() {
 	_kill_unmanaged_outputs "$crt" "$lcd"
 }
 
-# CRT gameStop).
+# Largest mode of the panel from ONE --current read (1920x1080 fallback — always echoes a mode).
 _lcd_native() {
 	local _n
 	_n=$(xrandr --current 2>/dev/null |
@@ -197,31 +256,17 @@ _lcd_native_primary_takeover() {
 	echo "$lcd"
 }
 
-apply_dual_layout() {
-	# the unlocked body directly).
-	exec 9>"$CRT_DUAL_STATE_DIR/layout.lock" 2>/dev/null || return 1
-	flock -x -w 10 9 2>/dev/null || {
-		exec 9>&- 2>/dev/null || true # release the fd regardless
-		return 1
-	}
-	_apply_dual_layout_unlocked
-	flock -u 9 2>/dev/null || true # released here
-	exec 9>&- 2>/dev/null || true
-	return 0
-}
-
 _apply_dual_layout_unlocked() {
 	# Detect only when the caller did not (measured 2026-08-28:
 	# detect_outputs = 1.21s, mostly the demote debounce sleep 1 +
-	# per-port sysfs/xrandr reads). apply_via_engine already classified
-	# (or skipped via --no-detect with a frozen topology); other callers
-	# land here with empty roles and get the full detection as before.
+	# per-port sysfs/xrandr reads). apply_via_engine already classified;
+	# other callers land here with empty roles and get the full detection.
 	if [ -z "${CRT_OUT:-}${CRT_PRESUMED_OUT:-}${LCD_OUT:-}" ]; then
 		detect_outputs 2>/dev/null || true # detection is idempotent; failure = empty classification, layout stays stock
 	fi
 	export DISPLAY="${DISPLAY:-:0}"
 
-	# the LCD in upscaled 1920x1080 instead of native
+	# Boot with only a PRESUMED CRT (converter wall): target it, tag the log.
 	local crt crttag
 	crt="${CRT_OUT}"
 	crttag=""
@@ -233,7 +278,7 @@ _apply_dual_layout_unlocked() {
 	# Dual desktop: the mode is the persistent conf Modeline, named by the
 	# family adapter (_owner_desktop_name) and applied by this single batch,
 	# which carries no mode-name literal in shared code and no name lookup:
-	# universal by construction. v1 topology properties preserved: one
+	# universal by construction. Topology properties preserved: one
 	# request, LCD comes up already scaled (no full-HD flash frame on
 	# dce_v6), CRT modeset rides the same write. The CRT transform is NOT
 	# touched here (batch-lie: mixing it with the LCD's scale-from made
@@ -241,7 +286,7 @@ _apply_dual_layout_unlocked() {
 	# 213x213 zoom, re-verified 2026-08-28); _owner_desktop_transform_guard
 	# reads it back and repairs standalone when needed.
 	if [ -n "$LCD_OUT" ] && [ -n "$crt" ]; then
-		local lcd crt_m crt_r _err _spec _pooled
+		local lcd crt_m crt_r _err _spec _pooled _cur15
 		_spec=$(_owner_desktop_name) || { echo "CRT-DUAL-CRT: dual aborted — no desktop name from the adapter on $crt" >&2; return 1; }
 		crt_m=${_spec% *}; crt_r=${_spec#* }
 		# RGS-15KHZ-EXT (gameStop dual converge): the CRT after a game holds
@@ -258,19 +303,17 @@ _apply_dual_layout_unlocked() {
 		# Resolution path = the same pool->SR->ensure-inject flow the CRT-dark
 		# branch uses (handles the no-pool corner); loud when nothing is
 		# attachable: the batch below fails visibly.
+		_cur15=""
 		if _crt_active_15khz "$crt" 2>/dev/null; then
 			_cur15=$(_xrandr_active_mode "$crt" name 2>/dev/null)
-			case "$_cur15" in
-				"$crt_m" | SR-*_640x480@*) crt_m="$_cur15" ;;
-				*)
-					_pooled=$(_crt_desktop_ensure "$crt") && crt_m="$_pooled" ||
-						echo "CRT-DUAL-CRT: $crt — no attachable 480i in pool and inject failed (X stale?) — dual batch will fail loudly" >&2
-					;;
-			esac
-		else
-			_pooled=$(_crt_desktop_ensure "$crt") && crt_m="$_pooled" ||
-				echo "CRT-DUAL-CRT: $crt — no attachable 480i in pool and inject failed (X stale?) — dual batch will fail loudly" >&2
 		fi
+		case "$_cur15" in
+			"$crt_m" | SR-*_640x480@*) crt_m="$_cur15" ;;
+			*)
+				_pooled=$(_crt_desktop_ensure "$crt") && crt_m="$_pooled" ||
+					echo "CRT-DUAL-CRT: $crt — no attachable 480i in pool and inject failed (X stale?) — dual batch will fail loudly" >&2
+				;;
+		esac
 		lcd=$(_lcd_native "$LCD_OUT")
 		_err=$(xrandr --output "$crt" --mode "$crt_m" --rate "$crt_r" --primary --pos 0x0 --output "$LCD_OUT" --mode "$lcd" --scale-from 640x480 --pos 0x0 2>&1) || {
 			echo "CRT-DUAL-CRT: dual batch failed: $_err — retrying two-step" >&2
@@ -283,7 +326,7 @@ _apply_dual_layout_unlocked() {
 		lcd=$(_lcd_native_primary_takeover)
 		echo "CRT-DUAL-CRT: LCD-only=$LCD_OUT@$lcd native primary"
 	elif [ -n "$crt" ]; then
-		# no --auto: the converter's fake EDID is 31kHz!).
+		# Direct 15 kHz desktop (never --auto: a converter's fake EDID is 31kHz — _crt_handle_converter).
 		_crt_set_15khz_direct "$crt"
 		_crt_set_primary "$crt"
 		# Hotplug CRT-only: HDMI may be disconnected but still owns CRTC 1 (seen 21:27 HDMI disconnected CRTC 1). _kill_unmanaged skips disconnected, so free it explicitly.
@@ -295,10 +338,11 @@ _apply_dual_layout_unlocked() {
 	_kill_unmanaged_outputs "$crt" "$LCD_OUT"
 }
 
-# After a CRT game the CRT is already on, only:
-# 1. CRT -> 640x480  (via _crt_set_15khz_direct)
+# After a CRT game the CRT is already on: restore the desktop layout
+# (re-detect first — the topology may have changed while the game held
+# the display).
 restore_after_game() {
-	detect_outputs 2>/dev/null || true # idempotent re-detection; see apply_dual_layout
+	detect_outputs 2>/dev/null || true # idempotent re-detection; see _apply_dual_layout_unlocked
 	export DISPLAY="${DISPLAY:-:0}"
 
 	local crt
@@ -340,16 +384,15 @@ restore_after_game() {
 	_kill_unmanaged_outputs "$crt" "$LCD_OUT"
 }
 
-# (monitor plugged/unplugged live — no reboot).
-# untouched.
-# glitch-free and flips HDMI in ~1s there.
+# Topology fingerprint from the GPU adapter (change detector for
+# layout_apply_if_changed; debug copy in layout-fp).
 _layout_fingerprint() {
 	_gpu_adapter || return 1
 	_impl_fingerprint
 }
 
-# black with no CRTC).
-#
+# ONE --current read reduced to "OUT|mode|primary|xpos" rows + a synthetic
+# SCREEN|WxH row.
 _layout_state_parse() { # "OUT|mode|primary|xpos" per output + "SCREEN|WxH" — ONE --current read
 	xrandr --current 2>/dev/null | awk '
 		/^Screen / { if (match($0, /current [0-9]+ x [0-9]+/)) {
@@ -417,26 +460,25 @@ _layout_convergent() {
 			;;
 		esac
 		case " $_lcd_outs " in *" $_o "*)
-			# 2026-08-12) ...
+			# LCD role: active mode at X=0 (a stale clone offset leaves it dark).
 			[ -n "$_act" ] && [ "$_act" != "none" ] || return 1
 			[ -n "$_xpos" ] && [ "$_xpos" = "0" ] || return 1
 			;;
 		esac
 	done
-	# the LCD legitimately clones at 640x480.
+	# LCD-only: the panel runs native and the screen size is native
+	# (a 640x480 clone size is dual-only).
 	if [ -z "${_crt_outs// /}" ]; then
 		for _o in $_lcd_outs; do
 			local _want_l
-			_want_l=$(_lcd_native "$_o" 2>/dev/null)
-			[ -n "$_want_l" ] || _want_l="1920x1080"
+			_want_l=$(_lcd_native "$_o" 2>/dev/null) # always yields a mode (1920x1080 fallback)
 			_row=$(printf '%s\n' "$_rows" | grep "^$_o|")
 			[ "$(echo "$_row" | cut -d'|' -f2)" = "$_want_l" ] || return 1
 		done
-		# one display on every verified topology.
 		local _lcd0 _scr
 		_lcd0=$(printf '%s' "$_lcd_outs" | awk '{print $1}')
 		_scr=$(printf '%s\n' "$_rows" | grep "^SCREEN|" | cut -d'|' -f2)
-		[ "$_scr" = "$(_lcd_native "$_lcd0" 2>/dev/null || echo 1920x1080)" ] || return 1
+		[ "$_scr" = "$(_lcd_native "$_lcd0" 2>/dev/null)" ] || return 1
 	fi
 	# dual must be 640x480 screen (clone) — not native 1920x1080 (seen live: gameStop left 1920 with ES 640 in corner)
 	if [ -n "$_crt_outs" ] && [ -n "$_lcd_outs" ]; then
@@ -468,6 +510,8 @@ _read_detect_state_roles() { # emit _crt_outs=/​_lcd_outs= assignments from de
 	done <"$CRT_DUAL_STATE_DIR/detect-state"
 }
 
+_layout_release() { flock -u 9 2>/dev/null || true; exec 9>&- 2>/dev/null || true; } # unlock + close the layout-lock fd
+
 layout_apply_if_changed() {
 	export DISPLAY="${DISPLAY:-:0}"
 
@@ -489,26 +533,23 @@ layout_apply_if_changed() {
 	[ -f "$CRT_DUAL_STATE_DIR/layout-fp" ] && old=$(cat "$CRT_DUAL_STATE_DIR/layout-fp" 2>/dev/null)
 	if _layout_convergent; then
 		[ "$old" = "$fp" ] || echo "$fp" >"$CRT_DUAL_STATE_DIR/layout-fp"
-		flock -u 9 2>/dev/null || true
-		exec 9>&- 2>/dev/null || true
+		_layout_release
 		return 0
 	fi
 
 	if ! _apply_dual_layout_unlocked 2>/dev/null; then
-		flock -u 9 2>/dev/null || true
-		exec 9>&- 2>/dev/null || true
+		_layout_release
 		return 1 # apply failed — fingerprint NOT updated, next check retries
 	fi
 	fp=$(_layout_fingerprint)
-	# failure so the next wake-up retries.
+	# Re-verify: a raced or partial apply is never recorded (fingerprint
+	# stays; the next wake-up retries).
 	if ! _layout_convergent; then
-		flock -u 9 2>/dev/null || true
-		exec 9>&- 2>/dev/null || true
+		_layout_release
 		return 1 # not converged — fingerprint NOT updated, next check retries
 	fi
 	echo "$fp" >"$CRT_DUAL_STATE_DIR/layout-fp"
-	flock -u 9 2>/dev/null || true
-	exec 9>&- 2>/dev/null || true
+	_layout_release
 	return 0
 }
 _owner_es_resize() {
@@ -536,39 +577,17 @@ _owner_display_readback() {
 }
 
 apply_via_engine() {
-	# libs are sourced by the main bootstrap (every dispatch path needs
-	# them now — gameStart target branches included)
-	if ! command -v layout_apply_if_changed >/dev/null 2>&1; then
-		if ! command -v _apply_dual_layout_unlocked >/dev/null 2>&1; then
-			log "FAIL: apply engine not available — loud failure"
-			return 2
-		fi
-	fi
+	# libs are sourced by the main bootstrap (every dispatch path needs them)
 	command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true
-	# Topology is FROZEN while the game guard is up: the watcher sleeps
-	# during a session (layout-watch.sh: game-guard branch), so between
-	# gameStart and gameStop no hotplug can have happened. Re-detecting
-	# here costs ~1.2s (demote debounce sleep 1 + per-port sysfs/xrandr
-	# reads) for zero new information — the last detect-state is the
-	# truth. The gameStop caller passes --no-detect; hotplug callers
-	# (watcher) do NOT, so they keep the fresh detect that IS their
-	# event handling. Fallback: if the state file is missing, detect
-	# anyway (measured 2026-08-28: detect_outputs = 1.21s, gameStop
-	# ~3.5s total, of which ~2.4s was double detect).
-	if [ "$_no_detect" = "1" ] && [ -f "$DETECT_STATE" ]; then
-		log "detect skipped (--no-detect, topology frozen — reusing detect-state)"
-	else
-		command -v detect_outputs >/dev/null 2>&1 && detect_outputs 2>/dev/null || true
-		command -v crt_probe >/dev/null 2>&1 && crt_probe 2>/dev/null || true
-	fi
-	CRT_OUT="$(_state_val CRT_OUT)"
-	if [ -z "$CRT_OUT" ]; then
-		_lcd_tmp="$(_state_val LCD_OUT)"
-		if [ -z "$_lcd_tmp" ]; then
-			CRT_OUT="$(_state_val CRT_PRESUMED_OUT)"
-		fi
-	fi
-	LCD_OUT="$(_state_val LCD_OUT)"
+	# Classify fresh on every request (measured 2026-08-28: detect_outputs =
+	# 1.21s): the topology is frozen while the game guard is up — the watcher
+	# sleeps during a session — and hotplug callers need the fresh read by
+	# definition. The frozen-topology detect skip was removed 2026-09-18:
+	# solo-launch left it with zero callers, and the docs described a
+	# gameStop flow that no longer exists.
+	command -v detect_outputs >/dev/null 2>&1 && detect_outputs 2>/dev/null || true
+	command -v crt_probe >/dev/null 2>&1 && crt_probe 2>/dev/null || true
+	_load_roles_from_state
 	log "engine apply: want=$want crt=$CRT_OUT lcd=$LCD_OUT (detect refreshed)"
 	local _rc=0
 	if layout_apply_if_changed 2>/dev/null; then
@@ -578,14 +597,13 @@ apply_via_engine() {
 		log "engine converge-or-apply: not converged (rc=$_rc)"
 	fi
 	_owner_es_resize || true
-	command -v _es_focus_restore >/dev/null 2>&1 && _es_focus_restore 2>/dev/null || {
-		local _wid _focus
-		_wid=$(xdotool search --class emulationstation 2>/dev/null | head -1)
-		if [ -n "$_wid" ]; then
-			_focus=$(xdotool getwindowfocus 2>/dev/null | awk '{print $NF}')
-			[ "$_focus" != "$_wid" ] && xdotool windowfocus "$_wid" 2>/dev/null || true
-		fi
-	}
+	# ES focus invariant (smoke-display check 1): the _es_focus_restore lib hook has no definition anywhere — inline is THE path (audit 2026-09-18).
+	local _wid _focus
+	_wid=$(xdotool search --class emulationstation 2>/dev/null | head -1)
+	if [ -n "$_wid" ]; then
+		_focus=$(xdotool getwindowfocus 2>/dev/null | awk '{print $NF}')
+		[ "$_focus" != "$_wid" ] && xdotool windowfocus "$_wid" 2>/dev/null || true
+	fi
 	_owner_display_readback || true
 	log "engine apply done (detect-state: $(tr '\n' ' ' <"$STATE_DIR/detect-state" 2>/dev/null))"
 	return $_rc
@@ -608,10 +626,22 @@ for _lib in "$_self_dir/../lib/display-lib.sh" "/userdata/system/crt-dual/src/li
 	[ -r "$_lib" ] && source "$_lib" 2>/dev/null && break
 done
 want="dual"
-_no_detect=0
 _check_only=0
 _solo_target=""
-for arg in "$@"; do case "$arg" in --want) shift; WANT_FILE="$1";; --state-dir) shift; STATE_DIR="$1";; --no-detect) _no_detect=1;; --check) _check_only=1;; --solo-prep) shift; _solo_target="$1";; esac done
+# while-loop parsing: `for arg in "$@"` + `shift` captured the PREVIOUS flag
+# as a value whenever a value flag followed another flag (audit 2026-09-18:
+# `--apply --solo-prep crt` silently prepped the LCD for a CRT game).
+# The zero-caller value flags (want/state-dir) and the frozen-topology skip
+# flag were deleted in the same pass: CRT_DUAL_WANT_FILE /
+# CRT_DUAL_STATE_DIR are the one override mechanism.
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--check) _check_only=1;;
+	--solo-prep) shift; _solo_target="${1:-}";;
+	--apply) : ;; # historical watcher verb: the want-file IS the request
+	esac
+	[ "$#" -gt 0 ] && shift
+done
 [ -f "$WANT_FILE" ] && want="$(cat "$WANT_FILE" 2>/dev/null | head -1 | tr -d ' \n' || echo dual)"
 [ -z "$want" ] && want="dual"
 if [ ! -f "$DETECT_STATE" ]; then
@@ -633,7 +663,7 @@ fi
 # dual = ONLY turn off the display the game will NOT use, then stock (+ the
 # patched launcher) manages the solo session end to end. The gameStop
 # restore belongs to the WATCHER (game-ended emitter → want=dual →
-# apply_dual_layout), never to a launch hook. Loud rc, no fallback chain.
+# layout_apply_if_changed), never to a launch hook. Loud rc, no fallback chain.
 if [ -n "$_solo_target" ]; then
 	command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true
 	export DISPLAY="${DISPLAY:-:0}"
@@ -660,14 +690,7 @@ if [ -n "$_solo_target" ]; then
 	fi
 	exit 0
 fi
-CRT_OUT="$(_state_val CRT_OUT)"
-if [ -z "$CRT_OUT" ]; then
-	_lcd_tmp="$(_state_val LCD_OUT)"
-	if [ -z "$_lcd_tmp" ]; then
-		CRT_OUT="$(_state_val CRT_PRESUMED_OUT)"
-	fi
-fi
-LCD_OUT="$(_state_val LCD_OUT)"
+_load_roles_from_state
 log "want=$want crt=$CRT_OUT lcd=$LCD_OUT"
 if [ -f "$STATE_DIR/profile" ] || [ -f "/tmp/crt-dual-mode" ]; then
 	log "game guard active — yield (no apply)"

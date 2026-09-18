@@ -248,9 +248,11 @@ echo "  install-source -> $PKG/install-source ($REPO)"
 #    already speak the stock videomode-key channel; the boot service
 #    re-applies at every boot after rgs_config re-copies the stock file,
 #    first apply takes the stock snapshot — uninstall restores it).
-bash "$SVCDIR/$OUR_SVC" resolution-patch \
-	|| echo "  WARN: resolution patch failed (anchor drift? see $LOG)"
-echo "  launcher raster hunks recomputed (service log: $LOG)"
+if bash "$SVCDIR/$OUR_SVC" resolution-patch; then
+	echo "  launcher raster hunks recomputed (service log: $LOG)"
+else
+	echo "  WARN: resolution patch failed (anchor drift? see $LOG)"
+fi
 
 # ── 7e. gamelist entry + tile (single logic copy in the service) ──
 bash "$SVCDIR/$OUR_SVC" gamelist-ensure \

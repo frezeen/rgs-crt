@@ -25,7 +25,10 @@ STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 mkdir -p "$STATE_DIR"
 
 TRIGGER="$STATE_DIR/hotplug-trigger"
-touch "$TRIGGER"
+touch "$TRIGGER" || {
+	echo "ERROR: cannot write $TRIGGER (is the state dir writable?)" >&2
+	exit 1
+}
 echo "hotplug trigger sent to $TRIGGER — watcher will apply within ~2s"
 
 exit 0

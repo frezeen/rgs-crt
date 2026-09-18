@@ -49,8 +49,8 @@ detect_gpu() {
 # the GPU-class whitelist (Maxwell regex + /etc/ati0dot.txt) is deleted
 # with the ati0dot list; the dotclock decide reads the PROBE's measured
 # knob (rgs-15khz.dotclock_min) with the safe 25.0 pre-measurement
-# fallback. ONE truth source, no tables (owner order; backport entry =
-# this block + the two log-line call sites below).
+# fallback. ONE truth source, no tables (owner order; the two log-line
+# call sites below are part of it).
 
 # Correct X name from DRM name (e.g. DVI-I-1 -> DVI-I-0)
 # REMOVED 2026-08-12 (audit finding M2): zero callers — the DRM->X

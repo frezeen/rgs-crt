@@ -46,7 +46,6 @@ PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 PROFILES_ROOT="$PKG_ROOT/profiles"
 LIB="$PKG_ROOT/src/lib/display-lib.sh"
 UI="${CRT_DUAL_UI:-$PKG_ROOT/src/selector/selector-ui.py}"
-MERGE="$PKG_ROOT/src/selector/merge.py"
 
 log() {
 	echo "CRT-DUAL-CORE: $*" >&2
@@ -106,19 +105,7 @@ if [ -d "$PROFILES_ROOT" ]; then
 		[ -d "$_d" ] || continue
 		_name="$(basename "$_d")"
 		[ -f "$_d/spec.conf" ] || continue
-		_target="$(
-			python3 - "$_d" "$PKG_ROOT" <<'PYEOF' 2>/dev/null || echo crt
-import sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[2] + "/src/selector")
-try:
-    import merge
-    label, desc, dt, *_ = merge.parse_spec(Path(sys.argv[1]))
-    print(dt)
-except Exception:
-    print("crt")
-PYEOF
-		)"
+		_target="$(python3 "$PKG_ROOT/src/selector/spec-target.py" "$_d" 2>/dev/null || echo crt)"
 		case "$_target" in
 		crt) PROFILES_CRT+=("$_name") ;;
 		lcd) PROFILES_LCD+=("$_name") ;;

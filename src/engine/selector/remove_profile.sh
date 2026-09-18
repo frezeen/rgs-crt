@@ -11,7 +11,7 @@
 #
 # Heavy lifting in merge.py (bash glue + python merge ).
 #
-# Usage: remove_profile.sh <profile-name>
+# Usage: remove_profile.sh <profile-name> [<system>]
 # Exit:  0 = clean (block removed or nothing active), 1 = fatal error
 #
 # Env (test seams): CRT_DUAL_PKG_ROOT / CRT_DUAL_TARGET_ROOT /
@@ -27,7 +27,7 @@ MERGE="$PKG_ROOT/src/selector/merge.py"
 LIB="$PKG_ROOT/src/lib/display-lib.sh"
 
 [ $# -ge 1 ] || {
-	echo "usage: remove_profile.sh <profile-name>" >&2
+	echo "usage: remove_profile.sh <profile-name> [<system>]" >&2
 	exit 1
 }
 NAME="$1"
@@ -76,6 +76,8 @@ fi
 # converge that ran double with the watcher's own.
 # Guard clear MUST stay here (the crash-clean contract + the watcher's
 # yield release — the game-ended emitter needs the guard GONE to fire).
+# Inline read by design: the hooks tolerate the package libs being absent
+# (remove_profile is exercised that way by seam test_remove_single_call).
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile 2>/dev/null || true

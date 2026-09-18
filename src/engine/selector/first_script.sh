@@ -4,10 +4,10 @@
 # Part of crt-dual — https://github.com/frezeen
 # first_script.sh — CRT-DUAL: stock USER_SCRIPTS hook (gameStart/gameStop)
 #
-# The ONLY hook point, synchronous. Timing note: stock
-# Batocera runs gameStart at emulatorlauncher.py:165 — AFTER the generator
-# is resolved (:103). For per-game EMULATOR selection the RAM monkey-patch
-# (sitecustomize.py) hoists this hook BEFORE
+# The ONLY hook point, synchronous. Timing note: stock Batocera runs
+# gameStart AFTER the generator is resolved (names, not line refs:
+# get_generator -> callExternalScripts). For per-game EMULATOR selection
+# the RAM monkey-patch (sitecustomize.py) hoists this hook BEFORE
 # Emulator() reads batocera.conf; at that point emulator/core ($3/$4) are
 # still unknown (empty) — exactly what the selector decides. It:
 #
@@ -83,8 +83,7 @@ gameStart)
 	;;
 
 gameStop)
-	# RGS-15KHZ-EXT BEGIN (stdout->stderr, both hooks; backport = this block
-	# + the one-line exec in gameStart). ES pipes the game command's stdout
+	# RGS-15KHZ-EXT BEGIN (stdout->stderr, both hooks). ES pipes the game command's stdout
 	# through head -300 ("head -300" x2 in the emulationstation binary,
 	# es_launch_stdout.log capped at exactly 300 lines — observed 2026-09-06
 	# RGS 43.41). When the cap falls inside gameStop the pipe read-end dies:

@@ -178,9 +178,7 @@ for t in $TESTS; do
 done
 
 # Restore the desktop (never leave the CRT on a test mode) — the
-# engine v2 applier is SR-OWNER (want-file; apply_dual_layout/
-# _crt_set_15khz_direct were REMOVED from display-lib in the v2 move,
-# see lib header "v2 PURE"). The want file already says dual (boot
+# applier is SR-OWNER (want-file): the want file already says dual (boot
 # topology); sr-owner applies it and re-verifies. A GAME that took over
 # the display owns the mode: restoring here would fight it, so the
 # restore is skipped in that case (the test modes are still dropped
@@ -192,8 +190,6 @@ if game_running; then
 	log "desktop restore skipped — a game owns the display"
 elif [ -x "$PKG/src/owner/sr-owner.sh" ]; then
 	bash "$PKG/src/owner/sr-owner.sh" >/dev/null 2>&1 || true # want=dual — the watcher's own applier
-elif command -v _crt_set_15khz_direct >/dev/null 2>&1; then
-	_crt_set_15khz_direct "$crt" >/dev/null 2>&1 || true # pre-v2 engine fallback
 fi
 "$XRANDR" --output "$crt" --rmmode "$name" 2>/dev/null || true # last test mode, best-effort cleanup
 

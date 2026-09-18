@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-19 — safer removal from the check screen, settings that stay right
+
+### Fixed
+- **If the removal started from the check screen does not complete, the
+  machine no longer restarts on its own.** It stops and says why, and you
+  can try again — before, a failed removal could still be followed by an
+  automatic restart.
+- **When you change a setting a second time, the newest value now wins.**
+  Some settings — for example the CRT clock floor `rgs-15khz.dotclock_min`
+  — could keep the older value after an edit; the layer now reads the last
+  one.
+
+### Improved
+- **The problem report says so instead of going quiet when a graphics
+  tool is missing** (for example when the desktop is not running), so the
+  bundle can be read without follow-up questions.
+- **When the installer cannot apply one of its compatibility adjustments
+  to the stock launcher, it now says so and points to its log** — before,
+  the install output claimed success either way.
+
 ## 2026-09-17 — Intel machines: the 480i patch is applied and kept; reports show its state
 
 ### Fixed
@@ -29,7 +49,7 @@
 ### Changed
 - **The installer no longer writes screen settings of its own.** It
   records the values your box uses (so the uninstall can hand them back
-  exactly) and leaves your own settings in charge — nothing was pinned,
+  exactly) and leaves your own settings in charge — nothing was locked in,
   so nothing needs reverting.
 
 ### Improved

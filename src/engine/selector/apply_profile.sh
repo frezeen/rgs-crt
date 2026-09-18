@@ -4,8 +4,8 @@
 # Part of crt-dual — https://github.com/frezeen
 # apply_profile.sh — CRT-DUAL profile engine: apply a profile at gameStart.
 #
-# gameStart hook (synchronous, runs BEFORE configgen — verified
-# emulatorlauncher.py:165-166): pre-clean stale blocks → inject marked
+# gameStart hook (synchronous; the sitecustomize RAM patch hoists it
+# BEFORE configgen resolves the generator): pre-clean stale blocks → inject marked
 # blocks → turn the non-target display OFF → verify → configgen carries
 # the keys to the emulator.
 #
@@ -15,7 +15,7 @@
 # function, NEVER raw xrandr — ) and the crash level-1
 # pre-clean orchestration.
 #
-# Usage: apply_profile.sh <profile-name>
+# Usage: apply_profile.sh <profile-name> [<system>]
 # Exit:  0 = applied, 1 = spec/fatal error, 2 = applied + rolled back
 #
 # Env (test seams, dry-run harness):
@@ -33,7 +33,7 @@ MERGE="$PKG_ROOT/src/selector/merge.py"
 LIB="$PKG_ROOT/src/lib/display-lib.sh"
 
 [ $# -ge 1 ] || {
-	echo "usage: apply_profile.sh <profile-name>" >&2
+	echo "usage: apply_profile.sh <profile-name> [<system>]" >&2
 	exit 1
 }
 NAME="$1"
@@ -69,7 +69,7 @@ if ! python3 "$MERGE" apply "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT"
 	exit 2
 fi
 
-# ── 3. Display switch — v2 thin sender over the SR-OWNER want-file (ADR 001) ──
+# ── 3. Display switch — thin sender over the SR-OWNER want-file (ADR 001) ──
 # RGS-15KHZ-EXT (single-topology pass-through, 2026-09-13): the per-launch
 # engine display work (the two-step primary/positions dance) is needed ONLY
 # in dual topology, where the stock flow cannot choose the primary. In any
@@ -82,20 +82,10 @@ fi
 # cycle; the keys and the guard still run (steps 1-4). The BOOT apply (zz)
 # and any hotplug re-entry keep the full engine — the gate reads
 # detect-state each launch and follows the topology.
-TARGET_DISPLAY="$(
-	python3 - "$PROFILE_DIR" "$PKG_ROOT" <<'PYEOF' 2>/dev/null || echo crt
-import sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[2] + "/src/selector")
-try:
-    import merge
-    label, desc, dt, *_ = merge.parse_spec(Path(sys.argv[1]))
-    print(dt)
-except Exception:
-    print("crt")
-PYEOF
-)"
+TARGET_DISPLAY="$(python3 "$PKG_ROOT/src/selector/spec-target.py" "$PROFILE_DIR" 2>/dev/null || echo crt)"
 TARGET_DISPLAY="${TARGET_DISPLAY:-crt}"
+# Inline read by design: same lib-absent tolerance as remove_profile.sh
+# (audit 2026-09-18 — do not "clean" this into a display-lib helper).
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then

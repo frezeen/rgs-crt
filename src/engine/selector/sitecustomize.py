@@ -12,8 +12,9 @@ Strategy:
     flaw — the per-game emulator selection must be written to
     batocera.conf BEFORE configgen resolves the generator, but the stock
     gameStart hook runs AFTER that. Configs/keys alone cannot fix this
-    ordering (verified on stock Batocera 43.1, 2026-08-10:
-    emulatorlauncher.py:103 get_generator() vs :165 gameStart hook).
+    ordering (verified on stock Batocera 43.1, 2026-08-10;
+    emulatorlauncher line refs re-checked 2026-09-18 — cite names:
+    get_generator() runs before the gameStart hook).
   - Guarded: patched behavior reads the profile state file at CALL time;
     with no profile active it behaves exactly like stock.
   - Self-verifying: _PATCHER_RESULTS -> verify.sh (a patcher that stops
@@ -56,10 +57,11 @@ def _patch_emulatorlauncher(module):
     batocera.conf, so the profile chosen by the selector is applied before
     configgen resolves the generator (emulator/core).
 
-    Stock flaw (verified on box 2026-08-10, emulatorlauncher.py):
-      :84  system = Emulator(args, rom)   # reads batocera.conf
-      :103 generator = get_generator(system.config.emulator, ...)
-      :165 callExternalScripts(..., "gameStart", ...)   # our hook — TOO LATE
+    Stock flaw (verified on box 2026-08-10; names stable, line refs
+    re-checked 2026-09-18 on RGS 43.42):
+      system = Emulator(args, rom)          # reads batocera.conf
+      generator = get_generator(system.config.emulator, ...)
+      callExternalScripts(..., "gameStart", ...)  # our hook — TOO LATE
     The selector writes mame.emulator=mame via the profile at gameStart;
     with stock ordering that write lands AFTER the generator was chosen, so
     the game always launches with the pre-existing emulator (libretro).
@@ -149,6 +151,18 @@ def _genconfig_prev(target: str, key: str, name: str) -> Path:
          / target.replace("/", "__").replace(".", "__"))
     d.mkdir(parents=True, exist_ok=True)
     return d / key.replace(".", "__").replace("/", "__")
+
+
+def _archive_genconfig(path: str, key: str, content: str, name: str, tag: str = "") -> None:
+    """First-apply-wins pre-edit archive for one key ('' = absent).
+    Bookkeeping must never block a game: failures warn only."""
+    try:
+        prev_file = _genconfig_prev(path, key, name)
+        if not prev_file.exists():
+            prev_file.write_text(content)
+    except OSError as e:
+        _log.warning("crt-dual: genconfig archive failed%s %s:%s: %s",
+                     tag, path, key, e)
 
 
 def _marker_lines() -> list:
@@ -266,21 +280,11 @@ def _apply_config_edits(path: str, entries: str, name: str | None = None) -> Non
             idx = next((i for i, ln in enumerate(lines)
                         if ln.strip().split('=', 1)[0].strip() == key), None)
             if archive:
-                try:
-                    prev_file = _genconfig_prev(path, key, name)
-                    if not prev_file.exists():
-                        prev_file.write_text(lines[idx] if idx is not None else "")
-                except OSError as e:
-                    _log.warning("crt-dual: genconfig archive failed %s:%s: %s",
-                                 path, key, e)
-            replaced = False
-            for i, ln in enumerate(lines):
-                if ln.strip().split('=', 1)[0].strip() == key:
-                    lines[i] = f'{key}={value}'
-                    replaced = True
-                    changed = True
-                    break
-            if not replaced:
+                _archive_genconfig(path, key, lines[idx] if idx is not None else "", name)
+            if idx is not None:
+                lines[idx] = f'{key}={value}'
+                changed = True
+            else:
                 lines.append(f'{key}={value}')
                 changed = True
         if changed:
@@ -318,17 +322,11 @@ def _apply_config_drop(path: str, keys: str, name: str | None = None) -> None:
             return  # nothing matched — no write, no archive (restore no-op)
         if name:
             for key in drop:
-                try:
-                    removed = [ln for ln in lines
-                               if ln.strip().split('=', 1)[0].strip() == key]
-                    if not removed:
-                        continue  # key not present — nothing to restore
-                    prev_file = _genconfig_prev(path, key, name)
-                    if not prev_file.exists():
-                        prev_file.write_text("\n".join(removed))
-                except OSError as e:
-                    _log.warning("crt-dual: genconfig archive failed (drop) %s:%s: %s",
-                                 path, key, e)
+                removed = [ln for ln in lines
+                           if ln.strip().split('=', 1)[0].strip() == key]
+                if not removed:
+                    continue  # key not present — nothing to restore
+                _archive_genconfig(path, key, "\n".join(removed), name, tag=" (drop)")
         else:
             _log.warning("crt-dual: config-drop with no active profile — no archive")
         with p.open('w') as _fh:

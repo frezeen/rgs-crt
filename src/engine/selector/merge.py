@@ -191,9 +191,7 @@ def parse_spec(profile_dir: Path):
                 else:
                     block_type.setdefault(block, "global" if block == "global" else "system")
                 blocks.add(block)
-                current_file = None
                 current_keypatch = None
-                current_section = None
                 in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = False
                 patches_prefix = ""
                 continue
@@ -333,6 +331,12 @@ def atomic_write(path: Path, content: bytes | str) -> None:
     os.replace(tmp, path)
 
 
+def _sanitize(part: str) -> str:
+    """Archive-path component: '/' and '.' -> '__' (independent
+    replacements, order irrelevant)."""
+    return part.replace("/", "__").replace(".", "__")
+
+
 # ──────────────────────────────────────────────────────────────
 # Marked-block injection / removal
 # ──────────────────────────────────────────────────────────────
@@ -382,7 +386,6 @@ def restore_configs(profile_dir: Path, configs: dict, target_root: Path,
 # (verified: writes `key=value`, no spaces). Reversible: the previous
 # value (or absence) is archived per key; remove restores it exactly.
 BATOCERA_SET = "/usr/bin/batocera-settings-set"
-BATOCERA_GET = "/usr/bin/batocera-settings-get"
 BATOCERA_CONF = "/userdata/system/batocera.conf"
 
 
@@ -408,6 +411,18 @@ def _batocera_set_inplace(key: str, value: str) -> None:
         subprocess.run([BATOCERA_SET, key, value], check=False, capture_output=True)
 
 
+def _batocera_delete_key(key: str) -> bool:
+    """Remove the key's line from batocera.conf (sed is the canonical
+    removal for a plain file). False = sed unavailable; the caller keeps
+    the previous suppress semantics (print skipped in that case)."""
+    try:
+        subprocess.run(["sed", "-i", rf"/^{re.escape(key)}=/d", BATOCERA_CONF],
+                       check=False, capture_output=True)
+        return True
+    except OSError:
+        return False
+
+
 def apply_batocera(batocera: dict, backup_root, name: str) -> None:
     if not batocera:
         return
@@ -417,23 +432,16 @@ def apply_batocera(batocera: dict, backup_root, name: str) -> None:
     for key, value in batocera.items():
         prev_file = _batocera_prev(key, backup_root, name)
         if not prev_file.exists():
-            # archive the PREVIOUS state (value or absence) — first apply
-            prev = ""
-            if os.path.exists(BATOCERA_CONF):
-                with contextlib.suppress(OSError):
-                    with open(BATOCERA_CONF, encoding="utf-8", errors="replace") as f:
-                        for ln in f:
-                            if ln.strip().startswith(key + "="):
-                                prev = ln.split("=", 1)[1].strip()
-                                break
-            prev_file.write_text(prev)
+            # Archive the PREVIOUS state (value or absence) — first apply.
+            # LAST occurrence wins, same as _conf_key/batocera-settings:
+            # with duplicate keys the archive must hold the EFFECTIVE
+            # value, or restore reinstates a dead line (audit 2026-09-18).
+            prev_file.write_text(_conf_key(Path(BATOCERA_CONF), key))
         if value == "":
             # RGS-15KHZ-EXT: empty value = session DELETE of a stock key
             # (default fires unforced). restore_batocera already restores
             # value-or-absence from the archive — no new restore path.
-            with contextlib.suppress(OSError):
-                subprocess.run(["sed", "-i", rf"/^{re.escape(key)}=/d", BATOCERA_CONF],
-                               check=False, capture_output=True)
+            _batocera_delete_key(key)
             print(f"  batocera: deleted {key} (session; prev archived)")
             continue
         _batocera_set_inplace(key, value)
@@ -462,9 +470,7 @@ def restore_batocera(batocera: dict, backup_root, name: str, remove_missing: boo
             if remove_missing:
                 # active-block key, never archived -> remove the line
                 # exactly (plain file, sed is the canonical removal)
-                with contextlib.suppress(OSError):
-                    subprocess.run(["sed", "-i", rf"/^{re.escape(key)}=/d", BATOCERA_CONF],
-                                   check=False, capture_output=True)
+                if _batocera_delete_key(key):
                     print(f"  batocera: removed {key} (active block, no prev archive)")
             continue
         prev = prev_file.read_text()
@@ -474,9 +480,7 @@ def restore_batocera(batocera: dict, backup_root, name: str, remove_missing: boo
         else:
             # was absent before: remove the line exactly (no whiteout for
             # batocera.conf — plain file, sed is the canonical removal)
-            with contextlib.suppress(OSError):
-                subprocess.run(["sed", "-i", rf"/^{re.escape(key)}=/d", BATOCERA_CONF],
-                               check=False, capture_output=True)
+            _batocera_delete_key(key)
             print(f"  batocera: removed {key} (was absent before apply)")
         prev_file.unlink(missing_ok=True)
 
@@ -489,9 +493,9 @@ def restore_batocera(batocera: dict, backup_root, name: str, remove_missing: boo
 # can never silently rot the profile.
 # ──────────────────────────────────────────────────────────────
 def _keypatch_prev(target: str, key: str, backup_root, name: str) -> Path:
-    d = Path(backup_root) / name / "keypatch" / target.replace("/", "__").replace(".", "__")
+    d = Path(backup_root) / name / "keypatch" / _sanitize(target)
     d.mkdir(parents=True, exist_ok=True)
-    return d / key.replace(".", "__").replace("/", "__")
+    return d / _sanitize(key)
 
 
 def _keypatch_key(line: str) -> str:
@@ -538,9 +542,9 @@ def apply_keypatch(keypatch: dict, target_root, backup_root, name: str) -> None:
             lines = p.read_text(errors="replace").splitlines()
         else:
             (Path(backup_root) / name / "keypatch"
-             / target.replace("/", "__").replace(".", "__")).mkdir(parents=True, exist_ok=True)
+             / _sanitize(target)).mkdir(parents=True, exist_ok=True)
             (Path(backup_root) / name / "keypatch"
-             / target.replace("/", "__").replace(".", "__") / "__absent__").touch()
+             / _sanitize(target) / "__absent__").touch()
             lines = []
             print(f"  keypatch: {target} missing — creating (removed at gameStop)")
         changed = False
@@ -574,7 +578,7 @@ def restore_keypatch(keypatch: dict, target_root, backup_root, name: str) -> Non
     for target, entries in keypatch.items():
         p = Path(target) if target.startswith("/") else Path(target_root) / target
         base = (Path(backup_root) / name / "keypatch"
-                / target.replace("/", "__").replace(".", "__"))
+                / _sanitize(target))
         if not base.is_dir():
             continue  # never applied — nothing to do
         keys = list(dict.fromkeys(_keypatch_key(ln) for _, ln in entries if _keypatch_key(ln)))
@@ -620,8 +624,8 @@ def restore_keypatch(keypatch: dict, target_root, backup_root, name: str) -> Non
 # ──────────────────────────────────────────────────────────────
 def _genconfig_prev(target: str, key: str, backup_root, name: str) -> Path:
     d = (Path(backup_root) / name / "genconfig"
-         / target.replace("/", "__").replace(".", "__"))
-    return d / key.replace(".", "__").replace("/", "__")
+         / _sanitize(target))
+    return d / _sanitize(key)
 
 
 def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> None:
@@ -649,7 +653,7 @@ def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> Non
                 continue
             p = Path(target) if target.startswith("/") else Path(target_root) / target
             base = (Path(backup_root) / name / "genconfig"
-                    / target.replace("/", "__").replace(".", "__"))
+                    / _sanitize(target))
             if not base.is_dir():
                 continue  # never applied — nothing to do
             keys = []
@@ -667,7 +671,7 @@ def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> Non
                 if not prev_file.exists():
                     continue
                 prev = prev_file.read_text(errors="replace")
-                lines = [l for l in lines if l.strip().split("=", 1)[0].strip() != key]
+                lines = [l for l in lines if _keypatch_key(l) != key]
                 if prev:
                     lines.append(prev)
                     print(f"  genconfig: restored {target}: {key}")
@@ -885,7 +889,8 @@ def _defaults_val(system: str, field: str, defaults_dir: Path) -> str:
 
 def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
     """The emulator/core the launched system will use, resolved exactly
-    like configgen (Emulator.py:42-66,130): batocera.conf
+    like configgen (Emulator `_load_system_config` over `_load_defaults`;
+    line refs re-checked 2026-09-18): batocera.conf
     <system>.emulator/.core first, then the stock default library
     (configgen-defaults-arch.yml over configgen-defaults.yml, per-system
     over [default]). Returns (emulator, core) — each '' when unknown.
@@ -919,8 +924,9 @@ def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
 # apply resolves stock (match), remove re-resolves modified (no match)
 # and the keypatch strands with exit 0 (measured live 2026-09-04 vf).
 # do_apply records, do_remove prefers the record, live is the fallback.
-# Backport for re-vendors: these 3 helpers + the 1-line call sites in
-# do_apply/do_remove re-apply onto upstream; `git log --grep=RGS-15KHZ-EXT`.
+# These 3 helpers + the 1-line call sites in do_apply/do_remove keep the
+# stock line visible in batocera.conf (the record supplies the pre-apply
+# name; live is the fallback).
 def _resolve_record_path(backup_root, name: str) -> Path:
     return Path(backup_root) / name / ".resolve"
 
