@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-19 — unplugging a screen no longer leaves the next launch black
+
+### Fixed
+- **After you unplug one of the two screens, starting a game on the
+  remaining one could leave it black.** The departed screen could stay
+  marked inside the system as if it were still driving the picture; the
+  layer then read the layout as already correct and made no change, and
+  the game's video mode was addressed to a screen that was no longer
+  there. The layer now releases any screen that is not physically present
+  on every display change — and again just before a game starts — so the
+  video mode always lands on the screen that is really there.
+
+### Improved
+- **The layer no longer declares the layout fine from the desktop picture
+  alone**: it also checks for outputs that kept the display path after
+  being disconnected — the exact condition behind the black screen above.
+
 ## 2026-09-19 — safer removal from the check screen, settings that stay right
 
 ### Fixed

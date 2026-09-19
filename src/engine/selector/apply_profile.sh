@@ -89,6 +89,14 @@ TARGET_DISPLAY="${TARGET_DISPLAY:-crt}"
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then
+	# Belt vs. hotplug-fresh launches (2026-09-19): a disconnected output
+	# can still own a CRTC (kernel enabled=1) and the stock launcher's
+	# XRandR modeset lands on it — X wedges, tube black. The convergence
+	# oracle now sees this too (free_stale_crtcs in the owner), but a launch
+	# may arrive before any watcher pass: free it here, then stand down.
+	if command -v free_stale_crtcs >/dev/null 2>&1; then
+		free_stale_crtcs 2>/dev/null || true # best-effort hygiene: an off failure must never block the launch (stock owns the session)
+	fi
 	log "stand-down: single-display topology — the stock launcher (patched) owns the display flow"
 else
 # Dual topology: ONE minimal verb — turn off the display the game will NOT

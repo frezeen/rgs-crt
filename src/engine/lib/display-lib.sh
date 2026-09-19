@@ -543,6 +543,41 @@ _sysfs_status() {
 	_impl_status "$1"
 }
 
+# STALE-CRTC INVARIANT (2026-09-19 black screen): a connector the kernel
+# reports disconnected may still hold a CRTC — X keeps it after an unplug
+# (live: HDMI-A-1 disconnected/enabled). `xrandr --current` cannot show it,
+# so an oracle built on X rows alone calls the layout converged; the next
+# XRandR modeset (MAME/SwitchRes) then lands on the gone output, wedges X
+# and blacks the tube (evidence: logs/evidence-hotplug-stale-crtc-*.txt).
+# Single extractor for the readers (oracle) and the writer (hygiene).
+_stale_crtcs_list() {
+	local _f _st _en _drm _x
+	for _f in "$CRT_DUAL_SYSFS"/card*-*/enabled; do
+		[ -f "$_f" ] || continue
+		_st=$(cat "${_f%/enabled}/status" 2>/dev/null)
+		_en=$(cat "$_f" 2>/dev/null)
+		[ "$_st" = "disconnected" ] && [ "$_en" = "enabled" ] || continue
+		_drm=$(basename "$(dirname "$_f")")
+		_drm=${_drm#card*-}
+		_x=$(_drm_to_x "$_drm" 2>/dev/null) || continue
+		[ -n "$_x" ] && echo "$_x"
+	done
+}
+
+_stale_crtc_present() { [ -n "$(_stale_crtcs_list)" ]; }
+
+free_stale_crtcs() { # free the CRTC of every disconnected-but-enabled output
+	local _x _n=0
+	[ -n "${DISPLAY:-}" ] || export DISPLAY=:0
+	while IFS= read -r _x; do
+		[ -n "$_x" ] || continue
+		xrandr --output "$_x" --off 2>/dev/null || true # best-effort: an off failure on a gone output leaves the state no worse than it was
+		_n=$((_n + 1))
+	done < <(_stale_crtcs_list)
+	[ "$_n" -gt 0 ] && echo "CRT-DUAL: freed $_n stale CRTC(s) on disconnected output(s)" >&2
+	return 0
+}
+
 # RAW sysfs connector fingerprint ("DVI-I-0:connected HDMI-0:connected ...")
 # — the channel AMD/Intel adapters fingerprint; NOT the family oracle
 # itself (that is _layout_fingerprint -> _impl_fingerprint).

@@ -329,13 +329,12 @@ _apply_dual_layout_unlocked() {
 		# Direct 15 kHz desktop (never --auto: a converter's fake EDID is 31kHz — _crt_handle_converter).
 		_crt_set_15khz_direct "$crt"
 		_crt_set_primary "$crt"
-		# Hotplug CRT-only: HDMI may be disconnected but still owns CRTC 1 (seen 21:27 HDMI disconnected CRTC 1). _kill_unmanaged skips disconnected, so free it explicitly.
-		for _o in HDMI-1 HDMI-0 DP-1 DP-2 DVI-D-1; do [ "$_o" != "$crt" ] && xrandr --display "$DISPLAY" --output "$_o" --off 2>/dev/null || true; done
 		echo "CRT-DUAL-CRT: CRT-only=$crt@640x480$crttag (HDMI/DP off, free stale CRTC)"
 	else
 		echo "CRT-DUAL-CRT: dual-output — no output detected (DISPLAY=$DISPLAY)" >&2
 	fi
 	_kill_unmanaged_outputs "$crt" "$LCD_OUT"
+	free_stale_crtcs # hotplug: a disconnected output can still own a CRTC (seen 21:27, reproduced 2026-09-19) — _kill_unmanaged skips disconnected, this frees it
 }
 
 # After a CRT game the CRT is already on: restore the desktop layout
@@ -496,6 +495,10 @@ _layout_convergent() {
 		[ "$_act" = "none" ] || return 1
 		[ "$_prim" = "0" ] || return 1 # phantom primary on unmanaged output (seen live 2026-08-25 unplug: DVI-I-1 primary with act none)
 	done <<<"$_rows"
+	# Kernel truth (2026-09-19): a disconnected connector must not own a
+	# CRTC. XRandR rows cannot show it; without this the oracle declares
+	# converged and the next game launch's modeset wedges X (black tube).
+	_stale_crtc_present && return 1
 	return 0
 }
 
