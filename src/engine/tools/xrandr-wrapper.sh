@@ -67,7 +67,7 @@ if [ -f /tmp/crt-dual/display-trace-on ]; then
 	if [[ " $* " =~ (--mode|--rate|--primary|--noprimary|--off|--newmode|--addmode|--delmode|--transform|--scale|--pos|--right-of|--left-of|--above|--below|--same-as|--rotate|--reflect|--gamma|--brightness|--fb|--size|--panning|--dpi|--set|--dryrun) ]]; then _cls=W
 	elif [[ " $* " =~ (--query|--verbose|--prop|--properties|--listmonitors|--listactivemonitors|--listproviders|--listPrimary|--listModes|--listConnectedOutputs|--currentResolution|--currentRotation) ]]; then _cls=G
 	elif [[ " $* " =~ --current ]]; then _cls=R; else _cls=G; fi
-	printf '%s %s %s PID=%s CHAIN=[%s] CALLER=[%s] ARGS=%s\n' "$_epoch" "$_cls" "$_ht" "$PPID" "$_chain" "${_caller:0:80}" "$*" >>/userdata/system/logs/display-trace.log 2>/dev/null || true
+	printf '%s %s %s PID=%s CHAIN=[%s] CALLER=[%s] ARGS=%s\n' "$_epoch" "$_cls" "$_ht" "$PPID" "$_chain" "${_caller:0:80}" "$*" >>"${CRT_DUAL_TRACE:-/tmp/crt-dual/display-trace.log}" 2>/dev/null || true
 fi
 
 # AMD gate — shared core (cached: lspci once per boot, then /tmp file;

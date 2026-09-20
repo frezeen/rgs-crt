@@ -13,6 +13,11 @@
 #   diag-dump.txt      engine src/engine/tools/diag-dump.sh (versions,
 #                      GPU, XORG errors, XRANDR all-outputs, EDID,
 #                      SYSFS connectors, mode file, classification)
+#   adapters.txt       engine src/engine/tools/edid-info.sh (per-connector
+#                      EDID forensics: identity, descriptor structure,
+#                      sizes, first DTD, and on DP the DPCD branch block
+#                      + OUI from the DRM aux chardev — tells a real
+#                      display's EDID from an adapter's fabrication)
 #   verify.txt         ./verify.sh full output + exit code (the gate)
 #   logs/              our runtime logs (/userdata/system/logs/:
 #                      rgs-15khz.log <- zz service, selector-core.log <-
@@ -60,6 +65,13 @@ echo "collecting (this takes a few seconds)..."
 #    extracted repo so it works even if the deploy folder moved).
 bash "$REPO/src/engine/tools/diag-dump.sh" >"$STAGE/diag-dump.txt" 2>&1 \
 	|| echo "diag-dump exited $? (kept its output anyway)" >>"$STAGE/diag-dump.txt"
+
+# 1b. Adapter/EDID forensics (2026-09-20, adapter incident): which adapter
+#     sits between the box and the tube, and whether an EDID is a real
+#     display's or a fabrication. Facts only; the class line comes from
+#     display-detect.sh (single source of truth).
+bash "$REPO/src/engine/tools/edid-info.sh" >"$STAGE/adapters.txt" 2>&1 \
+	|| echo "edid-info exited $? (kept its output anyway)" >>"$STAGE/adapters.txt"
 
 # 2. The gate verdict.
 bash "$REPO/verify.sh" >"$STAGE/verify.txt" 2>&1

@@ -38,33 +38,19 @@ mkdir -p "$STATE_DIR"
 
 log() { echo "CRT-DUAL-HOOK [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 
-# Shared libraries (display-lib: detect_outputs, layout_apply_if_changed).
-# Sourced here so both hooks share one detection.
-# shellcheck disable=SC1090  # source path is dynamic (system or PKG_ROOT candidate)
-for _lib in /usr/lib/gpu-lib.sh /usr/lib/display-lib.sh \
-	"$PKG_ROOT/src/lib/gpu-lib.sh" "$PKG_ROOT/src/lib/display-lib.sh"; do
-	[ -r "$_lib" ] && source "$_lib" 2>/dev/null
-done
-command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null
+# Display: the reconciler (ADR-002) is the only display owner — this hook
+# does the keys/profile work and hands the session over via apply_profile.
 
 case "$1" in
 gameStart)
 	exec 1>&2 # RGS-15KHZ-EXT — same rule as gameStop (see block there)
 	log "gameStart ($2, core=${3:-unknown})"
 
-	# Hotplug recovery (no reboot): if the output set changed since the
-	# layout was applied, reapply BEFORE the gate. layout_apply_if_changed
-	# compares the fingerprint -> identical = zero xrandr (no cost).
-	command -v layout_apply_if_changed >/dev/null 2>&1 && layout_apply_if_changed 2>/dev/null || true # best-effort; empty layout = stock
-
-	# dotclock floor (owner 2026-09-16): the FIRST CRT game launch
-	# measures the chain once (synchronous, cached) — any system, any
-	# emulator — BEFORE the emulator starts, so the RA floor is in place
-	# when the game reads its switchres ini. Later launches: the fast
-	# path (cache read + no-op refresh). LCD-only boots: the duty
-	# self-gates and nothing exists. gameStop NEVER runs this (the probe
-	# cycles the tube; a game owns the display then).
-	bash "${RGS15_SVC:-/userdata/system/services/zz_rgs_15khz}" dotclock-ensure >>"${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}" 2>&1 || true
+	# dotclock floor: measured at BOOT by the S30z hook (pre-X,
+	# KMS-native: mode set + WAIT_VBLANK = the behavioural oracle), which
+	# writes BOTH switchres inis fresh every boot (volatile /etc write,
+	# no overlay save). Nothing runs at game launch: an emulator can
+	# never be disturbed by a mode walk (owner directive 2026-09-20).
 
 	# Selector decision (gate display × profiles — the picker appears only
 	# when a real choice exists; empty output = stock default, no profile).

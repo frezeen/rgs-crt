@@ -44,7 +44,6 @@ set -uo pipefail
 
 PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 PROFILES_ROOT="$PKG_ROOT/profiles"
-LIB="$PKG_ROOT/src/lib/display-lib.sh"
 UI="${CRT_DUAL_UI:-$PKG_ROOT/src/selector/selector-ui.py}"
 
 log() {
@@ -52,16 +51,13 @@ log() {
 	echo "CRT-DUAL-CORE: $*" >>"${CRT_DUAL_LOG_FILE:-/userdata/system/logs/selector-core.log}" 2>/dev/null || true
 }
 
-# ── 1. Display detection (CONFIRMED only) ──
-# Both libs: gpu-lib (detect_gpu -> GPU_VENDOR/GPU_MODEL) is the
-# display-lib prerequisite (2026-08-12: sourcing display-lib alone left
-# GPU_VENDOR unset, which opened the --prop fallback gate -> 3 G per
-# gameStart).
-for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh" "$LIB"; do
-	[ -r "$_lib" ] && source "$_lib" 2>/dev/null
-done
-command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null
-command -v detect_outputs >/dev/null 2>&1 && detect_outputs 2>/dev/null || true
+# ── 1. Display roles (CONFIRMED only) ──
+# The reconciler (ADR-002) is the single writer of detect-state; the
+# selector only READS it — no detection, no display libs here.
+_ds="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state"
+CRT_OUTS="$(sed -n 's/^CRT_OUTS=//p' "$_ds" 2>/dev/null | head -1)"
+LCD_OUTS="$(sed -n 's/^LCD_OUTS=//p' "$_ds" 2>/dev/null | head -1)"
+[ -n "$CRT_OUTS$LCD_OUTS" ] || log "no detect-state roles yet ($_ds) — stock default"
 
 # LCD real-check (2026-08-11): an LCD is a REAL display only when the X
 # mode list shows native modes (>=800px width). The NVIDIA driver keeps a

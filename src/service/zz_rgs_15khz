@@ -46,7 +46,7 @@ LOG="${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}"
 LOGS_DIR="$(dirname "$LOG")"
 # Explicit truncation list — OUR files only (service log + engine runtime
 # log the game path appends to; stock display.log/es_launch_* NEVER touched).
-TRUNCATE_LIST="rgs-15khz.log selector-core.log dotclock-probe.log"
+TRUNCATE_LIST="rgs-15khz.log selector-core.log selector.log display-reconcile.log"
 RGS_FIX="/userdata/system/rgs/fix"
 MANIFEST="$PKG/overlay-manifest"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
@@ -75,6 +75,7 @@ manifest_src() {
 	case "$1" in
 	*/sitecustomize.py) printf '%s' "$PKG/src/selector/sitecustomize.py" ;;
 	*/S15crt-dual-gen) printf '%s' "$PKG/src/service/crt-gen-initd.sh" ;;
+	*/S30z-crt-dual-measure) printf '%s' "$PKG/src/service/dotclock-boot-initd.sh" ;;
 	*/99-crt-dual-hotplug.rules) printf '%s' "$PKG/src/udev/99-crt-dual-hotplug.rules" ;;
 	*) return 1 ;;
 	esac
@@ -253,59 +254,38 @@ resolution_patch_decide() {
 # ── GPU dotclock floor — chain property, measured ONCE at the first CRT
 #    game launch (owner architecture 2026-09-16) ──────────────────────
 # WHY: RA/GroovyMAME run NATIVE (RA super="0", mame.ini dotclock_min 0).
-# A chain that cannot produce a native mode's dotclock would go BLACK.
-# The capability is a property of the CHAIN: measured once by the probe,
-# cached in a state file (value + GPU fingerprint), and it feeds the GAME
-# consumers ONLY.
+# A chain that cannot produce a native mode's dotclock would go BLACK —
+# or worse, ACCEPT the mode and never scan it (Intel PCH: below ~10.4 MHz
+# the ICLKIP divider is invalid, xrandr says "active", vblanks never
+# arrive, every flip times out — measured 2026-09-20).
+# The capability is a property of the CHAIN: measured at BOOT (the S30z
+# hook, pre-X, KMS-native via dotclock-measure.py: mode set + WAIT_VBLANK
+# = the behavioural oracle), NEVER at game launch (no emulator can be
+# disturbed), NEVER hardcoded.
+# The floor is written FRESH at every boot into BOTH switchres inis: the
+# RA config-dir override AND the system /etc/switchres.ini (owner
+# directive 2026-09-20: volatile — the /etc write lives in the RAM
+# overlay, recomputed each boot, never overlay-saved by this duty).
+# Value precedence (ONE truth source):
+#   rgs-15khz.dotclock_min manual knob  >  measured (this boot)  >  0
+# `rgs-15khz.dotclock_min=off` disables the floor (both inis floor 0).
+# LCD-only boots / no CRT: inert, floor 0 (the stock default).
 # The desktop (480i) never consults it: 480i is the boot mode by
-# definition and sits above every chain's doubt zone. /etc/switchres.ini
-# stays STOCK (floor 0) — NOTHING in this layer ever writes it (the PR
-# rule); the desktop generator and the probe both read its floor-neutral
-# math directly.
-# Where the floor lives: the ONE file RA 1.22 reads — the config-dir
-# override /userdata/system/configs/retroarch/switchres.ini (absent in
-# stock → born here as a copy of the system ini + the floor).
-# Value precedence (ONE truth source — the measurement):
-#   rgs-15khz.dotclock_min manual knob  >  measured state (fingerprint
-#   match)  >  NOTHING. No safe fallback is ever written: pre-measurement
-#   games run RA's own library default (safe widening); the first CRT
-#   game launch measures and caches (dotclock-ensure, first_script hook).
-# `rgs-15khz.dotclock_min=off` disables the floor (RA override floor 0).
-# LCD-only boots: the whole machinery is inert (CRT gate in every entry
-# point) — if this machine never sees a CRT, none of it exists.
-# Lifecycle: the measurement re-certifies by deleting $PKG/state/dotclock
-# (or uninstall + install); a changed GPU fingerprint invalidates the
-# state automatically.
-dotclock_fpr() { # the video hardware identity (DRIVER:PCI_ID per card) —
-	# same shape as the service's (the cache validity + swap detection).
-	# The digit globs NEVER match connector dirs (card0-DP-1): a display
-	# plug/unplug must not change the fingerprint.
-	local _f="" _u _root="${RGS15_DRM_SYS:-/sys/class/drm}"
-	for _u in "$_root"/card[0-9]/device/uevent "$_root"/card[0-9][0-9]/device/uevent; do
-		[ -f "$_u" ] || continue
-		_f="$_f|$(sed -n 's/^DRIVER=//p' "$_u" | head -1):$(sed -n 's/^PCI_ID=//p' "$_u" | head -1)"
-	done
-	printf '%s' "$_f"
-}
-
-dotclock_state_read() { # echo the measured value when the cached state
-	# matches this hardware; nothing (rc 1) otherwise
-	local _sf="${RGS15_STATE:-$PKG/state/dotclock}" _v _fp
-	[ -f "$_sf" ] || return 1
-	_v="$(sed -n 's/^value=//p' "$_sf" | head -1)"
-	[ -n "$_v" ] || return 1
-	_fp="$(sed -n 's/^fpr=//p' "$_sf" | head -1)"
-	[ "$_fp" = "$(dotclock_fpr)" ] || return 1
-	printf '%s' "$_v"
-}
-
+# definition and sits above every chain's doubt zone.
 dotclock_crt_present() { # CRT-only/dual = active; LCD-only = inert.
 	# RGS15_CRT_PRESENT seam (tests: 1/0); else the display layer's own
-	# classification, same source order as the probe (xrandr/sysfs →
-	# owner detect-state → presumed analog).
+	# classification. Source order: the sysfs classification FIRST (the
+	# display layer's authoritative source; the ONLY one that works pre-X,
+	# where the S30z hook runs — without it the boot gate answered "no
+	# CRT" and the measured floor was never written, observed 2026-09-20),
+	# then the X-time sources (detect_outputs -> CRT_OUTS, detect-state).
 	if [ -n "${RGS15_CRT_PRESENT:-}" ]; then
 		[ "$RGS15_CRT_PRESENT" = "1" ]
 		return
+	fi
+	local _detect="${RGS15_DETECT:-$PKG/src/display/display-detect.sh}"
+	if [ -r "$_detect" ] && bash "$_detect" --list 2>/dev/null | grep -qE '^[^[:space:]]+[[:space:]]+analog[[:space:]]'; then
+		return 0
 	fi
 	[ -n "${CRT_OUTS:-}" ] && return 0
 	if ! command -v detect_outputs >/dev/null 2>&1; then
@@ -361,112 +341,52 @@ dotclock_normalize() {
 }
 
 dotclock_ra_ini="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
-dotclock_sys_ini="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}" # READ-ONLY: base + measurement math
+dotclock_sys_ini="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}" # written at boot (volatile)
 
 dotclock_ra_write() { # $1 = value: write the floor into the RA override
-	# — the ONE file RA reads. /etc is never touched. The override is
-	# created from the shipped ini on first write (RA ini absent in stock).
+	# — the file RA 1.22 reads. Born from the (freshly floored) system
+	# ini on first write; RA ini absent in stock.
 	[ -f "$dotclock_ra_ini" ] || {
 		mkdir -p "$(dirname "$dotclock_ra_ini")" 2>/dev/null || true
 		{
-			printf '# Managed by crt-dual (dotclock floor, decided at the first CRT game launch; base: %s)\n' "$dotclock_sys_ini"
+			printf '# Managed by crt-dual (dotclock floor, measured at boot; base: %s)\n' "$dotclock_sys_ini"
 			cat "$dotclock_sys_ini" 2>/dev/null
 		} >"$dotclock_ra_ini" 2>/dev/null || return 1
 	}
 	dotclock_ini_write "$dotclock_ra_ini" "$1"
 }
 
-dotclock_decide() {
-	# The single writer of the RA floor: materializes the decision
-	# (manual knob > measured state > nothing). Runs at boot (S99) to
-	# re-heal the RA ini after updates, and from dotclock-ensure at the
-	# first CRT game launch to materialize a fresh measurement.
+dotclock_write() { # $1 = measured floor in MHz (empty = measurement failed)
+	# The single writer of the dotclock floor (knob > measured > 0).
+	# Writes BOTH switchres inis fresh every boot: the system
+	# /etc/switchres.ini (volatile: the write lives in the RAM overlay,
+	# recomputed each boot, never overlay-saved by this duty) and the RA
+	# config-dir override born from it. Idempotent (rewrite only on drift).
+	local _measured="$1" _val="" _src="" _knob
 	if ! dotclock_crt_present; then
-		log "dotclock-decide: no CRT — inert (nothing written)"
-		return 0
-	fi
-	local _knob="" _val="" _src="" _before=""
-	_knob="$(conf_get 'rgs-15khz\.dotclock_min')"
-	if [ "$_knob" = "off" ]; then
-		_before=""
-		[ -f "$dotclock_ra_ini" ] && _before="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$dotclock_ra_ini" | head -1 | awk '{print $NF}' | tr -d "\r")"
-		if [ "$_before" = "0" ]; then
-			log "dotclock-decide: off (knob) — RA floor already 0 (converged)"
-		elif dotclock_ra_write "0"; then
-			log "dotclock-decide: off (knob) — RA floor set to 0 (games run the library default)"
+		_val="0" _src="no CRT (inert)"
+	else
+		_knob="$(conf_get 'rgs-15khz\.dotclock_min')"
+		if [ "$_knob" = "off" ]; then
+			_val="0" _src="manual off (knob)"
+		elif [ -n "$_knob" ] && [ -n "$(dotclock_normalize "$_knob")" ]; then
+			_val="$(dotclock_normalize "$_knob")" _src="manual (rgs-15khz.dotclock_min=$_knob)"
+		elif [ -n "$_measured" ] && [ -n "$(dotclock_normalize "$_measured")" ]; then
+			_val="$(dotclock_normalize "$_measured")" _src="measured this boot (${_measured} MHz)"
 		else
-			log "dotclock-decide: WARN could not write $dotclock_ra_ini"
-		fi
-		return 0
-	fi
-	if [ -n "$_knob" ]; then
-		_val="$(dotclock_normalize "$_knob")"
-		if [ -z "$_val" ]; then
-			log "dotclock-decide: WARN invalid rgs-15khz.dotclock_min='$_knob' — ignored, measurement path kept"
-		else
-			_src="manual (rgs-15khz.dotclock_min=$_knob)"
+			_val="0" _src="no measurement (stock default)"
 		fi
 	fi
-	if [ -z "$_val" ]; then
-		_val="$(dotclock_state_read)" || _val=""
-		[ -n "$_val" ] && _src="measured (state cache, fingerprint match)"
-	fi
-	if [ -z "$_val" ]; then
-		log "dotclock-decide: not measured yet — RA floor untouched (the first CRT game launch measures)"
-		return 0
-	fi
-	_before=""
-	[ -f "$dotclock_ra_ini" ] && _before="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$dotclock_ra_ini" | head -1 | awk '{print $NF}' | tr -d "\r")"
-	if [ "$_before" = "$_val" ]; then
-		log "dotclock-decide: converged (dotclock_min=$_val, $_src)"
-		return 0
+	if dotclock_ini_write "$dotclock_sys_ini" "$_val"; then
+		log "dotclock-write: $dotclock_sys_ini dotclock_min=$_val ($_src)"
+	else
+		log "dotclock-write: WARN could not write $dotclock_sys_ini"
 	fi
 	if dotclock_ra_write "$_val"; then
-		log "dotclock-decide: $dotclock_ra_ini dotclock_min -> $_val ($_src)"
+		log "dotclock-write: $dotclock_ra_ini dotclock_min=$_val ($_src)"
 	else
-		log "dotclock-decide: WARN could not write $dotclock_ra_ini"
+		log "dotclock-write: WARN could not write $dotclock_ra_ini"
 	fi
-	return 0
-}
-
-dotclock_ensure() {
-	# Runs at gameStart (USER_SCRIPTS hook, before the emulator starts —
-	# so the RA floor is in place when the game reads its switchres ini).
-	# CRT only. Fast path after the first measurement (state read + a
-	# possible no-op refresh); the FIRST CRT launch of this hardware runs
-	# the probe synchronously (one time, bounded) and caches the result.
-	if ! dotclock_crt_present; then
-		log "dotclock-ensure: no CRT — inert (nothing exists)"
-		return 0
-	fi
-	local _knob="" _val="" _probe=""
-	_knob="$(conf_get 'rgs-15khz\.dotclock_min')"
-	if [ "$_knob" = "off" ]; then
-		dotclock_decide # the knob owns it: refresh, never measure
-		return 0
-	fi
-	if [ -n "$_knob" ] && [ -n "$(dotclock_normalize "$_knob")" ]; then
-		dotclock_decide # manual value: refresh, never measure
-		return 0
-	fi
-	if _val="$(dotclock_state_read)"; then
-		dotclock_decide # measured cache: refresh if drifted (milliseconds)
-		return 0
-	fi
-	_probe="${RGS15_PROBE:-$PKG/src/service/dotclock-probe.sh}"
-	if [ ! -f "$_probe" ]; then
-		log "dotclock-ensure: probe missing ($_probe) — games run the library default (safe widen)"
-		return 0
-	fi
-	log "dotclock-ensure: first CRT game launch — measuring the chain (one time, bounded)"
-	if command -v timeout >/dev/null 2>&1; then
-		timeout "${RGS15_PROBE_TIMEOUT:-180}" bash "$_probe" >>"$LOGS_DIR/dotclock-probe.log" 2>&1 ||
-			log "dotclock-ensure: probe rc != 0 (see dotclock-probe.log)"
-	else
-		bash "$_probe" >>"$LOGS_DIR/dotclock-probe.log" 2>&1 ||
-			log "dotclock-ensure: probe rc != 0 (see dotclock-probe.log)"
-	fi
-	dotclock_decide # materialize the fresh measurement into the RA floor
 	return 0
 }
 
@@ -719,22 +639,21 @@ do_start() {
 		resolution_patch_decide
 	fi
 
-	# 3d-bis. dotclock decide (switchres.ini floors; self-healing at every
-	#     boot like 3d — an RGS update restores stock inies, the next boot
-	#     re-decides). Guard-hold skips it: system-level state is not
-	#     recomputed while held. The first-measure probe (3d-ter) runs
-	#     AFTER the decide so a first boot both applies the GPU-class
-	#     fallback AND starts measuring.
+	# 3d-bis. dotclock floor: the S30z boot hook wrote BOTH switchres
+	#     inis pre-X (measured, fresh every boot). Nothing to recompute
+	#     here: X is up at S99, the measurement cannot take the DRM
+	#     master, and re-writing without a measurement would zero the
+	#     floor the boot hook just measured. Guard-hold skips the whole
+	#     duty anyway (system-level state is not recomputed while held).
 	if [ "$_guard_hold" = "1" ]; then
-		log "start: dotclock decide skipped (guard hold)"
-	else
-		dotclock_decide
+		log "start: dotclock duty skipped (guard hold — S30z wrote it pre-X)"
 	fi
 
-	# 3d-ter. dotclock floor: NO boot measurement (owner 2026-09-16 — the
-	#     chain is measured at the FIRST CRT game launch, dotclock-ensure
-	#     via the first_script hook; ES boots clean at 480i, /etc
-	#     untouched). The boot decide only re-heals the RA override.
+	# 3d-ter. dotclock floor: the boot measurement lives in the S30z hook
+	#     (pre-X, KMS-native, both inis written fresh every boot). This
+	#     S99 duty does NOT touch it: X is up here, the measurement cannot
+	#     take the DRM master, and re-writing without a measurement would
+	#     zero the floor the boot hook just measured.
 
 	# 4. Re-deploy manifest overlay files (cmp||cp; save IFF drifted).
 	if [ "$_guard_hold" = "1" ]; then
@@ -892,17 +811,12 @@ resolution-patch)
 	resolution_patch_decide
 	exit $?
 	;;
-dotclock-decide)
-	# One-shot decide (install.sh calls it at install; the boot duty
-	# recomputes every boot). Log-only errors: never blocks.
-	dotclock_decide
-	exit 0
-	;;
-dotclock-ensure)
-	# Game-launch entry (first_script gameStart hook): the first CRT
-	# launch measures the chain synchronously and caches it; every later
-	# launch is the fast path. CRT-gated: LCD-only = inert.
-	dotclock_ensure
+dotclock-write)
+	# Boot entry (the S30z hook, pre-X): write the floor measured by
+	# dotclock-measure.py into BOTH switchres inis, fresh every boot.
+	# $2 = the measured MHz (empty = the measurement failed -> floor 0,
+	# loud in the log). Knob precedence lives in dotclock_write.
+	dotclock_write "${2:-}"
 	exit 0
 	;;
 tool-check)
@@ -918,7 +832,7 @@ tool-check)
 	fi
 	exit 0
 	;;*)
-	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-decide|dotclock-ensure}" >&2
+	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
 	exit 1
 	;;
 esac

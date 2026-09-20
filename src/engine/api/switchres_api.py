@@ -5,7 +5,7 @@
 """Switchres library bridge — ctypes over the STOCK libswitchres.so.
 
 Who creates/reads this: the generator (calc — boot-time X11 conf
-modelines), sr-owner.sh (create — converter 240p path), the patched
+modelines), the display reconciler (create — converter 240p path), the patched
 stock launcher hunks (calc --name), diag-dump.sh / verify.sh (version,
 calc smoke). No other consumer. Not persistent state.
 
@@ -236,6 +236,18 @@ def init_dummy_session(lib, ini_path, monitor_preset):
         # (same order as the CLI applying -m before add_display).
         lib.sr_set_monitor(monitor_preset.encode())
     lib.sr_set_option(b"keep_changes", b"1")
+    # Floor-neutral BY CONSTRUCTION (2026-09-20): the system ini now
+    # carries a boot-written dotclock floor, but the DESKTOP and the
+    # measurement ladder must stay floor-free (480i is the boot mode by
+    # definition and sits above every chain's doubt zone) — force the
+    # library's floor to 0 for every calc/dummy session this bridge
+    # performs. The GAME consumers read the inis themselves and DO honour
+    # the floor; create_mode (the attach path) does NOT neutralize it.
+    # SR_FLOOR=1 opts a caller back into the measured floor (the stock
+    # raster channel's custom videomodes: a declared raster below the
+    # chain's limit must widen exactly like RA/MAME, not go dark).
+    if os.environ.get("SR_FLOOR") != "1":
+        lib.sr_set_option(b"dotclock_min", b"0")
 
     # The dummy screen goes through sr_init_disp's OWN screen argument —
     # the same call the CLI's calculate branch performs via

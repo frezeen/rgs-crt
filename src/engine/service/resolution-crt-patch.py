@@ -67,7 +67,7 @@ _H2 = '''                @MARKER@ — upstream patch 0003, adapted): a conf valu
                     else
                         _W=${PARTRES%%x*}; _H=${PARTRES#*x}; _I=""
                         case "${_H}" in *i) _I="i"; _H="${_H%i}" ;; esac
-                        MODELINE=$(python3 @BRIDGE@ calc "${_W}" "${_H}" "${PARTHZ}${_I}" --name "${PARTRES}" 2>>$log)
+                        MODELINE=$(SR_FLOOR=1 python3 @BRIDGE@ calc "${_W}" "${_H}" "${PARTHZ}${_I}" --name "${PARTRES}" 2>>$log)
                         if [ -n "$MODELINE" ]; then
                             echo "setMode: generating ${MODE} via the Switchres CRT layer" >> $log
                             _MPARAMS=$(echo "$MODELINE" | sed 's/^Modeline "[^"]*"//')

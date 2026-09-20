@@ -11,7 +11,7 @@
 #   GPU_MODEL     — GPU model string
 #
 # Shell contract: safe under `set -u` and `set -o pipefail`; the caller
-# enables those options (see display-lib.sh header).
+# enables those options (the hooks/service do).
 
 # One lspci line per process — NEVER inside a per-output loop
 # (GPU detection is a one-time, sourced lib call).
@@ -45,12 +45,12 @@ detect_gpu() {
 	fi
 }
 
-# RGS-15KHZ-EXT (dotclock-decide, 2026-09-14): check_dotclock REMOVED —
-# the GPU-class whitelist (Maxwell regex + /etc/ati0dot.txt) is deleted
-# with the ati0dot list; the dotclock decide reads the PROBE's measured
-# knob (rgs-15khz.dotclock_min) with the safe 25.0 pre-measurement
-# fallback. ONE truth source, no tables (owner order; the two log-line
-# call sites below are part of it).
+# RGS-15KHZ-EXT (dotclock, 2026-09-20): check_dotclock REMOVED — the
+# GPU-class whitelist (Maxwell regex + /etc/ati0dot.txt) is deleted with
+# the ati0dot list. The floor is MEASURED at boot (the S30z hook,
+# KMS-native: mode set + WAIT_VBLANK) and written into both switchres
+# inis fresh every boot; the manual knob (rgs-15khz.dotclock_min) wins.
+# ONE truth source, no tables (owner order).
 
 # Correct X name from DRM name (e.g. DVI-I-1 -> DVI-I-0)
 # REMOVED 2026-08-12 (audit finding M2): zero callers — the DRM->X

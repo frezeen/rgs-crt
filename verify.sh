@@ -369,58 +369,63 @@ else
 	fi
 fi
 
-# ── 4e. GPU dotclock floor (architecture 2026-09-16): same discipline as
+# ── 4e. GPU dotclock floor (architecture 2026-09-20): same discipline as
 #      4b-4d (NOT counted in PRESENT — owns its verdict). ONE truth
-#      source — the measurement (state cache) or the manual knob; NO
-#      fallback is ever written; /etc/switchres.ini must stay STOCK
-#      (floor 0 — the layer never writes it). Expected INSTALLED: /etc
-#      stock; RA config-dir ini may be absent pre-first-launch (measured
-#      at the first CRT game launch) or carry the floor; knob valid or
-#      off (off => RA floor 0). Expected STOCK: RA-dir ini absent.
+#      source — the BOOT measurement (the S30z hook, KMS-native: mode set
+#      + WAIT_VBLANK) or the manual knob; the floor is written into BOTH
+#      switchres inis FRESH every boot (the /etc write is volatile: it
+#      lives in the RAM overlay, no overlay save — a reboot heals it to
+#      stock). Expected INSTALLED: the S30z hook installed; /etc carries
+#      a valid floor (the knob wins when set); the RA override matches
+#      when the floor is non-zero. Expected STOCK: RA ini + S30z hook
+#      absent, /etc back at 0.
 #      Env seams: RGS15_RA_SWITCHRES / RGS15_SYS_SWITCHRES / RGS15_CONF /
-#      RGS15_STATE.
+#      RGS15_S30Z.
 if [ "$PRESENT" -gt 0 ]; then
 	RA_SWITCHRES="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
 	_V_CONF="${RGS15_CONF:-/userdata/system/batocera.conf}"
 	_V_SYS_INI="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+	_V_S30Z="${RGS15_S30Z:-/etc/init.d/S30z-crt-dual-measure}"
 	_v_knob="$(grep -E '^rgs-15khz\.dotclock_min[[:space:]]*=' "$_V_CONF" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]"\r')"
 	if [ -n "$_v_knob" ] && [ "$_v_knob" != "off" ] && ! printf '%s' "$_v_knob" | grep -qE '^[0-9]+([.][0-9]+)?$'; then
 		bad "rgs-15khz.dotclock_min invalid value '$_v_knob' (number or off) — fix by hand (the measurement path stays)"
 	fi
-	if [ -f "$_V_SYS_INI" ]; then
-		_v_sys_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_V_SYS_INI" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
-		[ "$_v_sys_dc" = "0" ] \
-			&& ok "system switchres.ini stays stock (dotclock_min=0 — never written by the layer)" \
-			|| bad "$_V_SYS_INI dotclock_min=$_v_sys_dc (must stay stock 0 — the layer never writes /etc)"
+	[ -x "$_V_S30Z" ] \
+		&& ok "dotclock boot hook installed ($_V_S30Z)" \
+		|| bad "dotclock boot hook missing ($_V_S30Z — reinstall)"
+	_v_sys_dc=""
+	[ -f "$_V_SYS_INI" ] && _v_sys_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_V_SYS_INI" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+	_v_sys_n="$(printf '%s' "$_v_sys_dc" | awk '{ if ($0 ~ /^[0-9]+([.][0-9]+)?$/) { f = $0 + 0; if (f == 0) print "0"; else printf "%.1f", f } }')"
+	if [ -z "$_v_sys_dc" ]; then
+		bad "$_V_SYS_INI has no dotclock_min line (the boot hook never wrote it?)"
+	elif [ -z "$_v_sys_n" ]; then
+		bad "$_V_SYS_INI dotclock_min='$_v_sys_dc' is not a number"
+	elif [ "$_v_knob" = "off" ] && [ "$_v_sys_n" != "0" ]; then
+		bad "knob off but $_V_SYS_INI floor is $_v_sys_dc (expected 0)"
 	else
-		echo "WARN: dotclock check partial (/etc/switchres.ini missing — no switchres on this install?)" >&2
+		ok "system switchres.ini floor=$_v_sys_dc (written at boot, volatile; knob=${_v_knob:-unset})"
 	fi
-	if [ "$_v_knob" = "off" ]; then
-		_v_dc=""
-		[ -f "$RA_SWITCHRES" ] && _v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
-		[ -z "$_v_dc" ] || [ "$_v_dc" = "0" ] \
-			&& ok "dotclock off (knob) — RA floor ${_v_dc:-absent} (games run the library default)" \
-			|| bad "dotclock off (knob) but RA floor is $_v_dc (expected 0/absent — rerun the decide)"
-	elif [ ! -f "$RA_SWITCHRES" ]; then
-		# pre-first-launch state is legitimate now: nothing is written
-		# until the first CRT game launch measures (or the knob is set).
-		if [ -n "$_v_knob" ]; then
-			bad "dotclock knob='$_v_knob' but $RA_SWITCHRES missing (run: zz_rgs_15khz dotclock-decide)"
-		else
-			ok "dotclock not measured yet — RA ini absent by design (first CRT game launch measures)"
-		fi
+	if [ -n "$_v_sys_n" ] && [ "$_v_sys_n" != "0" ]; then
+		_v_ra_dc=""
+		[ -f "$RA_SWITCHRES" ] && _v_ra_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+		[ "$_v_ra_dc" = "$_v_sys_dc" ] \
+			&& ok "RA override floor matches ($_v_ra_dc)" \
+			|| bad "RA override floor '${_v_ra_dc:-absent}' != /etc floor $_v_sys_dc (run: zz_rgs_15khz dotclock-write $_v_sys_dc)"
 	else
-		_v_dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$RA_SWITCHRES" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
-		_v_st="$(sed -n 's/^value=//p' "${RGS15_STATE:-$PKG/state/dotclock}" 2>/dev/null | head -1)"
-		[ -n "$_v_dc" ] && ok "dotclock floor in RA ini (dotclock_min=$_v_dc, knob=${_v_knob:-unset}, measured-cache=${_v_st:-none})" \
-			|| bad "RA config-dir switchres.ini present but WITHOUT a dotclock_min line ($RA_SWITCHRES — decide incomplete)"
+		ok "dotclock floor 0 (no CRT / knob off / not measured — the stock default)"
 	fi
 else
 	_v_stk="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
-	if [ -e "$_v_stk" ]; then
-		bad "dotclock decide pieces LEFT OVER in stock state ($_v_stk)"
+	_v_stk2="${RGS15_S30Z:-/etc/init.d/S30z-crt-dual-measure}"
+	_v_stk3="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+	_v_stk3dc=""
+	[ -f "$_v_stk3" ] && _v_stk3dc="$(grep -E '^[[:space:]]*dotclock_min[[:space:]]' "$_v_stk3" 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '\r')"
+	if [ -e "$_v_stk" ] || [ -e "$_v_stk2" ]; then
+		bad "dotclock pieces LEFT OVER in stock state ($_v_stk / $_v_stk2)"
+	elif [ -n "$_v_stk3dc" ] && [ "$_v_stk3dc" != "0" ]; then
+		bad "$_v_stk3 floor $_v_stk3dc left in stock state (uninstall restore incomplete; a reboot heals)"
 	else
-		ok "dotclock decide absent (stock state)"
+		ok "dotclock pieces absent (stock state)"
 	fi
 fi
 

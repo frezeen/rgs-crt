@@ -40,6 +40,8 @@ SITE="${RGS15_SITE:-$(python3 -c 'import site; print(site.getsitepackages()[0])'
 SITECUSTOMIZE_SRC="$REPO/src/engine/selector/sitecustomize.py"
 S15_SRC="$REPO/src/engine/service/crt-gen-initd.sh"
 S15_DST="${RGS15_S15:-/etc/init.d/S15crt-dual-gen}"
+S30Z_SRC="$REPO/src/engine/service/dotclock-boot-initd.sh"
+S30Z_DST="${RGS15_S30Z:-/etc/init.d/S30z-crt-dual-measure}"
 UDEV_SRC="$REPO/src/engine/udev/99-crt-dual-hotplug.rules"
 UDEV_DST="${RGS15_UDEV:-/etc/udev/rules.d/99-crt-dual-hotplug.rules}"
 VNC1="${RGS15_VNC1:-/usr/bin/vnc}"
@@ -189,6 +191,14 @@ chmod +x "$S15_DST"
 manifest_add "$S15_DST"
 echo "  PRE-X hook -> $S15_DST"
 
+# ── 5b. Pre-X dotclock measurement hook (S30z: after the splash released
+#    the display, before X/ES — the one boot window with a free display;
+#    writes both switchres inis fresh every boot) ──
+cp "$S30Z_SRC" "$S30Z_DST" || fail "S30z deploy failed"
+chmod +x "$S30Z_DST"
+manifest_add "$S30Z_DST"
+echo "  dotclock measure hook -> $S30Z_DST"
+
 # ── 6. Engine boot service — THIN SHIM (never a logic copy) ──
 mkdir -p "$SVCDIR"
 cat >"$SVCDIR/$ENGINE_SVC" <<EOF
@@ -259,13 +269,10 @@ bash "$SVCDIR/$OUR_SVC" gamelist-ensure \
 	&& echo "  gamelist entry + tile ensured" \
 	|| echo "  WARN: gamelist ensure failed (entry skipped)"
 
-# ── 7e. GPU dotclock floor — one-shot decide (the boot service
-#    recomputes the RA override at every boot, self-healing). With no
-#    knob and no measurement cache yet this is a no-op: the floor is
-#    measured at the FIRST CRT game launch (dotclock-ensure, the
-#    first_script hook) and feeds the games only. /etc is never written.
-bash "$SVCDIR/$OUR_SVC" dotclock-decide || echo "  WARN: dotclock decide failed (see $LOG)"
-echo "  dotclock decide recomputed (service log: $LOG)"
+# ── 7e. GPU dotclock floor — the measurement lives in the S30z boot hook
+#    (pre-X, KMS-native: mode set + WAIT_VBLANK). It writes BOTH switchres
+#    inis fresh at every boot (volatile /etc write, no overlay save);
+#    nothing to pre-compute at install time (the first boot does it).
 
 # ── 8. udev hotplug rule (overlay, manifest-tracked) ──
 cp "$UDEV_SRC" "$UDEV_DST" || fail "udev rule deploy failed"

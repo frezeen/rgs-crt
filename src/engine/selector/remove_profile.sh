@@ -45,13 +45,6 @@ PROFILE_DIR="$PROFILES_ROOT/$NAME"
 	exit 1
 }
 
-[ -r "$LIB" ] && source "$LIB" 2>/dev/null
-# gpu-lib too: detect_gpu is the display-lib prerequisite (GPU_VENDOR/
-# GPU_MODEL) — without it the --prop fallback gate opened (2026-08-12:
-# 3 G per gameStart from selector/apply/remove).
-[ -r "$PKG_ROOT/src/lib/gpu-lib.sh" ] && source "$PKG_ROOT/src/lib/gpu-lib.sh" 2>/dev/null
-command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null
-
 log() { echo "CRT-DUAL-REMOVE [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 
 log "removing profile '$NAME'"
@@ -63,14 +56,14 @@ if ! python3 "$MERGE" remove "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT
 fi
 
 # ── 2. GameStop restore — the WATCHER owns it (owner order 2026-09-13) ──
-# RGS-15KHZ-EXT (watcher-owned restore): this hook NEVER calls sr-owner.
+# RGS-15KHZ-EXT (reconciler-owned restore, ADR-002): this hook NEVER applies.
 # Stock already restored the launch display (the patched launcher's
 # interlaced fallback for the tube — measured live megadrive 2026-09-13:
 # `setMode: interlaced fallback 640x480 -> 640x480i` landed before any
 # engine step); the watcher's game-ended emitter then re-applies the dual
 # within one poll (POLL_SEC=2) when the topology is dual. Per-launch
 # engine work here = the keys above + the guard clear only, in ANY
-# topology. The game-ended emitter (layout-watch `_prev_game=active` in
+# topology. The wake bell below (and the reconciler's game-ended emitter) is
 # the guard branch) is what makes this correct: pre-fix it was dead
 # (_game_ended could never fire) and the hook carried a redundant direct
 # converge that ran double with the watcher's own.
@@ -80,11 +73,18 @@ fi
 # (remove_profile is exercised that way by seam test_remove_single_call).
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
-rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile 2>/dev/null || true
+rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile "${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}" 2>/dev/null || true
+# Wake the single applier (2026-09-19): a session shorter than the 2 s
+# watcher poll leaves `game-ended` unseen, and the solo-prep's `enabled`
+# change is invisible to the status-only sysfs fingerprint — the restore
+# would never fire (dry chains: the post-hook settle never converged).
+# The poke is the same wake bell udev uses; the watcher consumes it as a
+# pure bell (converge only, never a forced re-probe).
+: >"${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/udev-poke" 2>/dev/null || true
 if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then
 	log "stand-down: single-display topology — the patched launcher restored the desktop (boot + hotplug keep the engine)"
 else
-	log "dual topology — the watcher re-applies the dual layout (game-ended emitter, <=2s)"
+	log "dual topology — the watcher re-applies the dual layout (guard clear + poke)"
 fi
 log "profile '$NAME' removed (keys + guard cleared; restore = watcher)"
 exit 0

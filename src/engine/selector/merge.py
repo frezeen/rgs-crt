@@ -763,7 +763,8 @@ def restore_binaries(profile_dir: Path, binaries: dict, target_root: Path,
     for rel, dst in binaries.items():
         dstp = Path(dst)
         bak = backup_root / name / "binaries" / rel
-        if not (bak / "was_symlink").exists() and not (bak / "was_regular").exists():
+        if not any((bak / r).exists() for r in
+                   ("was_symlink", "was_regular", "stock_lower", "stock_copy")):
             continue  # nothing recorded (never swapped) — no-op
         target = None
         if (bak / "was_symlink").exists():

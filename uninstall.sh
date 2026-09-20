@@ -21,6 +21,7 @@ OUR_SVC="zz_rgs_15khz"
 VNC_SVC="zz_crt_dual_vnc"
 SITE="${RGS15_SITE:-$(python3 -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null)}"
 S15_DST="${RGS15_S15:-/etc/init.d/S15crt-dual-gen}"
+S30Z_DST="${RGS15_S30Z:-/etc/init.d/S30z-crt-dual-measure}"
 UDEV_DST="${RGS15_UDEV:-/etc/udev/rules.d/99-crt-dual-hotplug.rules}"
 VNC1="${RGS15_VNC1:-/usr/bin/vnc}"
 VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
@@ -28,7 +29,7 @@ VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
 # seam-leak incident: a hermetic uninstall must never delete the LIVE
 # runtime logs — tests override this; defaults = live paths).
 LOGS_DIR="${RGS15_LOGS_DIR:-/userdata/system/logs}"
-OWN_LOGS="rgs-15khz.log selector-core.log"
+OWN_LOGS="rgs-15khz.log selector-core.log dotclock-measure.log"
 
 fail() {
 	echo "ERROR: $*" >&2
@@ -73,14 +74,18 @@ echo "  VNC symlinks removed"
 
 # ── 2b. GPU dotclock floor pieces: the RA config-dir switchres.ini WE
 #      created (stock has none; restoring stock = removing it) + the
-#      measurement cache ($PKG/state/dotclock — removed with the package
-#      tree below). /etc/switchres.ini is NEVER written by the current
-#      architecture (read-only base + measurement math); the restore
-#      below stays for LEGACY installs (older duties edited that one
-#      line in place) and is idle when the file is already stock.
+#      system /etc/switchres.ini, which the S30z boot hook writes at
+#      every boot (volatile: the write lives in the RAM overlay and a
+#      reboot heals it to stock; this restore puts the stock value back
+#      immediately so verify sees a clean stock state).
 RA_SWITCHRES="${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}"
 SYS_SWITCHRES="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
 rm -f "$RA_SWITCHRES" && echo "  RA config-dir switchres.ini removed (stock has none)"
+# the RA super width this layer writes from the measured floor (a key the
+# stock conf does not carry: restoring stock = removing it)
+sed -i '/^global\.retroarch\.crt_switch_resolution_super[[:space:]]*=/d' \
+	"${RGS15_CONF:-/userdata/system/batocera.conf}" 2>/dev/null || true
+echo "  RA crt_switch_resolution_super key removed (stock has none)"
 if [ -f "$SYS_SWITCHRES" ]; then
 	if grep -qE '^[[:space:]]*dotclock_min[[:space:]]+0$' "$SYS_SWITCHRES" 2>/dev/null; then
 		echo "  /etc/switchres.ini already stock (dotclock_min 0)"
@@ -94,11 +99,11 @@ fi
 # ── 3. Overlay files: udev + S15 + amdgpu-legacy modprobe pin
 #      (removal persisted below) ──
 MODPROBE_DST="${RGS15_MODPROBE_CONF:-/etc/modprobe.d/rgs-15khz-amdgpu-legacy.conf}"
-rm -f "$UDEV_DST" "$S15_DST" "$MODPROBE_DST"
+rm -f "$UDEV_DST" "$S15_DST" "$S30Z_DST" "$MODPROBE_DST"
 if [ -z "${RGS15_SKIP_RELOAD:-}" ]; then
 	udevadm control --reload-rules 2>/dev/null || true
 fi
-echo "  udev rule + S15 hook + amdgpu-legacy pin removed"
+echo "  udev rule + S15/S30z hooks + amdgpu-legacy pin removed"
 
 # ── 3b. /boot i915 pieces (persistent files, no overlay save needed):
 #      hook removed ONLY if byte-identical to ours (foreign = left in

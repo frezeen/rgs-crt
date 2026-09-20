@@ -82,21 +82,16 @@ for d in /sys/class/drm/card*-*/; do
 done
 [ "$found" = 0 ] && echo "  no DRM connectors"
 
-sep "CLASSIFICATION (display-lib cascade: EDID -> connected -> presumed)"
-if [ -r "$PACKAGE_DIR/lib/display-lib.sh" ]; then
-	source "$PACKAGE_DIR/lib/display-lib.sh" 2>/dev/null
-fi
-if command -v detect_outputs >/dev/null 2>&1; then
-	detect_outputs 2>/tmp/diag-detect.$$.log
-	grep "CRT-DUAL-DETECT" /tmp/diag-detect.$$.log 2>/dev/null | sed 's/^/  /'
-	rm -f /tmp/diag-detect.$$.log
-	echo "  CRT confirmed:  ${CRT_OUTS:-none}"
-	echo "  CRT presumed:   ${CRT_PRESUMED_OUTS:-none}"
-	echo "  LCD:            ${LCD_OUTS:-none}"
-	echo "--- PROBE presumed outputs (the presumption test) ---"
-	crt_probe 2>&1 | sed 's/^/  /'
+sep "CONNECTORS (display-detect --all: drm class status edid x-name)"
+if [ -r "$PACKAGE_DIR/display/display-detect.sh" ]; then
+	bash "$PACKAGE_DIR/display/display-detect.sh" --all 2>/dev/null | while IFS=$'\t' read -r _d _c _s _e _x; do
+		[ -n "$_d" ] && echo "  $_d  class=$_c  status=$_s  edid=${_e}B  x=$_x"
+	done
 else
-	echo "  display-lib.sh not available"
+	echo "  display-detect.sh not available"
+fi
+if [ -f "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" ]; then
+	echo "  state: $(grep -E '^(CRT_OUTS|LCD_OUTS)=' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" | tr '\n' ' ')"
 fi
 
 sep "99-crt.conf (/etc/X11/xorg.conf.d/)"

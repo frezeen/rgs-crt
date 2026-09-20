@@ -49,13 +49,6 @@ PROFILE_DIR="$PROFILES_ROOT/$NAME"
 	exit 1
 }
 
-# Display layer: BOTH libs — gpu-lib (detect_gpu -> GPU_VENDOR/
-# GPU_MODEL) is the display-lib prerequisite; without it the --prop
-# fallback gate opened (2026-08-12: 3 G per gameStart).
-[ -r "$LIB" ] && source "$LIB" 2>/dev/null
-[ -r "$PKG_ROOT/src/lib/gpu-lib.sh" ] && source "$PKG_ROOT/src/lib/gpu-lib.sh" 2>/dev/null
-command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null
-
 log() { echo "CRT-DUAL-APPLY [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 
 # ── 1. Crash level 1: pre-clean stale blocks / half-applied state ──
@@ -84,30 +77,16 @@ fi
 # detect-state each launch and follows the topology.
 TARGET_DISPLAY="$(python3 "$PKG_ROOT/src/selector/spec-target.py" "$PROFILE_DIR" 2>/dev/null || echo crt)"
 TARGET_DISPLAY="${TARGET_DISPLAY:-crt}"
-# Inline read by design: same lib-absent tolerance as remove_profile.sh
-# (audit 2026-09-18 — do not "clean" this into a display-lib helper).
-_lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
-_crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
-if [ -z "$_lcd_out" ] || [ -z "$_crt_out" ]; then
-	# Belt vs. hotplug-fresh launches (2026-09-19): a disconnected output
-	# can still own a CRTC (kernel enabled=1) and the stock launcher's
-	# XRandR modeset lands on it — X wedges, tube black. The convergence
-	# oracle now sees this too (free_stale_crtcs in the owner), but a launch
-	# may arrive before any watcher pass: free it here, then stand down.
-	if command -v free_stale_crtcs >/dev/null 2>&1; then
-		free_stale_crtcs 2>/dev/null || true # best-effort hygiene: an off failure must never block the launch (stock owns the session)
-	fi
-	log "stand-down: single-display topology — the stock launcher (patched) owns the display flow"
+# ── 3. Display hand-over (ADR-002, 2026-09-19) ──
+# ONE verb: the reconciler preps the session target (dual: the non-target
+# off, the target verified against the kernel with one bounded repair;
+# single-display: nothing to prep — stock owns the flow). No fallback
+# path: the reconciler is the only display owner.
+if [ -r "$PKG_ROOT/src/display/display-reconcile.sh" ]; then
+	bash "$PKG_ROOT/src/display/display-reconcile.sh" --session-start "$TARGET_DISPLAY" 2>&1 | sed 's/^/  /' \
+		|| log "WARN: session-start failed (display not prep'd — game runs anyway)"
 else
-# Dual topology: ONE minimal verb — turn off the display the game will NOT
-# use, then stock (+ the patched launcher) manages the solo session. No
-# want-file write at gameStart (the gameStop restore = the watcher's
-# game-ended emitter). flock keeps the verb serialized against the
-# watcher; loud failure, no fallback chain (the single-call doctrine).
-WANT_LOCK="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/want.lock"
-if command -v flock >/dev/null 2>&1; then flock -n "$WANT_LOCK" bash "$PKG_ROOT/src/owner/sr-owner.sh" --solo-prep "$TARGET_DISPLAY" 2>/dev/null || log "WARN: solo-prep failed (display not prep'd — game runs anyway)"
-else bash "$PKG_ROOT/src/owner/sr-owner.sh" --solo-prep "$TARGET_DISPLAY" 2>/dev/null || log "WARN: solo-prep failed (display not prep'd — game runs anyway)"
-fi
+	log "FAIL: display-reconcile.sh missing — display not prep'd (game runs anyway)"
 fi
 # ── 4. RGS-15KHZ-EXT (stock raster channel): the profile declares
 # per-game rasters as <system>.videomode keys (bare = preset-scaled into
@@ -118,5 +97,15 @@ fi
 # Here: nothing to do — the marker is the contract.
 touch /tmp/crt-dual-mode
 log "game-active guard written (/tmp/crt-dual-mode)"
+# Session suppression (2026-09-19 evening): hold the stock checker's
+# one-shot skip while this session owns the display — a hotplug whose
+# checker run lands mid-launch would clobber the solo-prep (target
+# blanked, rig evidence logs/rig-chain-boot-crt-20260919-040*.txt) or
+# tear down the running game. Self-terminating when the guard clears;
+# best-effort (never blocks the launch).
+if [ -r "$PKG_ROOT/src/layout/session-nohotplug.sh" ]; then
+	setsid bash "$PKG_ROOT/src/layout/session-nohotplug.sh" >/dev/null 2>&1 &
+	disown 2>/dev/null || true
+fi
 log "profile '$NAME' applied (display=$TARGET_DISPLAY)"
 exit 0

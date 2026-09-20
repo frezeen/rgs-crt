@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-09-20 — integrated graphics' own VGA port now runs games
+
+### Added
+- **The layer measures your video chain at every boot.** A few seconds
+  before the frontend starts it tries the low arcade video modes and
+  keeps the lowest one the chain can really display. The result is
+  thrown away and recomputed at every boot, so it always matches the
+  card and the cable of the moment; where every low mode works the
+  measurement is almost instant.
+- **The diagnostic report now identifies each screen**: every bundle
+  carries the adapter and EDID details of every port, so a screen that
+  is not recognized can be diagnosed from the report alone.
+
+### Fixed
+- **A tube behind a DisplayPort-to-VGA adapter is recognized as a tube
+  again**, and games run there with their low modes as before. The
+  layer now detects when an adapter reports itself instead of the
+  screen, and for screens that expose their own details it judges them
+  by whether they can show the low television modes.
+- **A machine whose VGA port cannot go below a certain clock now runs
+  games there.** Some integrated graphics cannot produce the very low
+  clocks of 240p at all: a game could start on a mode the screen never
+  showed (black picture, sometimes a stuck system). The layer now hands
+  games the smallest widened version of their mode that the chain can
+  display — same picture and the game's own refresh, a wider raster
+  (for example 640x224 instead of 320x224). Dedicated cards and
+  DisplayPort adapters are untouched: they keep their native modes.
+- **The desktop comes back quickly after you leave a game**: the layer
+  reacts within half a second instead of a couple of seconds.
+- **The two screens no longer advertise a low mode the tube cannot
+  show**, so the system cannot pick a picture the screen will not
+  display.
+- **The boot splash and the desktop land on the right screen in a
+  two-screen setup**, and the frontend window follows the screen when
+  the layer changes resolution: the menu no longer stays black until
+  you touch the controls, and no low-resolution flash appears at
+  launch.
+- **Custom resolutions declared for an emulator respect the measured
+  chain**: a declared raster below what the chain can display is
+  widened like the games instead of going dark.
+- **The system's own arcade emulator is properly restored after a
+  game** on machines where the layer swaps in the arcade build.
+
+### Improved
+- **RetroArch now takes its video settings from the same switchres
+  file the arcade emulator uses**, so both behave consistently on every
+  chain.
+- **The layer's own logs no longer grow without bound**: they are
+  trimmed at every boot.
+
+### Settings
+- **`rgs-15khz.dotclock_min`** sets the clock floor by hand (a number
+  in MHz, or `off` to disable it) and skips the boot measurement
+  entirely — useful when you want a fixed floor and the fastest boot.
+- **`crt-dual.crt_output`** declares which port carries the tube when
+  the layer cannot recognize it; **`crt-dual.analog_lcd`** declares
+  that an analog port — or a named list of ports — carries a panel
+  instead.
+
+### Unchanged on purpose
+- **The measured chain and the arcade video settings apply only while
+  playing with the tube profile.** The stock profile keeps the system
+  exactly as it was: no video settings, no files, nothing to restore.
+
 ## 2026-09-19 — unplugging a screen no longer leaves the next launch black
 
 ### Fixed

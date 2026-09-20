@@ -39,8 +39,8 @@ detect_gpu 2>/dev/null || true
 # boot's complete call inventory lands in display-trace.log. Create it to
 # investigate, remove it when done.
 if [ -f /userdata/system/crt-dual/BOOT_TRACE ]; then
-	mkdir -p /userdata/system/logs /tmp/crt-dual 2>/dev/null || true
-	: >/userdata/system/logs/display-trace.log 2>/dev/null || true
+	mkdir -p /tmp/crt-dual 2>/dev/null || true
+	: >/tmp/crt-dual/display-trace.log 2>/dev/null || true
 	touch /tmp/crt-dual/display-trace-on 2>/dev/null || true
 fi
 

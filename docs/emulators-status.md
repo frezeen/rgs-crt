@@ -30,6 +30,16 @@ shaders off, bezels off); **RA family** = the RetroArch family keys
 no shader from any source). A row saying "common + RA family" has no
 per-system tuning at all — its result comes from the pipeline alone.
 
+
+Some video chains cannot clock the lowest native arcade modes at all (the analog
+output of certain integrated graphics is one; a DisplayPort adapter or a
+dedicated AMD card is not). The layer measures the chain at every boot and,
+when that is the case, hands games the smallest widened version of their mode
+that still clocks — same picture and the game's exact refresh, just a wider
+raster (e.g. 640x224 instead of 320x224). Chains that can do native modes are
+left untouched. Nothing to configure: the measurement runs before the frontend
+starts.
+
 | System | What you get | Settings the profile applies | Verdict |
 | --- | --- | --- | --- |
 | Super Nintendo (snes, snes-msu1, sufami, satellaview) | Native SNES signal, 256x224@60.10, pixel-perfect, no filters | common + RA family | TESTED 2026-09-04, re-measured clean 2026-09-06 |

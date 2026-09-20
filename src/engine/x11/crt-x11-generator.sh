@@ -5,7 +5,8 @@
 # crt-x11-generator.sh — CRT-DUAL CRT X11 Config Generator
 #
 # Generates /etc/X11/xorg.conf.d/99-crt.conf with 15kHz modelines.
-# GPU detection via gpu-lib.sh + display-lib.sh.
+# GPU detection via gpu-lib.sh; connectors via the display-detect module
+# (ADR-002, universal kernel contract).
 # NVIDIA: vendor-specific options in the Device section below.
 # AMD: the boot service calls get_xorg_configs() (gpu-lib.sh) which
 # neutralises the stock amdgpu/radeon OutputClass (Batocera 43.1 ships no
@@ -24,7 +25,6 @@ echo "=== CRT-DUAL CRT X11 Config Generator ==="
 
 # GPU detection via common library
 source "$PACKAGE_DIR/lib/gpu-lib.sh" 2>/dev/null || true # package libs mandatory below (set -u fails loud if absent)
-source "$PACKAGE_DIR/lib/display-lib.sh" 2>/dev/null || true
 detect_gpu
 # RGS-15KHZ-EXT (dotclock): the check_dotclock call REMOVED with the
 # whitelist — the floor is measured at the first CRT game launch and
@@ -35,7 +35,7 @@ detect_gpu
 # conf.
 
 echo "GPU: $GPU_VENDOR ($GPU_MODEL)"
-echo "Note: X11 config generated for the detected GPU. The runtime applier (sr-owner.sh) uses"
+echo "Note: X11 config generated for the detected GPU. The runtime applier (display-reconcile.sh) uses"
 echo "standard cross-GPU RandR commands — AMD/Intel work without NVIDIA workarounds."
 
 # ──────────────────────────────────────────────
@@ -49,39 +49,52 @@ echo "standard cross-GPU RandR commands — AMD/Intel work without NVIDIA workar
 echo ""
 echo "--- Output detection ---"
 
-# Classification centralized in display-lib.sh (detect_outputs).
-# NO hardcoded port name: by TYPE (analog->CRT 15kHz,
-# digital->native LCD 31kHz+). detect_outputs reads xrandr if DISPLAY is
-# available, otherwise leaves CRT_OUTS/LCD_OUTS empty (handled downstream).
-detect_outputs
+# ONE source: the display-detect module (ADR-002) — kernel connector class
+# (EDID -> panel; no-EDID connected -> CRT candidate on ANY type, the
+# converter convention; disconnected -> analog-capable type), status and X
+# name (pure naming rule pre-X, family index offset). --all row fields:
+#   drm <TAB> class <TAB> status <TAB> edid-bytes <TAB> x-name
+_DETECT_ALL="$(bash "$PACKAGE_DIR/display/display-detect.sh" --all 2>/dev/null)"
+_xnames() { # $1 = class|any, $2 = status|any -> X names
+	printf '%s\n' "$_DETECT_ALL" | awk -F'\t' -v c="$1" -v s="$2" '($1 != "") && (c == "any" || $2 == c) && (s == "any" || $3 == s) { printf "%s ", $5 }'
+}
+_x_class() { printf '%s\n' "$_DETECT_ALL" | awk -F'\t' -v a="$1" '$1 == a || $5 == a { print $2; exit }'; }
+_output_is_analog() { [ "$(_x_class "${1:-}")" = "analog" ]; } # accepts DRM or X name; section/splash policy reads it
+CRT_OUTS="$(_xnames analog connected)"
+LCD_OUTS="$(_xnames panel connected)"
+
+# Splash target + Screen virtual size — the SAME detection the splash keys
+# use, computed here so the X conf can carry the Virtual size (the screen
+# must be born at the LCD's mode; without it X sizes to the first output,
+# the CRT's 640x480, and the stock logic visibly corrects on every launch:
+# owner-observed one-frame native flash 2026-09-20). Empty when no panel.
+_splash_x=""; _splash_mode=""; _splash_virtual=""
+for _d in /sys/class/drm/card*-*/; do
+	[ -f "${_d}status" ] || continue
+	[ "$(cat "${_d}status" 2>/dev/null)" = "connected" ] || continue
+	_drm=$(basename "$_d" | sed 's/^card[0-9]*-//')
+	_xn=$(_drm_to_x "$_drm" 2>/dev/null)
+	case " $LCD_OUTS " in
+	*" $_drm "* | *" $_xn "*) ;;
+	*) continue ;;
+	esac
+	_mode=$(head -1 "${_d}modes" 2>/dev/null)
+	[ -n "$_mode" ] || continue
+	_splash_x="${_xn:-$_drm}"
+	_splash_mode=$_mode
+	_splash_virtual="    SubSection \"Display\"
+        Virtual ${_mode%x*} ${_mode#*x}
+    EndSubSection"
+	break
+done
+# Effective CRT = confirmed + presumed; a box with NO analog connector at
+# all keeps its disconnected digitals as candidates (the DP++/converter
+# family gets the SAFE section below, never Ignore).
+CRT_ALL="$(_xnames analog any)"
+[ -z "$CRT_ALL" ] && CRT_ALL="$(_xnames panel disconnected)"
 echo "  -> CRT (15kHz): ${CRT_OUTS:-none}"
 echo "  -> LCD (native): ${LCD_OUTS:-none}"
-
-# Effective CRT outputs = CONFIRMED + PRESUMED (last resort). The
-# presumption applies ONLY to analog (VGA/DVI-I): a digital can never be
-# a CRT. The 15kHz modeline is thus available on the analog output even
-# when "disconnected" (VGA no-EDID) -> the probe can drive it.
-CRT_ALL="$(crt_all)"
 echo "  -> effective CRT (confirmed+presumed): ${CRT_ALL:-none}"
-
-# All X output names of one class from the kernel connector list: the
-# "universal" cushions below (CRT sections in LCD-only, LCD sections in
-# CRT-only) come from here — fully dynamic, no hardcoded ports, one
-# DRM->X mapping source (_drm_to_x).
-_all_outputs_of_class() { # $1 = analog|digital
-	local _acc="" _p _o _x
-	for _p in /sys/class/drm/card*-*; do
-		[ -e "$_p" ] || continue
-		_o="$(basename "$_p" | sed 's/^card[0-9]*-//')"
-		_x=$(_drm_to_x "$_o" 2>/dev/null)
-		if [ "$1" = "analog" ]; then
-			_output_is_analog "$_x" 2>/dev/null && _acc="$_acc $_x"
-		else
-			_output_is_analog "$_x" 2>/dev/null || _acc="$_acc $_x"
-		fi
-	done
-	echo "$_acc" | sed 's/^ //'
-}
 
 # Universal 99 cushion: when booting LCD-only (no CRT detected, CRT_ALL empty)
 # the X config would otherwise have no CRT Monitor section, so a later hotplug
@@ -93,7 +106,7 @@ _all_outputs_of_class() { # $1 = analog|digital
 if [ -z "$CRT_OUTS" ]; then
 	# LCD-only (no confirmed CRT): generate CRT sections for EVERY analog
 	# candidate so hotplug has the modeline — primary stays on LCD.
-	CRT_ALL="$(_all_outputs_of_class analog)"
+	CRT_ALL="$(_xnames analog any)"
 	[ -n "$CRT_ALL" ] && echo "  -> universal CRT (LCD-only, all analog): $CRT_ALL"
 fi
 
@@ -169,12 +182,30 @@ SR_API="$PACKAGE_DIR/api/switchres_api.py"
 
 M640=""
 M320=""
+_skip_m320=0
+# 240p pool mode: only when this chain can actually clock it. The floor
+# measured at boot (the manual knob wins; else the RA override carries the
+# last measurement) is the truth: a 320x240 (6.51 MHz) below it is a dead
+# mode in the pool, and the stock resolution logic can pick it — observed
+# 2026-09-20: the CRT went dark on a display hotplug when stock chose the
+# pool's 320x240. The desktop math itself stays floor-free (the API
+# override); this only stops advertising what the chain cannot scan.
+_pool_floor="$(sed -n 's/^rgs-15khz\.dotclock_min[[:space:]]*=[[:space:]]*//p' /userdata/system/batocera.conf 2>/dev/null | tail -1 | tr -d ' "[:space:]')"
+[ "$_pool_floor" = "off" ] && _pool_floor=0
+printf '%s' "$_pool_floor" | grep -qE '^[0-9]+([.][0-9]+)?$' || \
+	_pool_floor="$(sed -n 's/^[[:space:]]*dotclock_min[[:space:]]*//p' "${RGS15_RA_SWITCHRES:-/userdata/system/configs/retroarch/switchres.ini}" 2>/dev/null | tail -1 | tr -d '[:space:]')"
+if awk -v f="${_pool_floor:-0}" 'BEGIN { exit !(f + 0 > 6.51) }'; then
+	_skip_m320=1
+	echo "  240p pool mode SKIPPED (floor ${_pool_floor} MHz > 6.51: this chain cannot scan it)"
+fi
 if [ -r "$SR_API" ] && [ -f "$SR_INI" ]; then
 	M640=$("$SR_API" calc 640 480 "$CRT_DUAL_REFRESH" --ini "$SR_INI" | sed -E 's/Modeline "[^"]*"/Modeline "640x480i"/')
-	M320=$("$SR_API" calc 320 240 "$CRT_DUAL_REFRESH" --ini "$SR_INI" | sed -E 's/Modeline "[^"]*"/Modeline "320x240"/')
+	if [ "$_skip_m320" != "1" ]; then
+		M320=$("$SR_API" calc 320 240 "$CRT_DUAL_REFRESH" --ini "$SR_INI" | sed -E 's/Modeline "[^"]*"/Modeline "320x240"/')
+	fi
 fi
 
-if [ -z "$M640" ] || [ -z "$M320" ]; then
+if [ -z "$M640" ] || { [ "$_skip_m320" != "1" ] && [ -z "$M320" ]; }; then
 	echo "❌ switchres API produced no modelines (helper: $SR_API, ini: $SR_INI)"
 	echo "   99-crt.conf NOT modified — better an old conf than a custom modeline."
 	exit 1
@@ -203,8 +234,8 @@ echo "  320x240 (240p): $M320"
 # no EDID to suppress).
 # ──────────────────────────────────────────────
 
-# Sysfs (kernel) state of the connector from the X name — delegated to
-# _sysfs_status() in display-lib.sh (single DRM->X mapping, NVIDIA index+1).
+# Connector state comes from the display-detect --all snapshot above
+# (kernel truth, one mapping source).
 
 # NOTE: the printf is inside $(...) -> command substitution STRIPS trailing
 # newlines. Sections are written with a LEADING newline (\n before Section)
@@ -303,7 +334,7 @@ if [ -z "$LCD_OUTS" ]; then
 	# CRT-only (no LCD detected): generate LCD sections for EVERY digital
 	# candidate so hotplug LCD later has the EDID Monitor ready — fully
 	# dynamic via sysfs analog check, no hardcoded HDMI-1.
-	LCD_OUTS="$(_all_outputs_of_class digital)"
+	LCD_OUTS="$(_xnames panel any)"
 	[ -n "$LCD_OUTS" ] && echo "  -> universal LCD (CRT-only, all digital): $LCD_OUTS"
 fi
 LCD_MON_SECTIONS=""
@@ -338,21 +369,17 @@ done
 # (roleless empties — disconnected digitals like the empty DP on a
 # CRT+LCD box) gets its own Ignore section. No phantom "connected".
 #
-# The X output names come from the SYSFS connector list via the shared
-# reverse mapping (_drm_to_x in display-lib.sh — one mapping source for
-# both directions). NOT from xrandr: a running X already hides the
-# Disabled outputs, so a regen from xrandr would drop the very options
-# that kill the phantoms (self-negating, verified 2026-08-12: the
-# regenerated conf lost the Disabled options because the current X no
-# longer listed the phantoms). The sysfs always lists every connector
-# (kernel truth).
+# The X output names come from the display-detect --all snapshot (kernel
+# truth, the same source as every other role). NOT from xrandr: a running
+# X already hides the Disabled outputs, so a regen from xrandr would drop
+# the very options that kill the phantoms (self-negating, verified
+# 2026-08-12). The sysfs always lists every connector.
 #
 # Escape hatch: a user-declared crt-dual.crt_output is a CONFIRMED CRT
 # (in CRT_ALL -> has a Monitor section -> never Disabled).
 DISABLED_OUTS=""
-_all_outs=$(ls -d /sys/class/drm/card*-* 2>/dev/null | sed 's|.*/card[0-9]*-||')
-for _o in $_all_outs; do
-	_x=$(_drm_to_x "$_o" 2>/dev/null)
+while IFS=$'\t' read -r _o _cls _st _edid _x; do
+	[ -n "$_o" ] || continue
 	_covered=0
 	for _c in $CRT_ALL $LCD_OUTS; do
 		[ "$_x" = "$_c" ] && _covered=1
@@ -368,7 +395,7 @@ for _o in $_all_outs; do
 			DISABLED_OUTS="$DISABLED_OUTS $_o"
 		fi
 	fi
-done
+done <<<"$_DETECT_ALL"
 DISABLED_OUTS=$(echo "$DISABLED_OUTS" | sed 's/^ //')
 DISABLED_MON_SECTIONS=""
 for _o in $DISABLED_OUTS; do
@@ -533,6 +560,7 @@ EndSection
 Section "Screen"
     Identifier "Screen0"
     Device     "GPU0"
+${_splash_virtual}
 EndSection
 XEOF
 	fi
@@ -595,18 +623,6 @@ _bset() { [ "$(batocera-settings-get "$1" 2>/dev/null || true)" = "$2" ] || bato
 # tube splash is T21 scope). Written via the stock keys themselves
 # (global.videooutput is Batocera's own splash/display steering).
 # ──────────────────────────────────────────────
-_splash_x=""; _splash_mode=""
-for _d in /sys/class/drm/card*-*/; do
-	[ -f "${_d}status" ] || continue
-	[ "$(cat "${_d}status" 2>/dev/null)" = "connected" ] || continue
-	_drm=$(basename "$_d" | sed 's/^card[0-9]*-//')
-	_output_is_analog "$_drm" 2>/dev/null && continue
-	_mode=$(head -1 "${_d}modes" 2>/dev/null)
-	[ -n "$_mode" ] || continue
-	_splash_x=$(_drm_to_x "$_drm" 2>/dev/null)
-	_splash_mode=$_mode
-	break
-done
 if [ -n "$_splash_x" ] && [ -n "$_splash_mode" ]; then
 	_bset global.videooutput "$_splash_x"
 	_bset splash.screen.resize "$_splash_mode"

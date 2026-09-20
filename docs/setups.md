@@ -61,6 +61,16 @@ The full, honest picture, because this manual tells you everything:
   the re-scan simply never needs to be used;
 - Intel hardware was last exercised on an older revision: until the
   re-test lands, no claim in either direction about its detection;
+- if your tube sits behind an adapter that the system cannot recognize
+  (some adapters make a CRT look like an ordinary panel), you can tell
+  the layer exactly where it is: add `crt-dual.crt_output=<port>` to
+  `batocera.conf` and that port is treated as the tube. And if an analog
+  port of yours carries an LCD instead, `crt-dual.analog_lcd=1` says so —
+  or name the port (`crt-dual.analog_lcd=DP-1`, comma-separated for
+  several) when only some of them do: an LCD behind a VGA adapter looks
+  exactly like a tube to any automatic probe, so that one is your call.
+  Both are plain settings, they survive updates, and on the machines
+  tested here neither is needed;
 - said with total transparency: across several weeks of active testing
   the machine crashed **two or three times in total** around a plug
   event. Nothing partial and nothing to repair — a reboot resolved
@@ -73,6 +83,7 @@ The full, honest picture, because this manual tells you everything:
 | You plug the tube in between games | The desktop adapts; the next game launch offers the tube experience. |
 | You unplug the LCD | Same box, now a pure tube machine: no prompts, everything on the CRT. |
 | You plug or unplug the CRT — on the AMD machine's analog port | The one manual case: press Select + L1 on a controller; the re-scan applies it. |
+| The tube sits behind an adapter the layer cannot recognize | Declare it once: `crt-dual.crt_output=<port>` in `batocera.conf`. |
 | A change looks ignored (any other case) | Reboot — always correct. |
 | It happens mid-game | Nothing — intentionally. The change is picked up once you are back in the menu. |
 
