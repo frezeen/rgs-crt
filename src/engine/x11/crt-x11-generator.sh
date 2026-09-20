@@ -59,6 +59,12 @@ _xnames() { # $1 = class|any, $2 = status|any -> X names
 	printf '%s\n' "$_DETECT_ALL" | awk -F'\t' -v c="$1" -v s="$2" '($1 != "") && (c == "any" || $2 == c) && (s == "any" || $3 == s) { printf "%s ", $5 }'
 }
 _x_class() { printf '%s\n' "$_DETECT_ALL" | awk -F'\t' -v a="$1" '$1 == a || $5 == a { print $2; exit }'; }
+_xname_of() { printf '%s\n' "$_DETECT_ALL" | awk -F'\t' -v a="$1" '$1 == a { print $5; exit }'; }
+_in_list() { # $1 = name (an EMPTY name never matches), $2 = space-separated list
+	[ -n "$1" ] || return 1
+	case " $2 " in *" $1 "*) return 0 ;; esac
+	return 1
+}
 _output_is_analog() { [ "$(_x_class "${1:-}")" = "analog" ]; } # accepts DRM or X name; section/splash policy reads it
 CRT_OUTS="$(_xnames analog connected)"
 LCD_OUTS="$(_xnames panel connected)"
@@ -73,11 +79,16 @@ for _d in /sys/class/drm/card*-*/; do
 	[ -f "${_d}status" ] || continue
 	[ "$(cat "${_d}status" 2>/dev/null)" = "connected" ] || continue
 	_drm=$(basename "$_d" | sed 's/^card[0-9]*-//')
-	_xn=$(_drm_to_x "$_drm" 2>/dev/null)
-	case " $LCD_OUTS " in
-	*" $_drm "* | *" $_xn "*) ;;
-	*) continue ;;
-	esac
+	_xn=$(_xname_of "$_drm")
+	# the panel target: the DRM or X name must be in the panel list. The
+	# names come from the detect snapshot (pre-X pure rule); an EMPTY name
+	# must never match — `case " $list " in *" $empty "*` degenerates to
+	# `*"  "*` and matches any subject carrying a double space, which is
+	# how the first connected port (the CRT after the 2026-09-20 swap)
+	# stole the splash when _drm_to_x vanished with the deleted library.
+	if ! _in_list "$_drm" "$LCD_OUTS" && ! _in_list "$_xn" "$LCD_OUTS"; then
+		continue
+	fi
 	_mode=$(head -1 "${_d}modes" 2>/dev/null)
 	[ -n "$_mode" ] || continue
 	_splash_x="${_xn:-$_drm}"

@@ -46,7 +46,7 @@ LOG="${RGS15_LOG:-/userdata/system/logs/rgs-15khz.log}"
 LOGS_DIR="$(dirname "$LOG")"
 # Explicit truncation list — OUR files only (service log + engine runtime
 # log the game path appends to; stock display.log/es_launch_* NEVER touched).
-TRUNCATE_LIST="rgs-15khz.log selector-core.log selector.log display-reconcile.log"
+TRUNCATE_LIST="rgs-15khz.log selector-core.log selector.log display-reconcile.log display-detect.log"
 RGS_FIX="/userdata/system/rgs/fix"
 MANIFEST="$PKG/overlay-manifest"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"

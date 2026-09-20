@@ -80,7 +80,7 @@ echo "verify.sh exit code: $?" >>"$STAGE/verify.txt"
 # 3. Runtime logs — ours and the stock display/launch ones (full copies;
 #    missing ones are benign: some never exist before first use).
 for _f in rgs-15khz.log selector-core.log selector.log sr-owner.log \
-	service.log display.log udev.log es_launch_stdout.log \
+	display-detect.log service.log display.log udev.log es_launch_stdout.log \
 	es_launch_stderr.log es_script_stdout.log es_script_stderr.log \
 	rgs_download.log; do
 	[ -f "$LOGS_DIR/$_f" ] && cp -a "$LOGS_DIR/$_f" "$STAGE/logs/$_f" || true

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-21 — swapping the cables now just works
+
+### Fixed
+- **If you move the tube behind an adapter and the panel onto the analog
+  port, the layer follows the change by itself.** Screens are recognised
+  by what they report about themselves: an adapter that forwards the
+  panel's own details is recognised as a panel, an adapter with nothing
+  to forward is treated as the tube, and a screen that declares the low
+  television timings is treated as a tube wherever it sits. No setting
+  needs to be changed by hand.
+- **An old setting that no longer matches the cables is ignored loudly.**
+  If a port was declared as the panel (or as the tube) and the screens
+  are swapped, the layer says so in its log and follows what it actually
+  reads — your screens keep working; update or remove the setting when
+  you like.
+- **The boot splash and the desktop land on the right screen after such
+  a change** (the panel), and the desktop is born at the panel's own
+  mode.
+
 ## 2026-09-20 — integrated graphics' own VGA port now runs games
 
 ### Added

@@ -5,18 +5,26 @@
 # display-detect.sh — dynamic topology discovery (ADR-002), universal.
 #
 # The kernel's contracts are the only input (identical on AMD/Intel/NVIDIA):
-#   connected + readable EDID (>0 bytes)  -> PANEL (digital, DDC present)
-#   connected + synthetic EDID            -> ANALOG (CRT behind a converter
-#       that fabricates its own EDID — the active DP>VGA adapter class;
-#       see _edid_is_synthetic)
-#   connected + ANALOG-input EDID that declares sub-25 kHz timing or range
-#                                         -> ANALOG (a real VGA display's
-#       own block: a DDC-capable CRT/TV, or one passed through a converter)
-#   connected + digital-input EDID + DPCD branch "Analog VGA" -> ANALOG
-#       (the block cannot belong to a display behind an analog output:
-#       it is the adapter's fabrication — DPCD 0x0005 downstream port
-#       type, read via the DRM aux chardev; _dpcd_branch_analog)
+#   connected + readable EDID (>0 bytes):
+#     - fabricated block (converter template; _edid_is_synthetic) -> ANALOG
+#     - declares sub-25 kHz timing or range (_edid_sub25khz)      -> ANALOG
+#       (a 15 kHz display's own block: a DDC CRT/TV, or one passed
+#       through a converter — the converter may rewrite the input byte,
+#       so 15 kHz CAPABILITY, not the byte, decides)
+#     - otherwise                                                 -> PANEL
+#       (a real display's own block: a panel, or one passed through a
+#       converter — the converter forwards the display's identity)
 #   connected + no EDID                   -> ANALOG (CRT over a DAC / no DDC)
+#   disconnected                          -> candidate by connector type
+# The DPCD branch block (DPCD 0x0005 downstream type, _dpcd_branch_analog)
+# marks a port analog-CAPABLE (a converter to Analog VGA); it never
+# overrides a readable display EDID — it is the hook for the user
+# declaration and for the disconnected fallback.
+#
+# Declarations (crt-dual.crt_output / crt-dual.analog_lcd) disambiguate
+# only where evidence cannot; _decl_guard suspends a declaration that
+# contradicts live evidence, loudly (rule live-evidence).
+#
 # No connector name, resolution or machine fact is hardcoded. The X output
 # name is derived by matching the DRM name against `xrandr --current`
 # (X drops the [A-Z] slot: HDMI-A-1 -> HDMI-1); the exact name is tried
@@ -35,6 +43,9 @@ ENV_SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
 ENV_DISPLAY="${DISPLAY:-:0}"
 _XOUT=""
 _GPU_OFF=""
+_SUSPEND_CRT=""
+_SUSPEND_LCD=""
+_GUARD_DONE=""
 
 _x_outputs() { # cached xrandr --current (zero writes, R class)
 	if [ -z "$_XOUT" ]; then
@@ -95,15 +106,6 @@ _edid_is_synthetic() { # $1 = EDID file -> 0 = fabricated sink block (the
 	[ "$mh" -gt $((2 * dh)) ] || [ "$dh" -gt $((2 * mh)) ] || return 1
 	[ "$mv" -gt $((2 * dv)) ] || [ "$dv" -gt $((2 * mv)) ] || return 1
 	return 0
-}
-
-_edid_input_analog() { # $1 = EDID file -> 0 when byte 0x14 says ANALOG input
-	# (bit 7 clear). A real digital display can never report this: on a
-	# digital port an analog-input EDID is a VGA display's own block,
-	# passed through a converter (or a DDC-capable CRT on an analog port).
-	local v
-	v=$(od -An -tu1 -j 20 -N 1 -v "$1" 2>/dev/null | tr -d ' ')
-	[ -n "$v" ] && [ $(( v & 0x80 )) -eq 0 ]
 }
 
 _edid_sub25khz() { # $1 = EDID file -> 0 when the EDID declares a sub-25 kHz
@@ -171,12 +173,28 @@ _analog_capable() { # kernel connector-type token in the DRM name (universal)
 	return 1
 }
 
-_analog_lcd_declared() { # $1 = DRM name -> 0 when the user declared this
-	# port (or all of them) as carrying an LCD:
+_knob() { # $1 = batocera.conf key -> LAST occurrence value (settings APPEND), trimmed
+	local conf="${CRT_DUAL_BATOCERA_CONF:-/userdata/system/batocera.conf}"
+	[ -r "$conf" ] || return 1
+	local v
+	v=$(sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$conf" 2>/dev/null | tail -1 | tr -d ' "[:space:]')
+	[ -n "$v" ] && printf '%s\n' "$v"
+}
+
+_raw_crt_declared() { # $1 = DRM name: user declaration crt-dual.crt_output (DRM or X name)
+	local v
+	v=$(_knob 'crt-dual\.crt_output') || return 1
+	[ "$v" = "$1" ] && return 0
+	[ "$v" = "$(_pure_x_name "$1")" ] && return 0
+	return 1
+}
+
+_raw_lcd_declared() { # $1 = DRM name -> 0 when the user declared this port
+	# (or all of them) as carrying an LCD; no guard applied:
 	#   crt-dual.analog_lcd=1          -> every analog-capable port
 	#   crt-dual.analog_lcd=DP-1,DP-2  -> those ports only
-	# WHY a list: behind a VGA converter the adapter's fabricated EDID is
-	# identical for a CRT and for a panel — only the user can say which.
+	# WHY a list: behind a converter that fabricates its own EDID nothing
+	# in the kernel says what sits behind it — only the user can.
 	local v
 	v=$(_knob 'crt-dual\.analog_lcd') || return 1
 	[ "$v" = "1" ] && return 0
@@ -187,63 +205,96 @@ _analog_lcd_declared() { # $1 = DRM name -> 0 when the user declared this
 	return 1
 }
 
-_knob() { # $1 = batocera.conf key -> LAST occurrence value (settings APPEND), trimmed
-	local conf="${CRT_DUAL_BATOCERA_CONF:-/userdata/system/batocera.conf}"
-	[ -r "$conf" ] || return 1
-	local v
-	v=$(sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$conf" 2>/dev/null | tail -1 | tr -d ' "[:space:]')
-	[ -n "$v" ] && printf '%s\n' "$v"
+_declared_crt_matches() { # guard-aware: a suspended declaration does not match
+	case " $_SUSPEND_CRT " in *" $1 "*) return 1 ;; esac
+	_raw_crt_declared "$1"
 }
 
-_declared_crt_matches() { # $1 = DRM name: user declaration crt-dual.crt_output (DRM or X name)
-	local v
-	v=$(_knob 'crt-dual\.crt_output') || return 1
-	[ "$v" = "$1" ] && return 0
-	[ "$v" = "$(_pure_x_name "$1")" ] && return 0
-	return 1
+_analog_lcd_declared() { # guard-aware: a suspended declaration does not match
+	case " $_SUSPEND_LCD " in *" $1 "*) return 1 ;; esac
+	_raw_lcd_declared "$1"
+}
+
+_decl_warn() { # $* = message -> stderr + the module log (dedup; report-bundled)
+	local msg="display-detect: $*" log
+	printf '%s\n' "$msg" >&2
+	log="${CRT_DUAL_LOG:-/userdata/system/logs/display-detect.log}"
+	if ! grep -qF "$*" "$log" 2>/dev/null; then
+		# best-effort: a read-only call site must never fail on the log write
+		printf 'display-detect [%s]: %s\n' "$(date +%FT%T)" "$*" >>"$log" 2>/dev/null || true
+	fi
+}
+
+_evidence_class() { # $1 drm, $2 edid, $3 status -> class with declarations ignored
+	_CLASSIFY_EVIDENCE_ONLY=1 _classify "$1" "$2" "$3"
+}
+
+_decl_guard() { # one-time: suspend declarations contradicted by live evidence
+	# Rule live-evidence §3. A declaration written for one topology must
+	# never steer another silently: the declared LCD port that live
+	# evidence reads as no-panel while ANOTHER connected port presents a
+	# real panel block (or a declared CRT port whose block is a real
+	# panel) is a contradiction — warn loud, suspend, evidence wins.
+	[ -z "$_GUARD_DONE" ] || return 0
+	_GUARD_DONE=1
+	local f st drm edid cls rows="" panels="" analogs=""
+	for f in "$ENV_SYSFS"/card*-*/status; do
+		[ -f "$f" ] || continue
+		st=$(cat "$f" 2>/dev/null)
+		[ "$st" = "connected" ] || continue
+		drm=$(basename "$(dirname "$f")")
+		drm=${drm#card*-}
+		edid="${f%/status}/edid"
+		cls=$(_evidence_class "$drm" "$edid" "$st")
+		rows="$rows$drm|$cls|$edid"$'\n'
+		[ "$cls" = "panel" ] && panels="$panels $drm"
+		[ "$cls" = "analog" ] && analogs="$analogs $drm"
+	done
+	local d c e
+	while IFS='|' read -r d c e; do
+		[ -n "$d" ] || continue
+		if _raw_lcd_declared "$d" && [ "$c" = "analog" ] && [ -n "$panels" ]; then
+			_SUSPEND_LCD="$_SUSPEND_LCD $d"
+			_decl_warn "crt-dual.analog_lcd names $d as a panel, but live evidence reads $d as no-panel while$panels presents a real panel block — declaration suspended, evidence wins (update batocera.conf if the cabling changed)"
+		fi
+		if _raw_crt_declared "$d" && [ "$c" = "panel" ] && [ -n "$analogs" ]; then
+			# suspension only when the tube is demonstrably elsewhere (a
+			# converter/no-EDID candidate exists): a panel-looking block
+			# on the declared tube port with NO other analog candidate is
+			# the residual the knob exists for (a converter whose fake is
+			# indistinguishable from a real panel) — honored silently
+			_SUSPEND_CRT="$_SUSPEND_CRT $d"
+			_decl_warn "crt-dual.crt_output names $d as the tube, but its live EDID is a real panel block while$analogs reads as the converter/no-EDID class — declaration suspended, evidence wins (update batocera.conf if the cabling changed)"
+		fi
+	done <<<"$rows"
 }
 
 _classify() { # $1 = DRM connector, $2 = EDID path, $3 = status -> analog|panel
-	# User declarations win (the documented knobs, LAST occurrence):
+	# User declarations win (the documented knobs, LAST occurrence), but
+	# only when _decl_guard has not suspended them (contradicted by live
+	# evidence — rule live-evidence §3):
 	#   crt-dual.crt_output=<port>  -> that port is a confirmed CRT
 	#   crt-dual.analog_lcd=1|<list> -> analog ports (or the listed ones)
 	#                                  carry an LCD
-	_declared_crt_matches "$1" && { echo analog; return 0; }
-	if _analog_capable "$1" && _analog_lcd_declared "$1"; then
-		echo panel
-		return 0
+	if [ -z "${_CLASSIFY_EVIDENCE_ONLY:-}" ]; then
+		_declared_crt_matches "$1" && { echo analog; return 0; }
+		if _analog_capable "$1" && _analog_lcd_declared "$1"; then
+			echo panel
+			return 0
+		fi
 	fi
-	# Definitive (the adapter declares itself): the sink's DPCD branch
-	# block says it is a protocol converter to Analog VGA. It is used as
-	# PROOF OF FABRICATION below (a digital-input EDID cannot belong to a
-	# display behind an analog output); an analog-input EDID is the real
-	# display's own block and is judged by its content instead.
-	# (2026-09-20, live RTD2166-class adapter.)
-	# Convention (incident-decided): a readable EDID means a monitor with
-	# DDC -> panel, UNLESS the EDID is fabricated (converter class) -> CRT
-	# candidate, or it is a real VGA display's own block (ANALOG input)
-	# that declares sub-25 kHz capability -> CRT candidate; NO EDID on a
-	# connected port means a CRT candidate on ANY type (a converter/VGA
-	# CRT on DP++ is real — Intel UHD 630); a disconnected port is a
-	# candidate only when its type is analog-capable (the presumed analog).
+	# Evidence (the kernel's contracts; a converter may forward the real
+	# display's block or fabricate its own — the block's CONTENT decides):
+	#   fabricated (no name/range, no extension, size lie) -> nothing to
+	#       describe behind the converter -> the no-DDC class (a tube);
+	#   15 kHz capability declared (timing or range < 25 kHz) -> a 15 kHz
+	#       display's own block, whatever the input byte says (the
+	#       converter rewrites it: the live PHL pass-through reads digital);
+	#   otherwise -> a real display's own block -> the panel path.
 	if [ "$(_edid_bytes "$2")" -gt 0 ]; then
 		if _edid_is_synthetic "$2"; then
-			# fabricated block (no name/range, no extension, size lie)
 			echo analog
-		elif _edid_input_analog "$2"; then
-			# the VGA display's OWN block (pass-through adapter, or a
-			# DDC-capable display on an analog port): 15 kHz capability
-			# decides — a VGA LCD or a 31 kHz+ CRT keeps the panel path
-			if _edid_sub25khz "$2"; then
-				echo analog
-			else
-				echo panel
-			fi
-		elif [ "$3" = "connected" ] && _dpcd_branch_analog "$1"; then
-			# digital-input EDID on a port whose DPCD branch says the
-			# output is Analog VGA: a VGA display cannot report a digital
-			# input, so this block is the ADAPTER's fabrication -> the
-			# no-DDC class (a tube in practice)
+		elif _edid_sub25khz "$2"; then
 			echo analog
 		else
 			echo panel
@@ -295,6 +346,7 @@ _pure_x_name() { # DRM name -> X name by the naming rule (pre-X safe)
 
 detect_connectors() { # connected connectors only, deterministic order
 	local f st drm cls x
+	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
 		st=$(cat "$f" 2>/dev/null)
@@ -309,6 +361,7 @@ detect_connectors() { # connected connectors only, deterministic order
 
 detect_all_connectors() { # every connector: drm, class, status, edid-bytes, X name (pure rule pre-X)
 	local f st drm cls edid x
+	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
 		st=$(cat "$f" 2>/dev/null)
