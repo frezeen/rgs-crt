@@ -28,7 +28,9 @@
 # writer = THIS hook at boot, reader = humans + verify.sh, cleaning =
 # tmpfs (recreated each boot). /boot/i915-patched.ko — writer =
 # install.sh / the zz_rgs_15khz i915-patch duty, reader = this hook;
-# removed by uninstall.sh.
+# removed by uninstall.sh and by the i915-patch duty on non-Intel boots
+# (run before this hook when it matters: on the INTEL boot that follows a
+# swap back the pair is re-deployed at S99, live from the next reboot).
 
 [ "$1" = "start" ] || exit 0
 

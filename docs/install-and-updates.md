@@ -97,7 +97,10 @@ and if a system update replaced the driver underneath, the layer keeps
 the stock driver loading instead — the screen stays alive, and the
 verifier tells you the patch needs to be refreshed (recovery: the usual
 `./uninstall.sh` + `./install.sh`). Nothing about the patch is active on
-non-Intel machines: nothing is placed, nothing to manage.
+non-Intel machines: nothing is placed there, and if a box that had the
+patch is moved back to a non-Intel graphics card, the layer removes its
+own files from the boot partition by itself at the next start — there is
+nothing to clean up by hand.
 
 ## The arcade binary is yours to supply
 

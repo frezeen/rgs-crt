@@ -23,7 +23,9 @@
 # Intel i915 480i patch on /boot (i915-patch duty: hook + module deployed
 # there once by install.sh, self-healed at boot when drifted; the /boot
 # hook itself swaps the module BEFORE udev at every boot — see the duty
-# below and src/service/i915/boot-custom.sh).
+# below and src/service/i915/boot-custom.sh). On non-Intel boots the duty
+# removes BOTH pieces (ours only, foreign hook never touched): a GPU swap
+# back to AMD leaves no residue and verify.sh stays clean.
 # Exit 0 always (a boot service must not block boot; drift goes LOUDLY
 # into the log, and verify.sh flags it).
 #
@@ -467,12 +469,24 @@ amdgpu_legacy_decide() {
 # State files (shell-quality §7): /boot/boot-custom.sh (writer = this
 # duty + install.sh, reader = stock S00bootcustom; foreign hook never
 # overwritten) and /boot/i915-patched.ko (writer = this duty + install.sh,
-# reader = the /boot hook; removed by uninstall.sh). The fetched module
-# is archived in the repo's binaries dir (user-procured class, gitignored)
-# so a later boot redeploys it without re-downloading.
+# reader = the /boot hook; removed by uninstall.sh and by this duty on
+# non-Intel boots — /boot is a ro vfat, the removal remounts rw and
+# restores ro). The hook's provenance gate is its own marker line, never a
+# byte-compare against the repo copy: a repo edit made OUR older hook read
+# as foreign and the non-Intel cleanup left it behind (AMD boot
+# 2026-09-21). The fetched module is archived in the repo's binaries dir
+# (user-procured class, gitignored) so a later boot redeploys it without
+# re-downloading.
+_i915_hook_is_ours() { # $1 = hook path — marker line present in every shipped version
+	local _h="$1"
+	[ -f "$_h" ] || return 1
+	grep -q 'patched i915 swap for Intel 480i' "$_h" 2>/dev/null
+}
+
 i915_patch_decide() {
 	local _kernel _dmesg_ok _repo _hook_src _hook_dst _mod_dst _mod_name
 	local _hook_ok _mod_src _vm _want_fetch _dmesg_txt
+	local _rm_list _left_list _remount _p
 	_kernel="${RGS15_UNAME_R:-$(uname -r 2>/dev/null || true)}"
 	_hook_dst="${RGS15_BOOT_HOOK:-/boot/boot-custom.sh}"
 	_mod_dst="${RGS15_BOOT_MOD:-/boot/i915-patched.ko}"
@@ -500,21 +514,55 @@ i915_patch_decide() {
 	*) _dmesg_ok=0 ;;
 	esac
 	if [ "$_dmesg_ok" = "0" ]; then
-		# not an Intel-iGPU boot: the pieces must NOT linger (leftover hook
-		# would run a stale module check forever). OUR module is removed;
-		# a foreign hook is NEVER touched (loud log, uninstall refuses it too).
-		if [ -e "$_mod_dst" ]; then
-			rm -f "$_mod_dst" && log "i915-patch: module removed (not applicable: no i915 this boot)"
+		# not an Intel-iGPU boot: OUR pieces must NOT linger — a leftover
+		# hook runs a stale module check forever and verify.sh flags
+		# either file. A foreign hook is NEVER touched (loud log;
+		# uninstall refuses it too). /boot is a ro vfat on this line
+		# (mount shows ro,errors=remount-ro): a direct rm works only
+		# when it is somehow writable, otherwise remount rw -> retry ->
+		# restore ro (the sequence uninstall.sh §3b uses). AMD boot
+		# 2026-09-21 after the Intel phase: the old code removed only
+		# the module with a silent rm on the ro /boot — both files
+		# stayed and verify.sh went DIRTY.
+		_rm_list=""
+		_left_list=""
+		[ -e "$_mod_dst" ] && _rm_list="$_rm_list $_mod_dst"
+		if [ -e "$_hook_dst" ]; then
+			if _i915_hook_is_ours "$_hook_dst"; then
+				_rm_list="$_rm_list $_hook_dst"
+			else
+				log "i915-patch: WARN: boot hook is FOREIGN (no crt-dual marker) on a non-Intel box — left in place (inspect $LOG)"
+				_left_list="$_left_list $_hook_dst"
+			fi
 		fi
-		if [ -e "$_hook_dst" ] && [ -f "$_hook_src" ] && ! cmp -s "$_hook_dst" "$_hook_src"; then
-			log "i915-patch: WARN: boot hook is FOREIGN (differs from ours) on a non-Intel box — left in place (inspect $LOG)"
+		_remount=0
+		for _p in $_rm_list; do
+			rm -f "$_p" 2>/dev/null && continue
+			if [ "$_remount" = "0" ]; then
+				mount -o remount,rw /boot 2>/dev/null || true # a failed remount cannot hide: the retry below still fails and the path is logged loud
+				_remount=1
+			fi
+			rm -f "$_p" 2>/dev/null || _left_list="$_left_list $_p"
+		done
+		if [ "$_remount" = "1" ]; then
+			sync
+			mount -o remount,ro /boot 2>/dev/null || true # canonical restore (uninstall.sh does the same); nothing here needs /boot writable
 		fi
-		return 0
+		if [ -z "$_left_list" ]; then
+			# log fidelity: nothing present = silent no-op, never a
+			# phantom "removed" line (case 14 pins it)
+			[ -n "$_rm_list" ] && log "i915-patch: ours removed (not applicable: no i915 this boot)"
+			return 0
+		fi
+		log "i915-patch: WARN: /boot cleanup incomplete (left:$_left_list — verify.sh will flag)"
+		return 1
 	fi
 	# Intel: converge hook + module onto /boot. Never overwrite a foreign
-	# hook; never deploy a module whose vermagic is not the running kernel.
-	if [ -e "$_hook_dst" ] && [ -f "$_hook_src" ] && ! cmp -s "$_hook_dst" "$_hook_src"; then
-		log "i915-patch: GUARD FAIL: boot hook is FOREIGN (differs from ours) — refusing to touch it (amxcs installer or other CRT tool? uninstall theirs first)"
+	# hook (provenance = the crt-dual marker line; OUR older hook converges,
+	# the repo copy replaces it); never deploy a module whose vermagic is
+	# not the running kernel.
+	if [ -e "$_hook_dst" ] && ! _i915_hook_is_ours "$_hook_dst"; then
+		log "i915-patch: GUARD FAIL: boot hook is FOREIGN (no crt-dual marker) — refusing to touch it (amxcs installer or other CRT tool? uninstall theirs first)"
 		return 1
 	fi
 	_mod_name="i915-patched-$_kernel.ko"

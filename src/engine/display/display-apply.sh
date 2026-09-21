@@ -72,9 +72,56 @@ _unplanned_enabled() { # DRM connectors holding a CRTC OUTSIDE the plan (stale c
 		if [ -n "$x" ]; then
 			_planned "$x" || printf '%s\n' "$x"
 		else
-			printf '?%s\n' "$drm" # no X output: cannot free via RandR (reported loud below)
+			printf '?%s\n' "$drm" # no X output: cannot free via RandR (see _ignored_holders for the conf-ignored class)
 		fi
 	done
+}
+_ignored_by_conf() { # $1 = connector name — true when the generated conf ignores it
+	local _id="$1" _f="$XCONF"
+	[ -f "$_f" ] || return 1
+	awk -v id="$_id" '
+		/^[[:space:]]*Section[[:space:]]+"Monitor"/ { ins = 1; hit = 0; ign = 0; next }
+		/^[[:space:]]*EndSection/ { if (ins && hit && ign) ok = 1; ins = 0; next }
+		ins && /^[[:space:]]*Identifier/ { if (index($0, "\"" id "\"")) hit = 1; next }
+		ins && hit && /[Oo]ption[[:space:]]+"[Ii]gnore"[[:space:]]+"true"/ { ign = 1 }
+		END { exit !ok }
+	' "$_f" 2>/dev/null
+}
+_ignored_holders() { # '?DRM' entries: conf-ignored AND disconnected AND no X name — unactionable by construction
+	# (AMD boot 2026-09-21 after the Intel phase: DVI-D-1 disconnected with a
+	# stale encoder binding and Option "ignore" in the conf; counted as a
+	# mismatch it failed every apply → the bounded repair off->on'ed BOTH
+	# outputs at every event, twice per boot, the 2nd cycle caused only by
+	# this. The conf is regenerated pre-X from live truth, so the match
+	# follows the topology; anything not exactly this stays LOUD.)
+	local f drm y
+	for f in "$SYSFS"/card*-*/enabled; do
+		[ -f "$f" ] || continue
+		[ "$(cat "$f" 2>/dev/null)" = "enabled" ] || continue
+		drm=$(basename "$(dirname "$f")")
+		drm=${drm#card*-}
+		[ "$(cat "$(dirname "$f")/status" 2>/dev/null)" = "disconnected" ] || continue
+		_x_name_for_drm "$drm" >/dev/null 2>&1 && continue # has an X handle: normal unplanned path frees it
+		y=$(printf '%s' "$drm" | sed -E 's/-[A-Za-z]-/-/')
+		if _ignored_by_conf "$drm" || _ignored_by_conf "$y"; then
+			printf '?%s\n' "$drm"
+		fi
+	done
+}
+_actionable_unplanned() { # _unplanned_enabled minus the conf-ignored '?' class
+	local _raw _ign _it _out=""
+	_raw=$(_unplanned_enabled)
+	[ -n "$_raw" ] || return 0
+	_ign=$(_ignored_holders)
+	for _it in $_raw; do
+		case "$_it" in
+		'?'*)
+			case " $_ign " in *" $_it "*) continue ;; esac
+			;;
+		esac
+		_out="$_out$_it"$'\n'
+	done
+	printf '%s' "$_out"
 }
 STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 _write_desktop_state() { # single writer of the analog desktop name (the model reads it)
@@ -112,12 +159,21 @@ if [ "$want_screen" != "none" ]; then
 	[ "$(_screen)" = "$want_screen" ] || mismatch="$mismatch screen($(_screen)!=$want_screen)"
 fi
 # a CRTC outside the plan is a mismatch even in the read-only verdict (the
-# stale class: a gone output can keep one — the daemon's settle must see it)
-_unplanned=$(_unplanned_enabled)
+# stale class: a gone output can keep one — the daemon's settle must see it).
+# EXCEPTION (2026-09-21): a connector the generated conf deliberately
+# IGNORES, disconnected, with an encoder still attached and no X output, has
+# no RandR handle — unactionable by construction; it is a loud note, never a
+# mismatch (see _ignored_holders for the churn it caused). Everything else
+# stays LOUD.
+_ignored_conf=$(_ignored_holders)
+_ignored_note=""
+[ -n "$_ignored_conf" ] && _ignored_note="conf-ignored, not actionable:$(printf '%s' "$_ignored_conf" | tr '\n' ',')"
+_unplanned=$(_actionable_unplanned)
 [ -n "$_unplanned" ] && mismatch="$mismatch unplanned($(printf '%s' "$_unplanned" | tr '\n' ','))"
 
 if [ -z "$mismatch" ]; then
 	echo "display-apply: reality matches the plan (zero writes)"
+	[ -n "$_ignored_note" ] && echo "display-apply: note: $_ignored_note"
 	exit 0
 fi
 
@@ -147,6 +203,7 @@ done
 
 if [ "$mode" != "--apply" ]; then
 	echo "display-apply: MISMATCH$mismatch"
+	[ -n "$_ignored_note" ] && echo "display-apply: note: $_ignored_note"
 	printf 'display-apply: would run: %s\n' "${cmd[*]}"
 	exit 1
 fi
@@ -178,7 +235,7 @@ verify() {
 	if [ -n "$want_screen" ] && [ "$want_screen" != "none" ] && [ "$(_screen)" != "$want_screen" ]; then
 		bad="$bad screen"
 	fi
-	un=$(_unplanned_enabled)
+	un=$(_actionable_unplanned)
 	if [ -n "$un" ]; then
 		bad="$bad unplanned($(printf '%s' "$un" | tr '\n' ','))"
 	fi

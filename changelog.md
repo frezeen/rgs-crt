@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-21 — a cleaner start-up, and nothing left behind after a card swap
+
+### Fixed
+- **The picture no longer flashes off and on twice at start-up.** An
+  empty port that the layer deliberately keeps out of the desktop could
+  still be marked inside the system as driving the picture, so every
+  check tried to "fix" it and restarted both outputs even though the
+  picture was already right — that showed as extra blinks of the tube
+  and the panel during boot. Such a port is now recognised as
+  intentionally ignored and simply noted; anything else still stops the
+  line loudly.
+- **Moving the graphics card from Intel back to another brand leaves
+  nothing behind.** The Intel display patch the layer had placed on the
+  boot partition is removed by the layer itself at the first start on
+  the non-Intel card — before, those files stayed behind until a manual
+  clean-up.
+
 ## 2026-09-21 — swapping the cables now just works
 
 ### Fixed
