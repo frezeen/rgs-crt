@@ -1,36 +1,133 @@
 # Third-party components
 
 This repository bundles the following third-party components. All are
-GPL-2.0 licensed (compatible with this repository's LICENSE) and are
-shipped for stock Batocera, where the equivalent tool is not present
-(verified: no x11vnc/wayvnc/tigervnc on stock Batocera 43.1).
+under free-software licenses compatible with this repository's LICENSE
+(GPL-2.0): the VNC components are GPL-2.0-or-later (x11vnc carries an
+explicit OpenSSL linking exception), the SASL library is under the
+Cyrus SASL (Carnegie Mellon) BSD-style license. They are shipped for
+stock Batocera, where the equivalent tool is not present (verified: no
+x11vnc/wayvnc/tigervnc on stock Batocera 43.1).
 
-## x11vnc 0.9.17
+## x11vnc 0.9.17 (SHIPPED — `src/engine/vnc/binaries/x11vnc`)
 
-- **Purpose**: VNC server for the X11 desktop (`vnc` / `vnc-scaled`
+- **Purpose**: VNC server for the X11 desktop (the `vnc` / `vnc-scaled`
   launchers and the `zz_crt_dual_vnc` autostart service).
-- **License**: GPL-2.0 (x11vnc is distributed under the GNU GPL v2).
-- **Provenance**: binary built 2025-04-11, ported from a private
-  development repository (not part of this public tree).
-  Source: <https://github.com/LibVNC/x11vnc> (tag 0.9.17).
+- **License**: GPL-2.0-or-later. Copyright (C) 2002-2010 Karl J. Runge
+  and others. The upstream source header reads: "This is free software;
+  you can redistribute it and/or modify it under the terms of the GNU
+  General Public License as published by the Free Software Foundation;
+  version 2 of the License, or (at your option) any later version", plus
+  an explicit exception: "as a special exception, Karl J. Runge gives
+  permission to link the code of its release of x11vnc with the OpenSSL
+  project's 'OpenSSL' library (or with modified versions of it that use
+  the same license) and distribute the linked executables. You must obey
+  the GNU General Public License in all respects for all of the code used
+  other than 'OpenSSL'." The distribution below relies on that exception
+  (this box's x11vnc links the system OpenSSL 3 — nothing is bundled).
+- **Provenance**: binary version verified live (`x11vnc -version` ->
+  `0.9.17 lastmod: 2025-04-11`), built from the upstream release, ported
+  from a private development repository (not part of this public tree).
+  Corresponding source: <https://github.com/LibVNC/x11vnc> (tag 0.9.17).
 - **Modifications**: none — the binary is used as-is. Its only runtime
   adaptation is a `libcrypt.so.1` symlink to the system's
   `libcrypt.so.2` (stock Batocera 43 ships only .2; the crypt ABI is
-  stable — see `src/vnc/vnc-env.sh`).
+  stable — created at runtime by `src/engine/vnc/vnc-env.sh`, never
+  shipped, never committed).
+- **Shipped**: yes — it travels in this repository and is installed to
+  the deployed package by `install.sh`, so the `vnc` command and the
+  boot service work with no user action.
 
-## Bundled shared libraries (in `src/vnc/binaries/`)
+## Bundled shared libraries (SHIPPED — `src/engine/vnc/binaries/`)
 
 | File | Component | License |
 | --- | --- | --- |
-| `libvncserver.so.1` | LibVNCServer (server library for x11vnc) | GPL-2.0 |
-| `libvncclient.so.1` | LibVNCClient (client library for x11vnc) | GPL-2.0 |
-| `libsasl2.so.2` | Cyrus SASL (SASL support for x11vnc) | BSD-style (Cyrus SASL license) |
+| `libvncserver.so.1` | LibVNCServer 0.9.12 (server library for x11vnc) | GPL-2.0-or-later |
+| `libvncclient.so.1` | LibVNCClient 0.9.12 (client library for x11vnc) | GPL-2.0-or-later |
+| `libsasl2.so.2` | Cyrus SASL 2.1.28 (SASL support for x11vnc) | CMU BSD-style (text below) |
+
+- **Provenance**: version strings read from the shipped binaries
+  (`LibVNCServer 0.9.12`; `Cyrus SASL 2.1.28`); LibVNCServer is linked
+  against the system GnuTLS (not OpenSSL), so the exception above is not
+  needed for these libraries. Corresponding sources:
+  <https://github.com/LibVNC/libvncserver> (tag v0.9.12) and
+  <https://github.com/cyrusimap/cyrus-sasl> (release 2.1.28).
+- **Modifications**: none.
+
+## Cyrus SASL license (required notice for `libsasl2.so.2`)
+
+```
+/* CMU libsasl
+ * Tim Martin
+ * Rob Earhart
+ * Rob Siemborski
+ */
+/*
+ * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any other legal
+ *    details, please contact
+ *      Office of Technology Transfer
+ *      Carnegie Mellon University
+ *      5000 Forbes Avenue
+ *      Pittsburgh, PA  15213-3890
+ *      (412) 268-4387, fax: (412) 268-7395
+ *      tech-transfer@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+```
+
+This product includes software developed by Computing Services at
+Carnegie Mellon University (http://www.cmu.edu/computing/).
+
+## GPL compliance note (x11vnc / LibVNCServer)
+
+- The shipped binaries are UNMODIFIED upstream releases; the complete
+  GNU GPL v2 text is this repository's `LICENSE` file, and the upstream
+  notices remain embedded in the binaries.
+- **Written offer (GPL-2 section 3b)**: this project offers, valid for
+  at least three years from 2026-09-22 (the date of the first public
+  distribution of these binaries), to give any third party the complete
+  corresponding source code of the components above, for no more than
+  the cost of physically performing the distribution, on request through
+  this repository's issue tracker. The upstream links above are the
+  exact source releases the bundled binaries were built from.
+- The binaries are dynamically linked against the system's own
+  libraries (X11, OpenSSL, GnuTLS, cairo, ...) — none of those are
+  bundled; the three libraries in the table are shipped alongside
+  because stock Batocera does not provide them.
 
 ## Switchres (runtime dependency — NOT bundled)
 
 - **Purpose**: CRT modeline generation. Called at runtime through its C
   wrapper API (`sr_*`, `switchres_wrapper.h`) via the ctypes helper
-  `src/api/switchres_api.py` — see `docs/SWITCHRES-API.md`.
+  `src/engine/api/switchres_api.py` — see the engine's
+  `docs/SWITCHRES-API.md`.
 - **License**: GPL-2.0+ (compatible with this repository's LICENSE).
 - **Provenance**: the stock shared library shipped by Batocera x86
   (verified: `/usr/lib64/libswitchres.so.2.2.1` on Batocera 43.1, the
@@ -71,16 +168,9 @@ shipped for stock Batocera, where the equivalent tool is not present
   caveat; the check is the update-safe variant). The module binary is
   used byte-for-byte as published.
 
-## GPL compliance note
+## User-procured binaries (NOT bundled)
 
-- The bundled binaries are dynamically linked against the system's own
-  GPL-compatible libraries (X11, openssl, cairo, …) where possible; the
-  three bundled libraries above are shipped alongside because stock
-  Batocera does not provide them.
-- The source for x11vnc / LibVNCServer is available from the upstream
-  links above; the exact build configuration used for the bundled
-  binaries is recorded in the provenance note of this file (built from
-  upstream tags, no source modifications). If a source copy is required,
-  please open an issue in this repository.
-- This file exists to satisfy the obligations of the GPL before any
-  public distribution.
+GroovyMAME (`profiles/<name>/binaries/`, large third-party builds) is
+user-supplied and gitignored; `verify.sh` warns while it is missing and
+the arcade path then runs the stock emulator. See
+`docs/install-and-updates.md` ("The arcade binary is yours to supply").

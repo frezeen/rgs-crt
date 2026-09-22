@@ -15,6 +15,9 @@ set -uo pipefail
 export DISPLAY="${DISPLAY:-:0}" # the daemon is setsid-detached: every xrandr call needs it explicitly
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
+# CRTC ownership truth (modetest; CRT_DUAL_MODETEST = test seam). Kernel
+# `enabled` alone means "encoder attached" — see crtc-owner.sh.
+[ -r "$HERE/crtc-owner.sh" ] && . "$HERE/crtc-owner.sh"
 
 _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 _cur_mode() { _x | sed -n "/^$1 connected/,/^[^ ]/p" | awk '$0 ~ /\*/ { print $1; exit }'; }
@@ -61,19 +64,41 @@ _ensure_mode() { # $1 output, $2 mode — re-add the conf modeline when X lost i
 	echo "display-apply: re-added mode '$m' on $x from $XCONF (mode-pool loss)"
 	return 0
 }
-_unplanned_enabled() { # DRM connectors holding a CRTC OUTSIDE the plan (stale class: gone outputs keep one)
-	local f drm x
+_unplanned_enabled() { # connectors whose CURRENT encoder HOLDS A CRTC, outside the plan
+	# Kernel `enabled` only says an encoder is attached (drm_sysfs.c) —
+	# the CRTC id comes from modetest (crtc-owner.sh). An encoder-only
+	# attach has nothing RandR can free, so it is NOT a mismatch (the
+	# 2026-09-22 tester report: DVI-D-1 enabled with no CRTC failed every
+	# apply and the bounded repair blinked the tube). Unknown truth (tool
+	# missing/broken) falls back to the old, louder behavior.
+	local f drm x crtc
 	for f in "$SYSFS"/card*-*/enabled; do
 		[ -f "$f" ] || continue
 		[ "$(cat "$f" 2>/dev/null)" = "enabled" ] || continue
 		drm=$(basename "$(dirname "$f")")
 		drm=${drm#card*-}
+		crtc="?"
+		command -v crtc_of >/dev/null 2>&1 && crtc=$(crtc_of "$drm")
+		[ -z "$crtc" ] && continue # no CRTC: encoder-only attach, not a holder
 		x=$(_x_name_for_drm "$drm" 2>/dev/null) || x=""
 		if [ -n "$x" ]; then
 			_planned "$x" || printf '%s\n' "$x"
 		else
 			printf '?%s\n' "$drm" # no X output: cannot free via RandR (see _ignored_holders for the conf-ignored class)
 		fi
+	done
+}
+_encoder_only_holders() { # enabled+disconnected with a KNOWN-empty CRTC: a note, never a mismatch
+	local f drm crtc
+	command -v crtc_of >/dev/null 2>&1 || return 0
+	for f in "$SYSFS"/card*-*/enabled; do
+		[ -f "$f" ] || continue
+		[ "$(cat "$f" 2>/dev/null)" = "enabled" ] || continue
+		drm=$(basename "$(dirname "$f")")
+		drm=${drm#card*-}
+		[ "$(cat "$(dirname "$f")/status" 2>/dev/null)" = "disconnected" ] || continue
+		crtc=$(crtc_of "$drm")
+		[ -z "$crtc" ] && printf '%s\n' "$drm"
 	done
 }
 _ignored_by_conf() { # $1 = connector name — true when the generated conf ignores it
@@ -94,6 +119,9 @@ _ignored_holders() { # '?DRM' entries: conf-ignored AND disconnected AND no X na
 	# outputs at every event, twice per boot, the 2nd cycle caused only by
 	# this. The conf is regenerated pre-X from live truth, so the match
 	# follows the topology; anything not exactly this stays LOUD.)
+	# RESIDUAL (ADR-002, watch): if such a connector really holds a CRTC,
+	# RandR still cannot free it and this stays a note; the CRTC truth is
+	# visible per connector in diag-dump (crtc=...).
 	local f drm y
 	for f in "$SYSFS"/card*-*/enabled; do
 		[ -f "$f" ] || continue
@@ -160,20 +188,34 @@ if [ "$want_screen" != "none" ]; then
 fi
 # a CRTC outside the plan is a mismatch even in the read-only verdict (the
 # stale class: a gone output can keep one — the daemon's settle must see it).
-# EXCEPTION (2026-09-21): a connector the generated conf deliberately
-# IGNORES, disconnected, with an encoder still attached and no X output, has
-# no RandR handle — unactionable by construction; it is a loud note, never a
-# mismatch (see _ignored_holders for the churn it caused). Everything else
-# stays LOUD.
+# NOTES, never mismatches (kernel truth, crtc-owner.sh):
+#  - a connector the generated conf deliberately IGNORES, disconnected,
+#    with an encoder attached and no X output has no RandR handle
+#    (2026-09-21 churn: the bounded repair off->on'ed BOTH outputs);
+#  - a disconnected connector whose encoder holds NO CRTC is an attach
+#    only — nothing RandR could free (2026-09-22 tester report: a phantom
+#    `unplanned(DVI-D-1)` failed every apply on a CRT-only box).
+# Everything else stays LOUD.
 _ignored_conf=$(_ignored_holders)
-_ignored_note=""
-[ -n "$_ignored_conf" ] && _ignored_note="conf-ignored, not actionable:$(printf '%s' "$_ignored_conf" | tr '\n' ',')"
+_attach_only=$(_encoder_only_holders)
+# the same connector can be in both classes (conf-ignored AND no CRTC):
+# name it once, in the conf-ignored line
+_attach_list=""
+for _c in $_attach_only; do
+	case " $_ignored_conf " in
+	*" $_c "* | *"?$_c "*) continue ;;
+	esac
+	_attach_list="$_attach_list $_c"
+done
+_note=""
+[ -n "$_ignored_conf" ] && _note="conf-ignored, not actionable:$(printf '%s' "$_ignored_conf" | tr '\n' ',')"
+[ -n "$_attach_list" ] && _note="${_note:+$_note }encoder-only attach (no CRTC), not actionable:${_attach_list# }"
 _unplanned=$(_actionable_unplanned)
 [ -n "$_unplanned" ] && mismatch="$mismatch unplanned($(printf '%s' "$_unplanned" | tr '\n' ','))"
 
 if [ -z "$mismatch" ]; then
 	echo "display-apply: reality matches the plan (zero writes)"
-	[ -n "$_ignored_note" ] && echo "display-apply: note: $_ignored_note"
+	[ -n "$_note" ] && echo "display-apply: note: $_note"
 	exit 0
 fi
 
@@ -203,7 +245,7 @@ done
 
 if [ "$mode" != "--apply" ]; then
 	echo "display-apply: MISMATCH$mismatch"
-	[ -n "$_ignored_note" ] && echo "display-apply: note: $_ignored_note"
+	[ -n "$_note" ] && echo "display-apply: note: $_note"
 	printf 'display-apply: would run: %s\n' "${cmd[*]}"
 	exit 1
 fi

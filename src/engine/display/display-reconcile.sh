@@ -192,7 +192,12 @@ case "${1:---check}" in
 		log "session active — yield (the game owns the display)"
 		exit 0
 	fi
+	# Exit WITH the verdict: zz_crt_dual's WARN branch exists exactly for
+	# this rc. Without the explicit exit, the trailing `exit 0` made
+	# "Boot layout applied" a false green (2026-09-22 tester report: a
+	# LOUD FAILURE line was followed by "applied").
 	_reconcile
+	exit $?
 	;;
 --session-start)
 	_session_start "${2:-}"

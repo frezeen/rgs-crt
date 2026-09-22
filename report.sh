@@ -21,7 +21,10 @@
 #   verify.txt         ./verify.sh full output + exit code (the gate)
 #   logs/              our runtime logs (/userdata/system/logs/:
 #                      rgs-15khz.log <- zz service, selector-core.log <-
-#                      selector, selector.log, sr-owner.log, service.log
+#                      selector, selector.log, sr-owner.log (legacy
+#                      residue), service.log = engine writers;
+#                      display-reconcile.log <- the reconciler's event
+#                      narrative, gamepad-reprobe.log; display-detect.log
 #                      = engine writers) + stock (display.log,
 #                      es_launch_stdout/stderr.log,
 #                      es_script_stdout/stderr.log, udev.log <- the stock
@@ -80,6 +83,7 @@ echo "verify.sh exit code: $?" >>"$STAGE/verify.txt"
 # 3. Runtime logs — ours and the stock display/launch ones (full copies;
 #    missing ones are benign: some never exist before first use).
 for _f in rgs-15khz.log selector-core.log selector.log sr-owner.log \
+	display-reconcile.log gamepad-reprobe.log \
 	display-detect.log service.log display.log udev.log es_launch_stdout.log \
 	es_launch_stderr.log es_script_stdout.log es_script_stderr.log \
 	rgs_download.log; do

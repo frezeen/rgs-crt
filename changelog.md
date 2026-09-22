@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-23 — the remote view ships with the layer, and quieter starts on tube-only machines
+
+### Added
+- **The built-in remote view (VNC) now works out of the box.** A fresh
+  install used to come up without the server, so the remote view never
+  started; it is part of the layer now, like everything else. Setup is
+  unchanged: port 5900, no password, for trusted local networks (see the
+  manual, "Remote access" in the install & updates page).
+
+### Fixed
+- **On a machine with only the tube, an unused digital port can no longer
+  make the picture restart.** A port that merely has its connection
+  electronics attached was mistaken for one that still drives the
+  picture: every start-up check tried to free it, the tube blinked for
+  nothing, and the check could never report a clean state. The layer now
+  uses what the graphics card actually reports and simply notes such a
+  port; a port that really is still driving something is still caught and
+  reported loudly.
+- **The start-up record tells the truth again when a start-up check
+  fails.** A failing check used to be followed by an "applied" line
+  anyway; the failure now stands alone, and the automatic retry takes
+  over from there.
+- **Re-running the installer on a machine that has already used the
+  remote view no longer reports a false difference** and no longer stops.
+- **Reports sent to the developers now include the display engine's own
+  log**, so a display problem can be read from the bundle directly.
+
 ## 2026-09-21 — a cleaner start-up, and nothing left behind after a card swap
 
 ### Fixed

@@ -40,6 +40,11 @@ fi
 if [ -r "$PACKAGE_DIR/lib/gpu-lib.sh" ]; then
 	source "$PACKAGE_DIR/lib/gpu-lib.sh" 2>/dev/null
 fi
+# CRTC ownership truth (kernel `enabled` = encoder attached, not CRTC —
+# the dimension every reconcile verdict uses; crtc-owner.sh, modetest).
+if [ -r "$PACKAGE_DIR/display/crtc-owner.sh" ]; then
+	source "$PACKAGE_DIR/display/crtc-owner.sh" 2>/dev/null
+fi
 if command -v detect_gpu >/dev/null 2>&1; then
 	detect_gpu 2>/dev/null
 	echo "  GPU_VENDOR=${GPU_VENDOR:-unknown}  GPU_MODEL=${GPU_MODEL:-unknown}"
@@ -73,11 +78,17 @@ else
 	done
 fi
 
-sep "SYSFS /sys/class/drm (DRM connector status)"
+sep "SYSFS /sys/class/drm (connector status + enabled + crtc owner)"
 found=0
 for d in /sys/class/drm/card*-*/; do
 	[ -f "$d/status" ] || continue
-	echo "  $(basename "$d"): $(cat "$d/status" 2>/dev/null)"
+	_cn=$(basename "$d")
+	_cn=${_cn#card*-}
+	_en=$(cat "$d/enabled" 2>/dev/null || true)
+	_cr="?"
+	command -v crtc_of >/dev/null 2>&1 && _cr=$(crtc_of "$_cn")
+	[ -z "$_cr" ] && _cr=none
+	echo "  $(basename "$d"): $(cat "$d/status" 2>/dev/null)  enabled=${_en:-?}  crtc=$_cr"
 	found=1
 done
 [ "$found" = 0 ] && echo "  no DRM connectors"

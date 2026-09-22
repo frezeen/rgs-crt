@@ -476,7 +476,27 @@ if [ -z "${RGS15_SKIP_ENABLE:-}" ]; then
 	done
 fi
 
-# ── 6. VNC symlinks ──
+# ── 6. VNC symlinks + shipped payload ──
+# The payload (x11vnc + its libs) SHIPS in the bundle — GPL-2+/CMU-BSD,
+# notices + written source offer in THIRD-PARTY.md. Content drift is
+# already caught by the package byte-identity check above; modes are not
+# compared, and the launcher exec()s the binary, so a lost +x is a real
+# break that must fail here. No `have` call: the payload is part of the
+# package component counted above, not a component of its own.
+if [ -d "$PKG/src/vnc" ]; then
+	for _v in x11vnc libvncserver.so.1 libvncclient.so.1 libsasl2.so.2; do
+		if [ -e "$PKG/src/vnc/binaries/$_v" ]; then
+			ok "VNC payload present: $_v"
+		else
+			bad "VNC payload missing: $_v (shipped component — reinstall)"
+		fi
+	done
+	if [ -e "$PKG/src/vnc/binaries/x11vnc" ]; then
+		[ -x "$PKG/src/vnc/binaries/x11vnc" ] \
+			&& ok "VNC payload executable" \
+			|| bad "VNC payload x11vnc not executable"
+	fi
+fi
 for _pair in "$VNC1:$PKG/src/vnc/vnc" "$VNC2:$PKG/src/vnc/vnc-scaled"; do
 	_link="${_pair%%:*}"
 	_target="${_pair##*:}"

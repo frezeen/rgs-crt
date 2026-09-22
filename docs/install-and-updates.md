@@ -216,6 +216,16 @@ or stop it when you do not need it:
 batocera-services stop zz_crt_dual_vnc
 ```
 
+The server ships with the layer (x11vnc and its libraries travel in the
+repository and are installed with everything else — nothing to
+download) and is free software: x11vnc and LibVNCServer under
+GPL-2.0-or-later (x11vnc keeps its upstream OpenSSL linking exception),
+the SASL library under the Carnegie Mellon BSD-style license. The
+required notices and the written source offer live in
+[THIRD-PARTY.md](../THIRD-PARTY.md). If the binary is ever missing
+(damaged install), the boot service says so once and stays off instead
+of retrying.
+
 ## Known noise (harmless, ours, by design)
 
 If you read the launch log of a **stock-profile session on a

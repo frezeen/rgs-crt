@@ -21,12 +21,13 @@
 #
 # Runs from /userdata/system/services (Batocera custom service).
 # Package root: /userdata/system/crt-dual (installed by install.sh).
+# Env seam (tests): CRT_DUAL_PKG_ROOT overrides the package root.
 
 set -uo pipefail
 
 case "$1" in
 	start)
-		PKG_ROOT="/userdata/system/crt-dual"
+		PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 		VNC="$PKG_ROOT/src/vnc/vnc"
 		LOG="$PKG_ROOT/logs/vnc.log"
 		PIDFILE="/tmp/crt-dual-vnc.pid"
@@ -34,6 +35,16 @@ case "$1" in
 
 		[ -x "$VNC" ] || {
 			echo "zz_crt_dual_vnc: launcher $VNC missing — is the package installed?" >&2
+			exit 1
+		}
+		# The payload SHIPS with the layer (src/engine/vnc/binaries —
+		# GPL-2+/CMU-BSD, THIRD-PARTY.md): a missing binary must fail
+		# ONCE here. Without this guard the respawn loop below retries
+		# every 2 s forever (2026-09-22 tester report: 523 log lines of
+		# "No such file or directory" on a box that installed before the
+		# payload was distributed).
+		[ -x "$PKG_ROOT/src/vnc/binaries/x11vnc" ] || {
+			echo "zz_crt_dual_vnc: x11vnc missing ($PKG_ROOT/src/vnc/binaries/x11vnc) — VNC stays off; the payload ships with the layer (reinstall if it is gone)" >&2
 			exit 1
 		}
 

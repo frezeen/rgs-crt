@@ -174,7 +174,9 @@ its dependencies and reports loudly.
   page states it with the same honesty).
 - The arcade path runs on **GroovyMAME** (the CRT-capable MAME build),
   and a few systems can use similar user-supplied binaries: this
-  project never ships them. The verifier tells you exactly which one
+  project never ships them (the VNC server is the exception — it ships
+  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). The verifier
+  tells you exactly which one
   is missing and at which path to place it — and warns without
   blocking, so everything else keeps working meanwhile
   ([details](docs/install-and-updates.md#the-arcade-binary-is-yours-to-supply)).

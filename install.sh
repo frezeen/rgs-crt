@@ -135,7 +135,10 @@ echo "  package -> $PKG (src + profiles)"
 _engine_drift=""
 for _d in "$PKG"/src/*/; do
 	_b="$(basename "$_d")"
-	diff -r --exclude=overlay-manifest --exclude=backups "$REPO/src/engine/$_b" "$_d" >/dev/null 2>&1 \
+	# __pycache__ + the VNC runtime libcrypt symlink are excluded exactly
+	# as verify.sh does: both appear inside the package during normal use
+	# (python caches, vnc-env.sh symlink) and are NOT drift.
+	diff -r --exclude=overlay-manifest --exclude=backups --exclude=__pycache__ --exclude=libcrypt.so.1 "$REPO/src/engine/$_b" "$_d" >/dev/null 2>&1 \
 		|| _engine_drift="$_engine_drift $_b"
 done
 [ -n "$_engine_drift" ] \
