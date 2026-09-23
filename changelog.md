@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-23 — PlayStation on the tube, and the puzzle console re-checked
+
+### Added
+- **PlayStation games now run on the tube with the console's own
+  signal.** Measured: 512x240 at 60 Hz on a clean 15.7 kHz line,
+  pixel-for-pixel with no filters — pause menus and HUD text are crisp
+  at 1:1, and the picture keeps the original 4:3 proportions. The
+  system picks its standard PlayStation emulator by itself; a different
+  high-level emulator can be selected manually, but it is not the one
+  that starts, and its own behaviour on the tube was not separately
+  proven.
+
+### Improved
+- **The Pyxel row in the compatibility list was re-checked with the
+  current build**: same square-canvas signal as before (256x256 at
+  ~58.5 Hz), unchanged fill, legible text.
+
 ## 2026-09-23 — the remote view ships with the layer, and quieter starts on tube-only machines
 
 ### Added

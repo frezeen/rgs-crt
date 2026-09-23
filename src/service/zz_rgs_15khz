@@ -37,6 +37,7 @@
 #
 # Env seams (tests): RGS15_PKG/LOG, RGS15_RGS_VERSION_FILE/
 # BATOCERA_VERSION_FILE/RGS_CONFIG/FIX_DIR/SITE/SHADOW/CONF,
+# RGS15_RGS_DIR (the +rgs surface: gamelist-ensure),
 # RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_PCI_SYS (amdgpu-legacy),
 # RGS15_DMESG_SRC + RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_REPO/
 # RGS15_I915_ALLOW_FETCH (i915-patch).
@@ -50,6 +51,10 @@ LOGS_DIR="$(dirname "$LOG")"
 # log the game path appends to; stock display.log/es_launch_* NEVER touched).
 TRUNCATE_LIST="rgs-15khz.log selector-core.log selector.log display-reconcile.log display-detect.log"
 RGS_FIX="/userdata/system/rgs/fix"
+# +rgs surface (gamelist + tile) is a PATH SEAM: install/uninstall run in
+# the seam suite, and a hardcoded live path here rewrote the LIVE tile on
+# every suite run (2026-09-23 leak audit). Default = live.
+RGS_DIR="${RGS15_RGS_DIR:-/userdata/roms/rgs}"
 MANIFEST="$PKG/overlay-manifest"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
 BATOCERA_VERSION_SRC="${RGS15_BATOCERA_VERSION_FILE:-/usr/share/batocera/batocera.version}"
@@ -787,7 +792,7 @@ gamelist-ensure)
 	# 2026-09-07: boot re-assert keeps ours alive). Idempotent, OURS only:
 	# first-run backup ($PKG/backups/rgs-gamelist.xml, restored by
 	# uninstall.sh), insert guarded by grep, tile image generated once.
-	_gl="/userdata/roms/rgs/gamelist.xml"
+	_gl="$RGS_DIR/gamelist.xml"
 	[ -f "$_gl" ] || exit 0 # no rgs rom dir: nothing to do
 	mkdir -p "$PKG/backups" 2>/dev/null || true
 	[ -f "$PKG/backups/rgs-gamelist.xml" ] || cp "$_gl" "$PKG/backups/rgs-gamelist.xml"
@@ -811,7 +816,7 @@ if "rgs_crt_check.sh" not in text:
 PYEOF
 		log "start: gamelist entry re-asserted (ES had dropped or it was missing)"
 	fi
-	_img="/userdata/roms/rgs/media/images/rgs_crt_check.png"
+	_img="$RGS_DIR/media/images/rgs_crt_check.png"
 	if [ ! -f "$_img" ]; then
 		SDL_VIDEODRIVER=dummy python3 - "$_img" <<'PYEOF' 2>/dev/null || true
 import sys

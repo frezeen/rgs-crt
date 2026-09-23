@@ -58,12 +58,13 @@ starts.
 | Amiga 500/1200 | 480i arcade signal for every game; measured Aladdin gameplay filling all edges with 1:1 HUD text legible | common + 480i video mode, pixelated scaling, auto-crop on, aspect-correction off, 640x480 canvas forced in the emulator's own file | TESTED 2026-09-06 |
 | DOS | Signal follows the content's native mode; measured 320x200@65 | common + RA family | TESTED 2026-09-06 |
 | PS2 | 640x480i as designed, authentic hardware-style texture filtering, no fake scanlines. Attract-mode footage carries its own letterbox (the game's frame, not bars). Gameplay-HUD fill was waived on the test, noted honestly | common + vsync on, Vulkan backend, PS2-authentic texture filtering + dithering + mipmapping, 4:3 FMV ratio | TESTED-with-note 2026-09-07 |
+| PlayStation (psx) | The console's own signal, 1:1: measured 512x240 at 60 Hz on a clean 15.7kHz line, pixel-for-pixel with no filters — pause menus and HUD text crisp at 1:1, original 4:3 proportions. The system picks its standard PlayStation emulator by itself; a different high-level emulator can be selected manually, but it is not the one that starts | common only | TESTED 2026-09-23 |
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
 | BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
 | Doom (PrBoom), Mr. Boom | Native 320x200, full HUD, all edges | common + RA family | TESTED 2026-09-06 |
 | Ports & tools (Od Commander, RetroTrivia, Prince of Music) | Run stock on the tube's 480i desktop signal, crisp | common only | TESTED 2026-09-06 |
 | Commander X16 (commanderx16) | The machine's boot screen fills the tube with pixel-crisp 1:1 text. The X16's native signal is 640x480@60 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive), so the tube shows the same untouched pixel grid **interlaced** at 640x480i 15.69kHz — no scaling, all 480 lines. The machine also has a 320x240@60 (40-column) mode that stays 15kHz-safe; not proven on the tube yet (needs a program that switches to it). Launching a .bas program from the list: the stock loader carried only the last of its two program files (the boot banner proved the emulator, mode and text rendering; the program quirk is upstream's) | common + native 1:1 rendering (the stock renderer's 2x upscale disabled) | TESTED-with-note 2026-09-10 |
-| Pyxel (pyxel) | Runs on its own native signal: 256x256 at ~58.5Hz **progressive** on a clean 16.2kHz line (the tube's demonstrated upper edge), pixel-for-pixel with no filters. A square image on a 4:3 glass: the render fills the width with a minimal vertical overscan (the arcade standard — text sits well inside) | common + native mode applied by the display layer after the launcher's own modeset | TESTED-with-note 2026-09-10 |
+| Pyxel (pyxel) | Runs on its own native signal: 256x256 at ~58.5Hz **progressive** on a clean 16.2kHz line (the tube's demonstrated upper edge), pixel-for-pixel with no filters. A square image on a 4:3 glass: the render fills the width with a minimal vertical overscan (the arcade standard — text sits well inside) | common + native 256x256 mode declared per game | TESTED-with-note 2026-09-10; re-verified 2026-09-23 (same signal and fill, text legible) |
 | Wii U (cemu) | HD 16:9 console on the tube's 480i, full-bleed stretched — the shared HD-console policy. The emulator's own stretch setting lands in its live file (verified at game time), render native, no extra image tricks | common + cemu stretch aspect (FullscreenScaling) + gamescope 864x486@60 fullscreen stretch | TESTED 2026-09-10 |
 | PS4 (shadps4) | HD 16:9 content on the tube's 480i, full-bleed stretched — same policy as the PS3/Vita rows. Proven on the tube with and without the window wrapper: without it the emulator letterboxes by itself (its own file offers no stretch control) and the text measured softer, so the wrapper stays — it is what fills the glass. Render at the game's own scale, no sharpening or smoothing | common + gamescope 864x486@60 fullscreen stretch + native render | TESTED 2026-09-10 |
 | PS Vita (vita3k) | The Vita's native panel (960x544) has no 15kHz form (its interlaced variant needs ~17.3kHz — beyond the tube's demonstrated edge), so the game runs full-bleed stretched to the tube's 480i — same policy as the PS3 row. The internal render stays at the console's native scale, no sharpening or smoothing. A true-proportions letterbox mode exists (one two-key change) but it measured as smaller, dimmer text on the tube | common + gamescope 864x486@60 fullscreen stretch + native render scale | TESTED-with-note 2026-09-10 |
@@ -110,8 +111,8 @@ lists; each is certified by the launch named at the end of the line.
   reminiscence, vircon32, quake, intellivision, channelf, odyssey2,
   videopacplus, 3do, cassettevision: same pipeline
   as the TESTED C64 launch; amigacd32, amigacdtv ride the TESTED Amiga
-  path; psx (pcsx_rearmed, user override) and
-  zxspectrum (fuse, user override) ride the tested global-only path.
+  path; zxspectrum (fuse, user override)
+  rides the tested global-only path.
 - **Vintage computers via MAME/MESS** — arcadia, cgenie, dragon64,
   mz2500, mz2000, mz700, mz800, mz80k, oricatmos, pv2000, rx78, sv8000,
   beena, ctvboy, loopy, mc10, pc60, pc80, pcw, segaai, trs80, vis, fm7,
@@ -153,8 +154,6 @@ unproven — listed, never claimed:
   jaguarcd, samcoupe, apple2, apple2gs, enterprise, spectravideo,
   fmtowns, lindbergh, moonlight (needs a streaming host
   PC), vpinball, dxx-rebirth, win311, win95.
-- **psx via DuckStation**: the stock default emulator, but its
-  fullscreen-at-480i behavior was never proven — pending a launch.
 - konamigx: the base system definition is malformed, emulator truly
   unknown — needs upstream; gameandwatch: no content and no fallback —
   declared out.

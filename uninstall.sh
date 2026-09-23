@@ -30,6 +30,13 @@ VNC2="${RGS15_VNC2:-/usr/bin/vnc-scaled}"
 # runtime logs — tests override this; defaults = live paths).
 LOGS_DIR="${RGS15_LOGS_DIR:-/userdata/system/logs}"
 OWN_LOGS="rgs-15khz.log selector-core.log dotclock-measure.log"
+# Session state (/tmp/crt-dual) and the +rgs surface are PATH SEAMS too:
+# the seam suite runs THIS script twice per run, and the hardcoded
+# /tmp/crt-dual rm wiped the LIVE detect-state (2026-09-23: every launch
+# then fell back to stock silently until a reconcile event). Defaults =
+# live paths; tests override both.
+TMP_DIR="${RGS15_TMP:-/tmp}"
+RGS_DIR="${RGS15_RGS_DIR:-/userdata/roms/rgs}"
 
 fail() {
 	echo "ERROR: $*" >&2
@@ -39,7 +46,7 @@ fail() {
 [ "$(id -u)" = "0" ] || fail "run as root"
 
 # ── Guard: no game session may be active ──
-if [ -f /tmp/crt-dual/profile ] || [ -f /tmp/crt-dual-mode ]; then
+if [ -f "$TMP_DIR/crt-dual/profile" ] || [ -f "$TMP_DIR/crt-dual-mode" ]; then
 	if pgrep -x retroarch >/dev/null 2>&1 || pgrep -f "[e]mulatorlauncher -system" >/dev/null 2>&1; then
 		fail "a game session is active — quit the game first (refusing to pull the runtime)"
 	fi
@@ -167,7 +174,7 @@ if [ -e "$TOOL_DST" ]; then
 fi
 
 # ── 5c. gamelist: restore first-install backup, remove our tile image ──
-GL="/userdata/roms/rgs/gamelist.xml"
+GL="$RGS_DIR/gamelist.xml"
 GLB="$PKG/backups/rgs-gamelist.xml"
 if [ -f "$GLB" ] && [ -f "$GL" ]; then
 	if grep -q 'rgs_crt_check.sh' "$GL"; then
@@ -175,7 +182,7 @@ if [ -f "$GLB" ] && [ -f "$GL" ]; then
 		echo "  gamelist restored from first-install backup"
 	fi
 fi
-rm -f /userdata/roms/rgs/media/images/rgs_crt_check.png
+rm -f "$RGS_DIR/media/images/rgs_crt_check.png"
 
 # ── 6. Box keys: restore value-or-absence from first-install backups ──
 # + our own written key (rgs-15khz.dotclock_min — the probe's measured
@@ -241,7 +248,7 @@ for _l in $OWN_LOGS; do
 done
 
 # ── 9. Session ephemera (safe: guard above proved no live game) ──
-rm -rf /tmp/crt-dual /tmp/crt-dual-mode /tmp/crt-dual-profile-options
+rm -rf "$TMP_DIR/crt-dual" "$TMP_DIR/crt-dual-mode" "$TMP_DIR/crt-dual-profile-options"
 echo "  session files cleared"
 
 # ── 10. Persist overlay removal (warn-only: a reboot heals to stock) ──
