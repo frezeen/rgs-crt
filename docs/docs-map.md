@@ -8,3 +8,5 @@
 Why two: the mirror export set ships only the user surface (gift
 discipline), so engine internals must not travel with it. This is an
 export boundary, not duplication.
+- Pages describe the current state; release history lives in the root
+  `changelog.md`, developer history in the journal.

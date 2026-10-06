@@ -144,7 +144,7 @@ its dependencies and reports loudly.
 
 ## Status & limitations
 
-- Tested on two reference machines: RGS 43.41 (Batocera 43.1 base),
+- Tested on two reference machines: RGS 43.43 (Batocera 43.1 base),
   x86_64, one with an **NVIDIA GTX 970** and one with an **AMD R9
   270X**, arcade tube in the demonstrated 13.6–16.2 kHz range. An
   **Intel** gen9 iGPU path exists since the current revision: the install

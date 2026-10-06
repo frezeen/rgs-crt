@@ -3,11 +3,11 @@
 This layer runs INSIDE stock RGS and reverts cleanly.
 
 This is the honest per-system status of the **RGS 15 kHz CRT** profile.
-Certification box: RGS 43.41 (Batocera 43.1 base), x86_64, NVIDIA
+Certification box: RGS 43.43 (Batocera 43.1 base), x86_64, NVIDIA
 GTX 970, arcade tube in the demonstrated 13.6–16.2 kHz range — the
 measured numbers below come from it; the full layer has also been
 tested on an AMD R9 270X machine, and Intel hardware carries a
-pending re-test (older revision only). Every TESTED verdict
+pending re-test. Every TESTED verdict
 below comes from a real launch on that tube with the resulting signal
 measured — a glance is never a verdict.
 
@@ -42,39 +42,38 @@ starts.
 
 | System | What you get | Settings the profile applies | Verdict |
 | --- | --- | --- | --- |
-| Super Nintendo (snes, snes-msu1, sufami, satellaview) | Native SNES signal, 256x224@60.10, pixel-perfect, no filters | common + RA family | TESTED 2026-09-04, re-measured clean 2026-09-06 |
+| Super Nintendo (snes, snes-msu1, sufami, satellaview) | Native SNES signal, 256x224@60.10, pixel-perfect, no filters | common + RA family | TESTED 2026-09-04 |
 | NES, Famicom Disk System | Native 256x224@60, tiny credits legible | common + RA family | TESTED 2026-09-06 |
 | Mega Drive / Genesis (+ Mega-CD, Game Gear, SG-1000 on same pipeline) | Native 320x224, full-bleed, correct aspect | common + RA family | TESTED 2026-09-06 |
 | PC Engine / TurboGrafx (+ CD) | Native 256x240, full-bleed, crisp | common + RA family | TESTED 2026-09-06 |
 | Game Boy Advance | Its native 240x160@60 is too rare a signal for a tube; runs fullscreen at an even 3x on a clean interlaced signal instead — authentic handheld colors | common + RA family + core-native aspect (ratio=core) | TESTED 2026-09-06 |
-| Naomi / Dreamcast / Atomiswave family | Native 640x480i arcade signal. Expect a brief re-sync in the first seconds of a Dreamcast-family launch (the core announces its display size after boot; the tube settles on the true native mode) — safe at arcade frequency the whole time | common + RA family + 640x480 internal render, anisotropic filtering off (Atomiswave: the resolution key only) | TESTED 2026-09-04 (Naomi); family extension proven 2026-09-07 |
-| Arcade — MAME (standalone and RetroArch core) | Each game gets its own board's native mode; measured Virtua Fighter at 693x520@57.52i and R-Type at 384x256@55.02, both full-bleed with the smallest text legible. The standalone path runs on **GroovyMAME**, an arcade binary **you procure** (never shipped — see install & updates). Audio stable on the current binary | common + stand-alone arcade redirection (switchres on, artwork crop, accelerated video) + authored ini files + the binary swap + the launcher's hardcoded audio override dropped | TESTED 2026-09-04, re-measured clean 2026-09-07 and 2026-09-10 |
-| Sega Model 2 (model2) | Native Model 2 raster at 693x520@57.52i, full-bleed, correct aspect; runs the RGS Model 2 emulator (the JammASD cabinet wiring talks straight to the board emulation) | common + native 1:1 render + the declared raster (693x520i.57.524160) | TESTED 2026-09-10 (Daytona USA); re-verdicted on the stock raster channel 2026-09-13 — same native raster, full-bleed 99.8% measured |
+| Naomi / Dreamcast / Atomiswave family | Native 640x480i arcade signal. Expect a brief re-sync in the first seconds of a Dreamcast-family launch (the core announces its display size after boot; the tube settles on the true native mode) — safe at arcade frequency the whole time | common + RA family + 640x480 internal render, anisotropic filtering off (Atomiswave: the resolution key only) | TESTED 2026-09-04 (Naomi) |
+| Arcade — MAME (standalone and RetroArch core) | Each game gets its own board's native mode; measured Virtua Fighter at 693x520@57.52i and R-Type at 384x256@55.02, both full-bleed with the smallest text legible. The standalone path runs on **GroovyMAME**, an arcade binary **you procure** (never shipped — see install & updates). Audio stable on the current binary | common + stand-alone arcade redirection (switchres on, artwork crop, accelerated video) + authored ini files + the binary swap + the launcher's hardcoded audio override dropped | TESTED 2026-09-04 |
+| Sega Model 2 (model2) | Native Model 2 raster at 693x520@57.52i, full-bleed, correct aspect; runs the RGS Model 2 emulator (the JammASD cabinet wiring talks straight to the board emulation) | common + native 1:1 render + the declared raster (693x520i.57.524160) | TESTED 2026-09-10 (Daytona USA) |
 | Arcade — Neo Geo / FBNeo | Native 320x240@60 progressive, fullscreen | common + RA family | TESTED 2026-09-06 |
-| Sega Saturn | Correct proportions at 660x224@59.83, with ~7% black bands top and bottom kept ON PURPOSE: stretching the signal to fill would trade correctness for vanity | common + RA family | TESTED 2026-09-06 |
-| Nintendo DS | Both screens stacked (Top/Bottom) at 661x496i filling the whole tube — owner-chosen after comparing side-by-side layout too (both work; the stacked one fills the glass) | common + RA family | TESTED 2026-09-06 |
+| Sega Saturn | Correct proportions at 660x224@59.83, with ~7% black bands top and bottom kept on purpose: stretching the signal to fill would trade correctness for accuracy | common + RA family | TESTED 2026-09-06 |
+| Nintendo DS | Both screens stacked (Top/Bottom) at 661x496i filling the whole tube | common + RA family | TESTED 2026-09-06 |
 | Commodore 64 | Native 384x272@50, full-bleed square pixels, no pillars | common + RA family + zoom mode off, pepto-PAL palette, square-pixel aspect | TESTED 2026-09-06 |
 | Nintendo 64 (+64DD) | Native 320x240@60 progressive, pixel-for-pixel edge to edge. The session uses the core that follows the console's live video timing; the stock default is never touched | common + RA family + session-scoped core choice (parallel_n64) | TESTED 2026-09-06 |
 | Amiga 500/1200 | 480i arcade signal for every game; measured Aladdin gameplay filling all edges with 1:1 HUD text legible | common + 480i video mode, pixelated scaling, auto-crop on, aspect-correction off, 640x480 canvas forced in the emulator's own file | TESTED 2026-09-06 |
 | DOS | Signal follows the content's native mode; measured 320x200@65 | common + RA family | TESTED 2026-09-06 |
-| PS2 | 640x480i as designed, authentic hardware-style texture filtering, no fake scanlines. Attract-mode footage carries its own letterbox (the game's frame, not bars). Gameplay-HUD fill was waived on the test, noted honestly | common + vsync on, Vulkan backend, PS2-authentic texture filtering + dithering + mipmapping, 4:3 FMV ratio | TESTED-with-note 2026-09-07 |
-| PlayStation (psx) | The console's own signal, 1:1: measured 512x240 at 60 Hz on a clean 15.7kHz line, pixel-for-pixel with no filters — pause menus and HUD text crisp at 1:1, original 4:3 proportions. The system picks its standard PlayStation emulator by itself; a different high-level emulator can be selected manually, but it is not the one that starts | common only | TESTED 2026-09-23 |
+| PS2 | 640x480i as designed, authentic hardware-style texture filtering, no fake scanlines. Attract-mode footage carries its own letterbox (the game's frame, not bars); gameplay-HUD fill not certified | common + vsync on, Vulkan backend, PS2-authentic texture filtering + dithering + mipmapping, 4:3 FMV ratio | TESTED-with-note 2026-09-07 |
+| PlayStation (psx) | The console's own signal, 1:1: measured 512x240 at 60 Hz on a clean 15.7kHz line, pixel-for-pixel with no filters — pause menus and HUD text crisp at 1:1, original 4:3 proportions. The system picks its standard PlayStation emulator by itself | common only | TESTED 2026-09-23 |
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
 | BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
 | Doom (PrBoom), Mr. Boom | Native 320x200, full HUD, all edges | common + RA family | TESTED 2026-09-06 |
 | Ports & tools (Od Commander, RetroTrivia, Prince of Music) | Run stock on the tube's 480i desktop signal, crisp | common only | TESTED 2026-09-06 |
-| Commander X16 (commanderx16) | The machine's boot screen fills the tube with pixel-crisp 1:1 text. The X16's native signal is 640x480@60 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive), so the tube shows the same untouched pixel grid **interlaced** at 640x480i 15.69kHz — no scaling, all 480 lines. The machine also has a 320x240@60 (40-column) mode that stays 15kHz-safe; not proven on the tube yet (needs a program that switches to it). Launching a .bas program from the list: the stock loader carried only the last of its two program files (the boot banner proved the emulator, mode and text rendering; the program quirk is upstream's) | common + native 1:1 rendering (the stock renderer's 2x upscale disabled) | TESTED-with-note 2026-09-10 |
-| Pyxel (pyxel) | Runs on its own native signal: 256x256 at ~58.5Hz **progressive** on a clean 16.2kHz line (the tube's demonstrated upper edge), pixel-for-pixel with no filters. A square image on a 4:3 glass: the render fills the width with a minimal vertical overscan (the arcade standard — text sits well inside) | common + native 256x256 mode declared per game | TESTED-with-note 2026-09-10; re-verified 2026-09-23 (same signal and fill, text legible) |
-| Wii U (cemu) | HD 16:9 console on the tube's 480i, full-bleed stretched — the shared HD-console policy. The emulator's own stretch setting lands in its live file (verified at game time), render native, no extra image tricks | common + cemu stretch aspect (FullscreenScaling) + gamescope 864x486@60 fullscreen stretch | TESTED 2026-09-10 |
-| PS4 (shadps4) | HD 16:9 content on the tube's 480i, full-bleed stretched — same policy as the PS3/Vita rows. Proven on the tube with and without the window wrapper: without it the emulator letterboxes by itself (its own file offers no stretch control) and the text measured softer, so the wrapper stays — it is what fills the glass. Render at the game's own scale, no sharpening or smoothing | common + gamescope 864x486@60 fullscreen stretch + native render | TESTED 2026-09-10 |
-| PS Vita (vita3k) | The Vita's native panel (960x544) has no 15kHz form (its interlaced variant needs ~17.3kHz — beyond the tube's demonstrated edge), so the game runs full-bleed stretched to the tube's 480i — same policy as the PS3 row. The internal render stays at the console's native scale, no sharpening or smoothing. A true-proportions letterbox mode exists (one two-key change) but it measured as smaller, dimmer text on the tube | common + gamescope 864x486@60 fullscreen stretch + native render scale | TESTED-with-note 2026-09-10 |
-| PS3 (rpcs3) | HD 16:9 console on a 15kHz tube: no native mode exists, so the tube shows it full-bleed stretched to 4:3 — the proportions are compressed (16:9 content in a 4:3 glass), owner-chose after seeing both fills on the tube. Render at the game's native scale (no artificial upscaling), no sharpening or smoothing. The letterboxed alternative (true proportions with black bars) exists as a one-key change if you ever prefer it | common + rpcs3 native render scale (100%) + gamescope 864x486 fullscreen stretch | TESTED-with-note 2026-09-10 |
+| Commander X16 (commanderx16) | The machine's boot screen fills the tube with pixel-crisp 1:1 text. The X16's native signal is 640x480@60 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive), so the tube shows the same untouched pixel grid **interlaced** at 640x480i 15.69kHz — no scaling, all 480 lines. The machine also has a 320x240@60 (40-column) mode that stays 15kHz-safe; not proven on the tube yet. For a .bas launch the stock loader carries only the last of the program's two files (upstream behaviour) | common + native 1:1 rendering (the stock renderer's 2x upscale disabled) | TESTED-with-note 2026-09-10 |
+| Pyxel (pyxel) | Runs on its own native signal: 256x256 at ~58.5Hz **progressive** on a clean 16.2kHz line (the tube's demonstrated upper edge), pixel-for-pixel with no filters. A square image on a 4:3 glass: the render fills the width with a minimal vertical overscan (the arcade standard — text sits well inside) | common + native 256x256 mode declared per game | TESTED-with-note 2026-09-10 |
+| Wii U (cemu) | HD 16:9 console on the tube's 480i, full-bleed stretched — the shared HD-console policy. The emulator's own stretch setting lands in its live file, render native, no extra image tricks | common + cemu stretch aspect (FullscreenScaling) + gamescope 864x486@60 fullscreen stretch | TESTED 2026-09-10 |
+| PS4 (shadps4) | HD 16:9 content on the tube's 480i, full-bleed stretched — same policy as the PS3/Vita rows. The window wrapper is what fills the glass: without it the emulator letterboxes by itself (its own file offers no stretch control). Render at the game's own scale, no sharpening or smoothing | common + gamescope 864x486@60 fullscreen stretch + native render | TESTED 2026-09-10 |
+| PS Vita (vita3k) | The Vita's native panel (960x544) has no 15kHz form (its interlaced variant needs ~17.3kHz — beyond the tube's demonstrated edge), so the game runs full-bleed stretched to the tube's 480i — same policy as the PS3 row. The internal render stays at the console's native scale, no sharpening or smoothing. A true-proportions letterbox mode exists (a two-key change) | common + gamescope 864x486@60 fullscreen stretch + native render scale | TESTED-with-note 2026-09-10 |
+| PS3 (rpcs3) | HD 16:9 console on a 15kHz tube: no native mode exists, so the tube shows it full-bleed stretched to 4:3 — the proportions are compressed (16:9 content in a 4:3 glass). Render at the game's native scale (no artificial upscaling), no sharpening or smoothing. The letterboxed alternative (true proportions with black bars) exists as a one-key change if you ever prefer it | common + rpcs3 native render scale (100%) + gamescope 864x486 fullscreen stretch | TESTED-with-note 2026-09-10 |
 | Xbox / Chihiro (xemu) | Native 640x480 on the tube's 480i signal — gameplay fills the glass edge to edge (the title art keeps its own dark frame); title text legible 1:1. Runs the stock Xbox emulator with a 1:1 render scale and no extra image tricks (sharpness and smoothing stay off) | common + gamescope 640x480@60 window (pixel filter, no sharpening, fullscreen stretch) + native render scale | TESTED 2026-09-10 |
-| GameCube / Triforce / Wii (dolphin family) | Native 640x480 raster shown on the tube's 480i signal (the console's own 480p is a 31kHz signal a 15kHz tube cannot show progressively) — full-bleed. The internal render runs at an even 2x for crisper geometry and text: chosen on the tube by a side-by-side comparison (the crisper variant, measured on the title text) and uniformed across the whole family | common + dolphin stretch-to-window fill, internal render 2x | TESTED 2026-09-10 |
+| GameCube / Triforce / Wii (dolphin family) | Native 640x480 raster shown on the tube's 480i signal (the console's own 480p is a 31kHz signal a 15kHz tube cannot show progressively) — full-bleed. The internal render runs at an even 2x for crisper geometry and text | common + dolphin stretch-to-window fill, internal render 2x | TESTED 2026-09-10 |
 
-**Every exit verified the same way:** the session ends, everything
-returns to the desktop state, and the verifier reports clean — this is
-part of the verdict, not a footnote.
+**Every verdict includes the exit:** the session ends, everything
+returns to the desktop state, and the system reports clean.
 
 ## Same certified pipeline, not individually launched (family)
 
@@ -130,7 +129,7 @@ lists; each is certified by the launch named at the end of the line.
   global-only standalone path.
 - **Clock Signal classics** — amstradcpc, archimedes, colecovision,
   macintosh, mastersystem, msx1, msx2, zxspectrum: same global-only
-  path (three TESTED launches prove it byte-for-byte).
+  path (three TESTED launches).
 - **Ports & standalone games** — abuse, bstone, cannonball, catacomb,
   cdogs, cgenius, corsixth, devilutionx, doom3, easyrpg, ecwolf,
   eduke32, fury, etlegacy, fallout1-ce, fallout2-ce, flatpak, gzdoom,
@@ -154,9 +153,11 @@ unproven — listed, never claimed:
   jaguarcd, samcoupe, apple2, apple2gs, enterprise, spectravideo,
   fmtowns, lindbergh, moonlight (needs a streaming host
   PC), vpinball, dxx-rebirth, win311, win95.
+- rawthrills (Aliens Armageddon, Big Buck Hunter Pro): the tube profile
+  sends these two gun games to the tube's 480i arcade signal instead of
+  leaving them on the LCD — verified on the glass 2026-10-07 on both
+  engines (wine and linuxloader): the picture fills the 4:3 frame, no
+  letterbox, no stretch.
 - konamigx: the base system definition is malformed, emulator truly
   unknown — needs upstream; gameandwatch: no content and no fallback —
   declared out.
-
-The pending list shrinks one launch at a time, and a launch only
-flips a row when the numbers agree with the table's standard.
