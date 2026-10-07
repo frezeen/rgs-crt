@@ -955,7 +955,9 @@ feed-check)
 	_line="OFFLINE"
 	if [ "${RGS15_FEED_ALLOW_NET:-0}" = "1" ]; then
 		_tmp="$(mktemp /tmp/rgs-crt-feed.XXXXXX 2>/dev/null || true)"
-		if [ -n "$_tmp" ] && "$_fetch" -fsS --max-time "$_timeout" -o "$_tmp" "$_feed_url" 2>/dev/null; then
+		# -L follows redirects (release-asset hosts answer 302; without
+		# it curl banks an empty body with rc 0 and the probe misreads).
+		if [ -n "$_tmp" ] && "$_fetch" -fsSL --max-time "$_timeout" -o "$_tmp" "$_feed_url" 2>/dev/null; then
 			_feed="$(tr -d ' \t\r\n' <"$_tmp" 2>/dev/null || true)"
 			if feed_is_rev "$_feed" && feed_is_rev "$_installed"; then
 				_cmp="$(feed_vercmp "$_feed" "$_installed")"

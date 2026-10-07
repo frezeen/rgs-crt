@@ -55,10 +55,13 @@ if [ -e "$SRC/.git" ]; then
 	fail "developer worktree ($SRC/.git exists); use deploy.sh"
 fi
 
-# Every fetch carries a timeout: a bare fetch with no timeout can hang a
-# headless box forever (the i915 fetch without one is the anti-pattern).
+# Every fetch carries a timeout AND follows redirects (-L): a bare fetch
+# with no timeout can hang a headless box forever (the i915 fetch
+# without one is the anti-pattern), and release-asset hosts answer 302 —
+# without -L curl writes an empty body with rc 0 and the sha check below
+# silently skips placement (observed 2026-10-07: empty mame file).
 fetch() { # $1 = URL, $2 = outfile
-	"$FETCH" -fsS --max-time "$TIMEOUT" -o "$2" "$1"
+	"$FETCH" -fsSL --max-time "$TIMEOUT" -o "$2" "$1"
 }
 
 if [ -n "$TMPDIR_SEAM" ]; then
