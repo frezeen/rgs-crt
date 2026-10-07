@@ -109,6 +109,34 @@ This is the right tool for any settings file the emulator owns and may
 rewrite itself — it always operates on the current content, so it
 cannot silently rot.
 
+If the setting must live inside a named section of the file (INI files
+group their keys under `[Section]` headers), write the section in front
+of the key — the line lands in that section (created if the file has
+none yet) and is removed from it again at exit:
+
+```
+[psp]
+[keypatch/configs/ppsspp/PSP/SYSTEM/ppsspp.ini]
+Graphics/DisplayStretch = True
+```
+
+A key written without a section keeps the plain behavior (anywhere in
+the file).
+
+Some emulators keep a `<key>\default` marker beside every setting (Qt
+and QSettings-based programs such as azahar do this, and they rewrite
+those markers each time they save). While the marker says `true` the
+program ignores the value on the line and uses its own built-in default
+instead — so patching the value alone is silently discarded. Patch the
+marker with it:
+
+```
+[3ds]
+[keypatch/configs/azahar-emu/qt-config.ini]
+Layout/custom_top_width = 640
+Layout/custom_top_width\default = false
+```
+
 ### 3. Whole files the profile provides — `[configs]`
 
 ```

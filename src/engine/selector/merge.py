@@ -499,7 +499,76 @@ def _keypatch_prev(target: str, key: str, backup_root, name: str) -> Path:
 
 
 def _keypatch_key(line: str) -> str:
-    return line.split("=", 1)[0].strip()
+    return _ini_line(line.split("=", 1)[0])
+
+
+# RGS-15KHZ-EXT (BOM tolerance): PPSSPP saves ppsspp.ini with a UTF-8 BOM,
+# which would otherwise hide the file's first line from section/key matching
+# (a missed [Graphics] makes the keypatch append a DUPLICATE section, and the
+# generator's configparser then fails the whole read and rewrites empty).
+def _ini_line(s: str) -> str:
+    return s.strip().lstrip("\ufeff").strip()
+
+
+# RGS-15KHZ-EXT (section-aware keypatch): a keypatch key may name the INI
+# section it must live in as `Section/Key = value` (first '/' separates).
+# Plain `Key = value` keeps the original flat behavior byte-for-byte.
+def _kp_section(line: str) -> str:
+    left = line.split("=", 1)[0]
+    return left.split("/", 1)[0].strip() if "/" in left else ""
+
+
+def _kp_section_key(line: str) -> tuple[str, str]:
+    left = line.split("=", 1)[0]
+    if "/" in left:
+        s, _, k = left.partition("/")
+        return s.strip(), k.strip()
+    return "", left.strip()
+
+
+def _kp_write_line(line: str) -> str:
+    """The physical line: section qualifier stripped
+    ('Graphics/DisplayStretch = True' -> 'DisplayStretch = True')."""
+    left = line.split("=", 1)[0]
+    if "/" in left:
+        return line.split("/", 1)[1].strip()
+    return line.strip()
+
+
+def _section_bounds(lines: list, section: str):
+    """(header_index, body_end_exclusive) of `[section]`, or None when the
+    header is absent. body_end = next header line or len(lines). BOM-safe."""
+    hi = None
+    for i, ln in enumerate(lines):
+        s = _ini_line(ln)
+        if s.startswith("[") and s.endswith("]") and s[1:-1].strip() == section:
+            hi = i
+            break
+    if hi is None:
+        return None
+    end = len(lines)
+    for j in range(hi + 1, len(lines)):
+        s = _ini_line(lines[j])
+        if s.startswith("[") and s.endswith("]"):
+            end = j
+            break
+    return hi, end
+
+
+def _created_section_marker(target: str, section: str, backup_root, name: str) -> Path:
+    d = Path(backup_root) / name / "keypatch" / _sanitize(target)
+    return d / f"__created_section__{_sanitize(section)}"
+
+
+def _has_ini_sections(lines: list) -> bool:
+    """True when the file carries at least one `[Section]` header (BOM-safe).
+    A flat key appended to such a file lands OUTSIDE its section and is
+    inert — the declared-effect guard warns instead of failing a launch."""
+    for ln in lines:
+        s = _ini_line(ln)
+        if s.startswith("[") and s.endswith("]"):
+            return True
+    return False
 
 
 def _filter_keypatch(keypatch: dict, system: str | None, block_type: dict | None,
@@ -549,24 +618,75 @@ def apply_keypatch(keypatch: dict, target_root, backup_root, name: str) -> None:
             print(f"  keypatch: {target} missing — creating (removed at gameStop)")
         changed = False
         for _block, line in entries:
-            key = _keypatch_key(line)
-            if not key or "=" not in line:
+            qid = _keypatch_key(line)
+            if not qid or "=" not in line:
                 raise SpecError(f"keypatch line without '=': {target}: {line}")
-            prev_file = _keypatch_prev(target, key, backup_root, name)
-            idx = next((i for i, l in enumerate(lines) if _keypatch_key(l) == key), None)
-            dupes = [i for i, l in enumerate(lines) if _keypatch_key(l) == key][1:]
+            value = line.split("=", 1)[1].strip()
+            section = _kp_section(line)
+            if "/" in line.split("=", 1)[0]:
+                _s, _k = _kp_section_key(line)
+                if not _s or not _k:
+                    raise SpecError(
+                        "keypatch sectioned key malformed (want Section/Key): "
+                        f"{target}: {line}")
+            prev_file = _keypatch_prev(target, qid, backup_root, name)
+            if not section:
+                # flat key: corrective rewrite-or-append anywhere (unchanged)
+                idx = next((i for i, l in enumerate(lines)
+                            if _keypatch_key(l) == qid), None)
+                dupes = [i for i, l in enumerate(lines)
+                         if _keypatch_key(l) == qid][1:]
+                if not prev_file.exists():
+                    prev_file.write_text(lines[idx] if idx is not None else "")
+                if idx is None:
+                    if _has_ini_sections(lines):
+                        print(f"  WARN: keypatch: {target}: flat key "
+                              f"'{qid}' appended to a SECTIONED file — it "
+                              f"lands outside any section and is inert; "
+                              f"declare it as Section/{qid}")
+                    lines.append(line)
+                    changed = True
+                elif lines[idx] != line:
+                    lines[idx] = line
+                    changed = True
+                for i in sorted(dupes, reverse=True):
+                    del lines[i]
+                    changed = True
+                print(f"  keypatch: {target}: {qid}={value}")
+                continue
+            # sectioned key: place INSIDE [section] (created if absent)
+            key = _kp_section_key(line)[1]
+            write_line = _kp_write_line(line)
+            bounds = _section_bounds(lines, section)
+            if bounds is None:
+                if not prev_file.exists():
+                    prev_file.write_text("")  # absent before apply
+                _created_section_marker(target, section, backup_root, name).write_text(section)
+                lines.append(f"[{section}]")
+                lines.append(write_line)
+                changed = True
+                print(f"  keypatch: {target}: [{section}] {key}={value} (section created)")
+                continue
+            hi, end = bounds
+            idx = next((i for i in range(hi + 1, end)
+                        if _keypatch_key(lines[i]) == key), None)
+            dupes = [i for i in range(hi + 1, end)
+                     if _keypatch_key(lines[i]) == key][1:]
             if not prev_file.exists():
                 prev_file.write_text(lines[idx] if idx is not None else "")
             if idx is None:
-                lines.append(line)
+                insert_at = end
+                while insert_at - 1 > hi and not lines[insert_at - 1].strip():
+                    insert_at -= 1
+                lines.insert(insert_at, write_line)
                 changed = True
-            elif lines[idx] != line:
-                lines[idx] = line
+            elif lines[idx] != write_line:
+                lines[idx] = write_line
                 changed = True
             for i in sorted(dupes, reverse=True):
                 del lines[i]
                 changed = True
-            print(f"  keypatch: {target}: {key}={line.split('=', 1)[1].strip()}")
+            print(f"  keypatch: {target}: [{section}] {key}={value}")
         if changed or not p.is_file():
             atomic_write(p, "\n".join(lines) + ("\n" if lines else ""))
 
@@ -581,23 +701,62 @@ def restore_keypatch(keypatch: dict, target_root, backup_root, name: str) -> Non
                 / _sanitize(target))
         if not base.is_dir():
             continue  # never applied — nothing to do
-        keys = list(dict.fromkeys(_keypatch_key(ln) for _, ln in entries if _keypatch_key(ln)))
+        qids = list(dict.fromkeys(_keypatch_key(ln) for _, ln in entries if _keypatch_key(ln)))
         if p.is_file():
             lines = p.read_text(errors="replace").splitlines()
         else:
             lines = []
-        for key in keys:
-            prev_file = _keypatch_prev(target, key, backup_root, name)
+        for qid in qids:
+            prev_file = _keypatch_prev(target, qid, backup_root, name)
             if not prev_file.exists():
                 continue
             prev = prev_file.read_text(errors="replace")
-            lines = [l for l in lines if _keypatch_key(l) != key]
-            if prev:
-                lines.append(prev)
-                print(f"  keypatch: restored {target}: {key}")
+            entry_line = next((ln for _, ln in entries if _keypatch_key(ln) == qid), "")
+            section = _kp_section(entry_line)
+            key = _kp_section_key(entry_line)[1]
+            if not section:
+                lines = [l for l in lines if _keypatch_key(l) != key]
+                if prev:
+                    lines.append(prev)
+                    print(f"  keypatch: restored {target}: {qid}")
+                else:
+                    print(f"  keypatch: removed {target}: {qid} (was absent before apply)")
             else:
-                print(f"  keypatch: removed {target}: {key} (was absent before apply)")
+                bounds = _section_bounds(lines, section)
+                if bounds is None:
+                    if prev:
+                        lines.append(prev)
+                        print(f"  keypatch: restored {target}: {qid}")
+                    else:
+                        print(f"  keypatch: removed {target}: {qid} (section already gone)")
+                else:
+                    hi, end = bounds
+                    idxs = [i for i in range(hi + 1, end)
+                            if _keypatch_key(lines[i]) == key]
+                    if idxs:
+                        first = idxs[0]
+                        if prev:
+                            lines[first] = prev
+                        else:
+                            del lines[first]
+                        for i in sorted(idxs[1:], reverse=True):
+                            del lines[i]
+                    elif prev:
+                        lines.insert(hi + 1, prev)
+                    print(f"  keypatch: {'restored' if prev else 'removed'} "
+                          f"{target}: [{section}] {key}")
             prev_file.unlink(missing_ok=True)
+        # sections WE created: drop the header once the section is empty
+        for marker in sorted(base.glob("__created_section__*")):
+            sect = marker.read_text(errors="replace").strip()
+            b = _section_bounds(lines, sect)
+            if b:
+                hi, end = b
+                body = [l for l in lines[hi + 1:end]
+                        if l.strip() and not l.strip().startswith("#")]
+                if not body:
+                    del lines[hi:end]
+            marker.unlink(missing_ok=True)
         (base / "__absent__").unlink(missing_ok=True)
         if not p.is_file() and not lines:
             pass  # stayed absent — clean
@@ -1150,6 +1309,13 @@ def do_validate(profile_dir: Path, name: str, target_root: Path):
         for _block, line in entries:
             if "=" not in line:
                 raise SpecError(f"keypatch line without '=': {target}: {line}")
+            left = line.split("=", 1)[0].strip()
+            if "/" in left:
+                sect, _, k = left.partition("/")
+                if not sect.strip() or not k.strip():
+                    raise SpecError(
+                        "keypatch sectioned key malformed (want Section/Key): "
+                        f"{target}: {line}")
     print(f"  spec OK: {name} — {label} ({display_target})")
     return True
 

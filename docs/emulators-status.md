@@ -53,12 +53,14 @@ starts.
 | Arcade — Neo Geo / FBNeo | Native 320x240@60 progressive, fullscreen | common + RA family | TESTED 2026-09-06 |
 | Sega Saturn | Correct proportions at 660x224@59.83, with ~7% black bands top and bottom kept on purpose: stretching the signal to fill would trade correctness for accuracy | common + RA family | TESTED 2026-09-06 |
 | Nintendo DS | Both screens stacked (Top/Bottom) at 661x496i filling the whole tube | common + RA family | TESTED 2026-09-06 |
+| Nintendo 3DS | Both screens shown at once, stacked at the same size and widened to the tube's edges: no black bars, and the pair fills the glass top to bottom at 640x480i. Equal screens cost a little width, so the handheld's picture is slightly wider than the hardware's | common + the emulator's own two-screen layout forced to two equal halves on the tube's 4:3 canvas (written in the emulator's settings, put back when the game closes) | TESTED 2026-10-07 |
 | Commodore 64 | Native 384x272@50, full-bleed square pixels, no pillars | common + RA family + zoom mode off, pepto-PAL palette, square-pixel aspect | TESTED 2026-09-06 |
 | Nintendo 64 (+64DD) | Native 320x240@60 progressive, pixel-for-pixel edge to edge. The session uses the core that follows the console's live video timing; the stock default is never touched | common + RA family + session-scoped core choice (parallel_n64) | TESTED 2026-09-06 |
 | Amiga 500/1200 | 480i arcade signal for every game; measured Aladdin gameplay filling all edges with 1:1 HUD text legible | common + 480i video mode, pixelated scaling, auto-crop on, aspect-correction off, 640x480 canvas forced in the emulator's own file | TESTED 2026-09-06 |
 | DOS | Signal follows the content's native mode; measured 320x200@65 | common + RA family | TESTED 2026-09-06 |
 | PS2 | 640x480i as designed, authentic hardware-style texture filtering, no fake scanlines. Attract-mode footage carries its own letterbox (the game's frame, not bars); gameplay-HUD fill not certified | common + vsync on, Vulkan backend, PS2-authentic texture filtering + dithering + mipmapping, 4:3 FMV ratio | TESTED-with-note 2026-09-07 |
 | PlayStation (psx) | The console's own signal, 1:1: measured 512x240 at 60 Hz on a clean 15.7kHz line, pixel-for-pixel with no filters — pause menus and HUD text crisp at 1:1, original 4:3 proportions. The system picks its standard PlayStation emulator by itself | common only | TESTED 2026-09-23 |
+| PlayStation Portable (psp) | The portable's 16:9 picture fills the whole 4:3 tube with no black bars; the render stays at the console's native scale with sharp (nearest) filtering, so the image is enlarged, not softened | common + full-screen stretch (the display-stretch key, set inside the emulator's own Graphics section) + native render scale + nearest filtering | TESTED 2026-10-07 |
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
 | BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
 | Doom (PrBoom), Mr. Boom | Native 320x200, full HUD, all edges | common + RA family | TESTED 2026-09-06 |
@@ -71,6 +73,7 @@ starts.
 | PS3 (rpcs3) | HD 16:9 console on a 15kHz tube: no native mode exists, so the tube shows it full-bleed stretched to 4:3 — the proportions are compressed (16:9 content in a 4:3 glass). Render at the game's native scale (no artificial upscaling), no sharpening or smoothing. The letterboxed alternative (true proportions with black bars) exists as a one-key change if you ever prefer it | common + rpcs3 native render scale (100%) + gamescope 864x486 fullscreen stretch | TESTED-with-note 2026-09-10 |
 | Xbox / Chihiro (xemu) | Native 640x480 on the tube's 480i signal — gameplay fills the glass edge to edge (the title art keeps its own dark frame); title text legible 1:1. Runs the stock Xbox emulator with a 1:1 render scale and no extra image tricks (sharpness and smoothing stay off) | common + gamescope 640x480@60 window (pixel filter, no sharpening, fullscreen stretch) + native render scale | TESTED 2026-09-10 |
 | GameCube / Triforce / Wii (dolphin family) | Native 640x480 raster shown on the tube's 480i signal (the console's own 480p is a 31kHz signal a 15kHz tube cannot show progressively) — full-bleed. The internal render runs at an even 2x for crisper geometry and text | common + dolphin stretch-to-window fill, internal render 2x | TESTED 2026-09-10 |
+| Raw Thrills gun shooters (rawthrills) | Both titles on this machine show the arcade picture full on the 4:3 tube, no letterbox and no stretch, each on its own engine (the native loader for Aliens Armageddon, Wine for Big Buck Hunter Pro) | common + the tube raster on the stock video-mode key (`rawthrills.videomode = 640x480i`); no emulator or core pin — the system's own engine choice is followed | TESTED 2026-10-07 |
 
 **Every verdict includes the exit:** the session ends, everything
 returns to the desktop state, and the system reports clean.
@@ -149,15 +152,10 @@ No content on the certification box, or one specific behavior still
 unproven — listed, never claimed:
 
 - switch, xbox360,
-  psp, 3ds, model3, hikaru, namco2x6, daphne, singe,
+  model3, hikaru, namco2x6, daphne, singe,
   jaguarcd, samcoupe, apple2, apple2gs, enterprise, spectravideo,
   fmtowns, lindbergh, moonlight (needs a streaming host
   PC), vpinball, dxx-rebirth, win311, win95.
-- rawthrills (Aliens Armageddon, Big Buck Hunter Pro): the tube profile
-  sends these two gun games to the tube's 480i arcade signal instead of
-  leaving them on the LCD — verified on the glass 2026-10-07 on both
-  engines (wine and linuxloader): the picture fills the 4:3 frame, no
-  letterbox, no stretch.
 - konamigx: the base system definition is malformed, emulator truly
   unknown — needs upstream; gameandwatch: no content and no fallback —
   declared out.

@@ -68,16 +68,16 @@ modern stack and the layer will not touch the choice again.
 
 Some GPU/adapter combinations cannot produce the very low video clocks
 that a few consoles' native resolutions need — asking for them shows a
-black screen instead of a game. At the **first game you launch on a CRT**
-the layer measures the real limit of your chain (a few quick mode changes
-on the tube, once, before the game starts). On the RetroArch path it then
-asks for the game's native resolution only when the chain can produce it;
-below the limit the picture is widened instead — same game, full screen,
-never black. The standalone arcade path keeps its own authored settings
-and is not touched by the measurement. The desktop (480i) never depends on this: it boots
-the same on every machine. `rgs-15khz.dotclock_min=off` in `batocera.conf`
-keeps the emulators' own behavior and stops the measuring; a number
-(e.g. `rgs-15khz.dotclock_min=25`) pins the floor by hand.
+black screen instead of a game. On a CRT setup the layer measures the chain
+at **boot, before the desktop appears**, rather than interrupting the first
+game. If the check reports a failure, the layer records a warning and
+uses its default floor.
+On the RetroArch path the measured limit can widen a picture that would
+otherwise ask the chain for an unsupported low clock. The standalone arcade
+path keeps its own authored settings. The desktop (480i) remains unchanged.
+`rgs-15khz.dotclock_min=off` in `batocera.conf` skips the measurement and
+keeps the emulators' own floor behavior; a number (e.g.
+`rgs-15khz.dotclock_min=25`) sets the floor by hand instead.
 
 ## Intel machines and the display patch
 

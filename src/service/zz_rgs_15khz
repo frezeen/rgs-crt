@@ -16,7 +16,9 @@
 # config menu); re-deploy ONLY the manifest-listed overlay
 # files that drifted (install.sh is authoritative and rewrites the
 # manifest every run); save the overlay IFF something was re-deployed;
-# re-create the VNC symlinks (stateless per boot); recompute the amdgpu
+# re-create the VNC symlinks (stateless per boot); wait for rgs_config to
+# finish then re-apply the stock-launcher raster hunks (bounded, 2026-10-07
+# race); recompute the amdgpu
 # dc=0 modprobe pin (amdgpu-legacy duty, 2026-09-10 — the modprobe.d
 # file must exist BEFORE the module binds, so the boot service writes
 # it for the NEXT boot; install.sh calls the same one-shot); keep the
@@ -43,7 +45,9 @@
 # RGS15_I915_ALLOW_FETCH (i915-patch),
 # RGS15_FEED_VERSION_URL/RGS15_FETCH_BIN/RGS15_FETCH_TIMEOUT/
 # RGS15_FEED_ALLOW_NET (feed-check), RGS15_SRC/RGS15_UPDATE_GET
-# (tool-update: project folder / get.sh path overrides).
+# (tool-update: project folder / get.sh path overrides),
+# RGS15_RES_TARGET/RGS15_RES_BAK (resolution-patch),
+# RGS15_RGS_CONFIG_PROC/WAIT/GRACE/POLL (the rgs_config order wait).
 
 set -uo pipefail
 
@@ -233,10 +237,48 @@ PYEOF
 # State file (shell-quality §7): who writes = this function (boot duty +
 # the install.sh one-shot call), who reads = kmod when amdgpu loads,
 # who cleans = uninstall.sh + the remove branch below.
+# ── ordering vs rgs_config (2026-10-07) ───────────────────────────────
+# rgs_config runs async in the SAME S99 loop (both `start &`) and
+# UNCONDITIONALLY re-copies the stock launcher LATE in its script (line
+# ~176 of ~270; its early S02resize canary does NOT prove it finished).
+# So a re-apply that races it can be clobbered — reproduced 2026-10-07:
+# our apply 20:27:30, rgs_config cp 20:27:32 -> verify DIRTY. Wait for the
+# rgs_config process to be GONE before re-applying; on a fresh boot it may
+# not have started yet, so give it a short grace first. Bounded: a boot
+# service must never hang (the belt falls through and logs).
+rgs_config_running() {
+	local _pat="${RGS15_RGS_CONFIG_PROC:-[/]userdata/system/services/rgs_config}"
+	command -v pgrep >/dev/null 2>&1 || return 1
+	pgrep -f "$_pat" >/dev/null 2>&1
+}
+
+wait_rgs_config_done() {
+	# _max/_grace are POLL COUNTS; with the default POLL=1s they are ~seconds.
+	local _max="${RGS15_RGS_CONFIG_WAIT:-60}" _grace="${RGS15_RGS_CONFIG_GRACE:-15}"
+	local _poll="${RGS15_RGS_CONFIG_POLL:-1}" _i=0 _seen=0
+	while [ "$_i" -lt "$_max" ]; do
+		if rgs_config_running; then
+			_seen=1
+		elif [ "$_seen" = "1" ]; then
+			log "resolution-patch: rgs_config finished (after ${_i} polls) — ordered re-apply"
+			return 0
+		elif [ "$_i" -ge "$_grace" ]; then
+			log "resolution-patch: rgs_config not seen in ${_grace} polls (already ran or disabled) — re-apply"
+			return 0
+		fi
+		sleep "$_poll"
+		_i=$((_i + 1))
+	done
+	log "resolution-patch: rgs_config still running after ${_max} polls — applying anyway (verify flags any clobber)"
+	return 0
+}
+
 # ── the stock launcher raster channel (resolution-patch duty, 2026-09-13)
 # /usr/bin/batocera-resolution is a STOCK file rgs_config re-copies from
-# rgs/fix/ at every boot BEFORE this service runs — so the duty re-applies
-# the raster hunks at every boot, right after it. First apply takes a
+# rgs/fix/ at every boot — so the duty re-applies the raster hunks at every
+# boot AFTER rgs_config has finished (wait_rgs_config_done above; the old
+# "before this service runs" assumption was false and lost the 2026-10-07
+# race). First apply takes a
 # whole-file snapshot under backups/stock-originals (restore = uninstall.sh);
 # the content guard needs the exact stock anchors: an RGS update that
 # changes the file = LOUD skip, verify flags the drift, the next boot
@@ -694,13 +736,16 @@ do_start() {
 	done
 	log "start: logs truncated ($TRUNCATE_LIST)"
 
-	# 2. Ordering evidence: rgs_config products in place?
-	# (S02resize is the canary — rgs_config cmp+cp's it every boot.)
+	# 2. Early canary only: has rgs_config STARTED? S02resize is copied near
+	#    the TOP of its script, so a match says NOTHING about whether it
+	#    FINISHED — the late launcher cp is handled by wait_rgs_config_done
+	#    at 3d (the 2026-10-07 boot logged "ordering OK" here and was then
+	#    clobbered). Kept as a cheap progress signal, never as ordering proof.
 	if [ -f "$RGS_FIX/S02resize-v42fix" ] && [ -f "/etc/init.d/S02resize" ] \
 		&& cmp -s "$RGS_FIX/S02resize-v42fix" "/etc/init.d/S02resize"; then
-		log "start: rgs_config products in place (S02resize matches fix — ordering OK)"
+		log "start: rgs_config early canary in place (S02resize copied; finishing not implied)"
 	else
-		log "start: rgs_config products NOT in place (ran before rgs_config, or fix changed)"
+		log "start: rgs_config early canary absent (not started yet, or fix changed)"
 	fi
 
 	# 3. Update watch (boot): adopt a re-verified update or hold.
@@ -741,12 +786,14 @@ do_start() {
 	fi
 
 	# 3d. launcher raster hunks (/usr/bin/batocera-resolution; rgs_config
-	#     re-copied the stock file earlier this boot — re-apply AFTER it,
-	#     self-healing every boot, snapshot at first apply). Guard-hold
-	#     skips it like 3c: system-level state is not recomputed while held.
+	#     re-copies the stock file LATE in its script — wait until it has
+	#     finished, THEN re-apply, or the copy clobbers us; self-healing
+	#     every boot, snapshot at first apply). Guard-hold skips it like 3c:
+	#     system-level state is not recomputed while held.
 	if [ "$_guard_hold" = "1" ]; then
 		log "start: resolution patch skipped (guard hold)"
 	else
+		wait_rgs_config_done
 		resolution_patch_decide
 	fi
 
