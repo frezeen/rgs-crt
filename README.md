@@ -16,7 +16,7 @@ removes itself back to the exact stock state at any time.
 | No fake CRT effects | Smoothing and scanline-style filters are switched off on the tube. The tube is the filter. |
 | The menu keeps working | Between games the desktop runs on the tube, on a connected LCD, or on both. Pick whichever you plugged in. |
 | It always gives things back | Every setting a game needed is reverted the moment the game exits. The desktop, the values, everything returns to what it was. |
-| A safety net you can see | A check entry in the Batocera config menu shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is designed to become, one day, where this layer updates itself in one press. |
+| A safety net you can see | A check entry in the Batocera config menu shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself in one press when a newer release is available. |
 
 ## Three ways to plug it in
 
@@ -71,18 +71,18 @@ that instruction printed. Everything else about obtaining, installing
 or updating RGS lives on RGS's official channels; this project
 deliberately does not duplicate those steps.
 
-Download the ZIP from this page (green "Code" button → "Download ZIP"),
-copy it to the box, extract, then from the extracted folder:
+Over SSH, as root, one command installs the layer — and the same
+command updates it later:
 
 ```
-./install.sh      # onto a stock box only
-./uninstall.sh    # back to exact stock
-./verify.sh       # exit 0 = clean; the gate for everything else
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
 ```
 
-After `install.sh`: connect the CRT and reboot once — the first boot
-completes one display setting; run `./verify.sh` after the reboot and
-expect green. The first tube session begins.
+After it finishes: connect the CRT and reboot once — the first boot
+completes one display setting. Then, from the installed folder
+(`/userdata/roms/rgs_crt`), `./verify.sh` must report clean (exit 0):
+that is the gate for everything else. To remove the layer entirely,
+`./uninstall.sh` from the same folder returns the box to exact stock.
 
 Details — what the install owns, what an RGS update does to it, how the
 check tool decides green vs red: **[docs/install-and-updates.md](docs/install-and-updates.md)**
@@ -172,14 +172,16 @@ its dependencies and reports loudly.
   across the whole test period the box crashed two or three times
   around a plug event, every time recovered by a reboot (the setups
   page states it with the same honesty).
-- The arcade path runs on **GroovyMAME** (the CRT-capable MAME build),
-  and a few systems can use similar user-supplied binaries: this
-  project never ships them (the VNC server is the exception — it ships
-  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). The verifier
+- The arcade path runs on **GroovyMAME** (the CRT-capable MAME build):
+  the install fetches the tested build automatically from the project's
+  public release — it is still never shipped in this repository (the VNC
+  server is the exception — it ships
+  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). If the box was
+  offline and the binary is missing, the verifier
   tells you exactly which one
   is missing and at which path to place it — and warns without
   blocking, so everything else keeps working meanwhile
-  ([details](docs/install-and-updates.md#the-arcade-binary-is-yours-to-supply)).
+  ([details](docs/install-and-updates.md#the-arcade-binary-arrives-with-the-install)).
 - After an RGS system update, reinstalling this layer is required if
   its self-check cannot vouch for the new system — by design, so you
   never run a half-verified setup.
@@ -225,8 +227,9 @@ with the LCD and CRT plugged in the way you want reported:
    batocera-es-swissknife --emukill
    ```
 
-2. **One command, run from the folder you extracted this project
-   into (as root — over SSH you already are; without root the bundle
+2. **One command, run from the installed folder
+   (`/userdata/roms/rgs_crt` — the folder the install uses; as root —
+   over SSH you already are; without root the bundle
    may miss system state):**
 
    ```
@@ -237,8 +240,9 @@ with the LCD and CRT plugged in the way you want reported:
    the display (which screens are connected, what they report, the GPU,
    live mode timings), the gate's verdict, every relevant log, the
    installed state and the display lines from the system log — and zips
-   it all. Deleted the folder
-   after installing? Re-download the ZIP. `report.sh` writes only its
+   it all. If the folder is gone, run the install command again and
+   report from there.
+   `report.sh` writes only its
    own report folder and zip; the snapshot inside it looks at the
    display while gathering — nothing on the box is modified.
 

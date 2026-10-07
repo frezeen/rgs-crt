@@ -40,7 +40,10 @@
 # RGS15_RGS_DIR (the +rgs surface: gamelist-ensure),
 # RGS15_MODPROBE_CONF/RGS15_UNAME_R/RGS15_PCI_SYS (amdgpu-legacy),
 # RGS15_DMESG_SRC + RGS15_BOOT_HOOK/RGS15_BOOT_MOD/RGS15_I915_REPO/
-# RGS15_I915_ALLOW_FETCH (i915-patch).
+# RGS15_I915_ALLOW_FETCH (i915-patch),
+# RGS15_FEED_VERSION_URL/RGS15_FETCH_BIN/RGS15_FETCH_TIMEOUT/
+# RGS15_FEED_ALLOW_NET (feed-check), RGS15_SRC/RGS15_UPDATE_GET
+# (tool-update: project folder / get.sh path overrides).
 
 set -uo pipefail
 
@@ -629,6 +632,61 @@ i915_patch_decide() {
 	return 0
 }
 
+# ── update feed (feed client): feed-check + tool-update ────────────────
+# feed-check prints exactly ONE line for the UI (first word parsed):
+# CURRENT <installed> | UPDATE <feedver> | BLOCKED <feedver> <targetrgs>
+# | OFFLINE. Non-destructive, best-effort: any fetch failure, unreadable
+# or malformed version = OFFLINE (never blocks, never touches live
+# state). Versions are MAJOR.MINOR.REV; the target base is the first two
+# components (the RGS line the release is certified on); comparison is the
+# FULL numeric tuple (a REV-only compare would call 43.54.9 newer than
+# 43.55.1). The fetch always carries --max-time via RGS15_FETCH_BIN
+# (default curl, same shape as get.sh); RGS15_FEED_ALLOW_NET=1 opts into
+# the network — unset/0 answers OFFLINE without fetching (hermetic seams,
+# offline-safe default). Installed is read from ${PKG}.version, live RGS
+# from RGS_VERSION_SRC. tool-update runs get.sh — the ONE install/update
+# chain — from the recorded project folder, then reboots (deliberate,
+# user-launched from rgs_crt_check, same shape as tool-uninstall).
+feed_is_rev() { # $1 -> rc 0 iff MAJOR.MINOR.REV, all numeric
+	case "${1:-}" in
+	"" | *[^0-9.]*) return 1 ;;
+	esac
+	# grep without -q drains to EOF (no SIGPIPE trap — shell-quality);
+	# the || true guards the redirect under set -o pipefail.
+	[ "$(printf '%s' "$1" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)" = "$1" ]
+}
+
+feed_is_base() { # $1 -> rc 0 iff it starts with numeric MAJOR.MINOR (live rgs.version shape)
+	case "${1:-}" in
+	"" | *[^0-9.]*) return 1 ;;
+	esac
+	[ -n "$(printf '%s' "$1" | grep -E '^[0-9]+\.[0-9]+' || true)" ]
+}
+
+feed_vercmp() { # $1 $2 = MAJOR.MINOR.REV -> prints -1 / 0 / 1 (full tuple, numeric)
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		split(a, A, "."); split(b, B, ".");
+		for (i = 1; i <= 3; i++) {
+			x = A[i] + 0; y = B[i] + 0;
+			if (x < y) { print -1; exit }
+			if (x > y) { print 1; exit }
+		}
+		print 0
+	}'
+}
+
+feed_base_ge() { # $1 = live RGS, $2 = target base -> rc 0 iff live >= target (first two components, numeric)
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		split(a, A, "."); split(b, B, ".");
+		for (i = 1; i <= 2; i++) {
+			x = A[i] + 0; y = B[i] + 0;
+			if (x < y) exit 1;
+			if (x > y) exit 0
+		}
+		exit 0
+	}'
+}
+
 do_start() {
 	# 1. Truncate our logs (boot-pristine).
 	for _f in $TRUNCATE_LIST; do
@@ -884,8 +942,66 @@ tool-check)
 		log "tool: verdict RED (layer not certifiable on this system)"
 	fi
 	exit 0
+	;;
+feed-check)
+	# the update feed probe for rgs_crt_check (UI parses the first
+	# word; empty/garbage => OFFLINE on the UI side). Exactly ONE line
+	# on stdout, always; exit 0 always (a probe never fails the caller).
+	_installed="$(tr -d ' \t\r\n' <"${PKG}.version" 2>/dev/null || true)"
+	_live_rgs="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
+	_feed_url="${RGS15_FEED_VERSION_URL:-https://raw.githubusercontent.com/frezeen/rgs-crt/main/VERSION}"
+	_fetch="${RGS15_FETCH_BIN:-curl}"
+	_timeout="${RGS15_FETCH_TIMEOUT:-8}"
+	_line="OFFLINE"
+	if [ "${RGS15_FEED_ALLOW_NET:-0}" = "1" ]; then
+		_tmp="$(mktemp /tmp/rgs-crt-feed.XXXXXX 2>/dev/null || true)"
+		if [ -n "$_tmp" ] && "$_fetch" -fsS --max-time "$_timeout" -o "$_tmp" "$_feed_url" 2>/dev/null; then
+			_feed="$(tr -d ' \t\r\n' <"$_tmp" 2>/dev/null || true)"
+			if feed_is_rev "$_feed" && feed_is_rev "$_installed"; then
+				_cmp="$(feed_vercmp "$_feed" "$_installed")"
+				if [ "$_cmp" = "0" ] || [ "$_cmp" = "-1" ]; then
+					_line="CURRENT $_installed"
+				else
+					_target="$(printf '%s' "$_feed" | cut -d. -f1,2)"
+					if feed_is_base "$_live_rgs" && feed_base_ge "$_live_rgs" "$_target"; then
+						_line="UPDATE $_feed"
+					else
+						_line="BLOCKED $_feed $_target"
+					fi
+				fi
+			fi
+		fi
+		rm -f "$_tmp" 2>/dev/null || true # benign: the probe must leave no temp file behind
+	fi
+	echo "$_line"
+	log "tool: feed-check $_line"
+	exit 0
+	;;
+tool-update)
+	# DELIBERATE update from the rgs_crt_check tool (user-launched, no
+	# game launch in flight): run get.sh — the ONE install/update chain —
+	# from the recorded project folder, then reboot into the updated
+	# layer. Missing source/get.sh = loud log + non-zero exit, NO reboot
+	# (fail-safe: never reboot a box that could not be updated); a
+	# failing get.sh likewise aborts the reboot.
+	_src="${RGS15_SRC:-$(cat "$PKG/install-source" 2>/dev/null || true)}"
+	_get="${RGS15_UPDATE_GET:-$_src/get.sh}"
+	if [ -z "$_src" ] || [ ! -f "$_get" ]; then
+		log "tool: update requested but no usable get.sh (src='${_src:-?}' get='${_get:-?}') — run get.sh from the project folder by hand"
+		exit 1
+	fi
+	log "tool: update requested (deliberate, from rgs_crt_check) — running $_get then reboot"
+	if bash "$_get" >>"$LOG" 2>&1; then
+		log "tool: update complete — rebooting into the updated layer"
+		reboot
+		exit 0
+	else
+		_rc=$?
+		log "tool: update returned non-zero (rc=$_rc) — reboot ABORTED (inspect the log)"
+		exit "$_rc"
+	fi
 	;;*)
-	echo "usage: $0 {start|stop|tool-check|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
+	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
 	exit 1
 	;;
 esac

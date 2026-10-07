@@ -29,7 +29,8 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
 PKG_VERSION_FILE="${PKG}.version"
-PKG_VERSION="rgs-15khz step7-resilience (engine 0a05ab6)"
+# PKG_VERSION is assigned below, after fail() exists (a guard that fires
+# before its reporter is defined cannot fail loud — it would fall through).
 HOOK_SRC="$REPO/src/engine/selector/first_script.sh"
 HOOK_DST="${RGS15_HOOK:-/userdata/system/scripts/first_script.sh}"
 SVCDIR="${RGS15_SVCDIR:-/userdata/system/services}"
@@ -55,6 +56,12 @@ fail() {
 	echo "ERROR: $*" >&2
 	exit 1
 }
+
+# Single source of truth: the root VERSION file (MAJOR.MINOR = live
+# rgs.version base, REV = our per-base counter). Fail loud, never invent.
+[ -f "$REPO/VERSION" ] || fail "repo VERSION missing ($REPO/VERSION)"
+PKG_VERSION="$(cat "$REPO/VERSION")"
+[ -n "$PKG_VERSION" ] || fail "repo VERSION empty ($REPO/VERSION)"
 
 [ "$(id -u)" = "0" ] || fail "run as root"
 [ -n "${RGS15_SKIP_ENABLE:-}" ] || command -v batocera-services >/dev/null 2>&1 \

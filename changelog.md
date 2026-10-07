@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-07 — one command installs and updates, from the box itself
+
+**Install and update with a single command.** The layer now installs —
+and later updates — with one command run over SSH on the box itself:
+
+```
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+```
+
+An update removes the old layer and installs the new one in one go,
+then asks for a reboot. No download-and-copy step on your computer
+first.
+
+**The check entry updates too.** The green/red screen in the Batocera
+config menu now offers a newer release certified for your box when one
+exists: one press applies it the same clean way. A release built for a
+newer RGS than the box runs is never offered — update RGS itself first.
+
+**The arcade binary arrives on its own.** The arcade path needs its
+special MAME build; the install now fetches the tested build
+automatically, so there is nothing to hunt down and place by hand.
+
 ## 2026-10-07 — the Raw Thrills shooters reach the tube, and a fuller diagnostic report
 
 **Raw Thrills gun shooters on the tube.** The tube profile now covers the Raw

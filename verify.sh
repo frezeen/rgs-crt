@@ -23,7 +23,13 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
 PKG_VERSION_FILE="${PKG}.version"
-PKG_VERSION="rgs-15khz step7-resilience (engine 0a05ab6)"
+# Single source of truth: the root VERSION file (read here, judged below
+# once bad() exists — verify reports every defect, never exits mid-preamble).
+if [ -f "$REPO/VERSION" ] && [ -n "$(cat "$REPO/VERSION" 2>/dev/null)" ]; then
+	PKG_VERSION="$(cat "$REPO/VERSION")"
+else
+	PKG_VERSION=""
+fi
 HOOK_SRC="$REPO/src/engine/selector/first_script.sh"
 HOOK_DST="${RGS15_HOOK:-/userdata/system/scripts/first_script.sh}"
 SVCDIR="${RGS15_SVCDIR:-/userdata/system/services}"
@@ -61,6 +67,10 @@ ok() {
 have() {
 	PRESENT=$((PRESENT + 1))
 }
+
+# Single-source version gate (judged here: bad() exists from this point).
+[ -n "$PKG_VERSION" ] \
+	|| bad "repo VERSION missing or empty ($REPO/VERSION — the single source of truth)"
 
 is_registered() {
 	batocera-settings-get system.services 2>/dev/null | tr ' ' '\n' | grep -qx "$1"

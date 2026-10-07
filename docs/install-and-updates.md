@@ -18,11 +18,18 @@ or updating RGS itself belong to RGS's official channels, not to this
 manual. This layer extends that stock RGS from the inside; it assumes
 nothing beyond it and modifies none of it permanently.
 
-`./install.sh` installs onto a **stock box only**. If the box already
-has the layer, it says so and stops — the answer is `./uninstall.sh`
-first. There is deliberately no "upgrade in place" path: every version
-is installed fresh onto stock, which is what keeps the promise that
-removal returns you to exactly where you started.
+One command installs the layer, and the same command updates it
+later. Over SSH, as root:
+
+```
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+```
+
+It fetches the current release, and when the box already has the layer
+it removes the old one first — every version still lands fresh onto
+stock, which is what keeps the promise that removal returns you to
+exactly where you started. Then it installs the new release and checks
+itself. No git is needed on the box.
 
 At install the system:
 
@@ -95,34 +102,32 @@ The patch survives an RGS update the same way the rest of the layer's
 boot work does: it is checked against the running system at every boot,
 and if a system update replaced the driver underneath, the layer keeps
 the stock driver loading instead — the screen stays alive, and the
-verifier tells you the patch needs to be refreshed (recovery: the usual
-`./uninstall.sh` + `./install.sh`). Nothing about the patch is active on
+verifier tells you the patch needs to be refreshed
+(recovery: run the install command above again). Nothing about the patch is active on
 non-Intel machines: nothing is placed there, and if a box that had the
 patch is moved back to a non-Intel graphics card, the layer removes its
 own files from the boot partition by itself at the next start — there is
 nothing to clean up by hand.
 
-## The arcade binary is yours to supply
+## The arcade binary arrives with the install
 
 The tube profile runs arcade games (the MAME systems) through
 **GroovyMAME** — the special MAME build that generates video modes for
-arcade CRTs on the fly. Its binaries are large, third-party and
-license-sensitive, so this project never ships them, in this repository
-or on the box.
+arcade CRTs on the fly. Its binaries are large third-party builds, so
+this project never ships them in this repository.
 
-To light up the arcade path:
+You do nothing extra for it: the install fetches the tested build
+automatically from the project's public release, checks it, and places
+it where the arcade path expects it (the certification here was done on
+**0.289**). Updating later re-uses the binary already on the box when
+it matches, instead of downloading it again.
 
-- get a GroovyMAME build for Linux x86_64 (the official GroovyMAME
-  project is the source; the certification here was done on **0.289** —
-  newer builds usually behave, but they are your re-test, not our
-  claim);
-- place the executable as:
-  `/userdata/system/crt-dual/profiles/rgs-15khz/binaries/mame` — the
-  file is simply named `mame`, and must be runnable;
-- run `./verify.sh`: while the binary is absent the verifier WARNs
-  printing that full expected path, and still reports clean — every
-  non-arcade system works untouched; once it is placed, the warning
-  disappears and arcade launches use it.
+If the box was offline at install time and the binary is missing, the
+verifier says which one and where it goes
+(`/userdata/system/crt-dual/profiles/rgs-15khz/binaries/mame` — the
+file is simply named `mame`, and must be runnable), and still reports
+clean — every non-arcade system works untouched; once it is placed, the
+warning disappears and arcade launches use it.
 
 Without the binary, what you skip is the arcade certification (the
 native-mode per-game path described in the compatibility map); nothing
@@ -179,8 +184,8 @@ it is not the only actor, so it never silently hopes for the best:
 - It cannot guarantee itself → it **holds**: the CRT-targeting profiles
   step aside so games keep launching with plain stock behavior,
   nothing is deleted, and the boot log + the check tool tell you.
-  Recovery is always the same two commands: `./uninstall.sh` then
-  `./install.sh` from the current package.
+  Recovery is always the same: the check tool's update choice below,
+  or the single install command again.
 - Each launch also passes a fast runtime check; a failing check logs
   loudly and the game still launches stock-safe — the layer never
   blocks a game to make a point.
@@ -195,14 +200,15 @@ tools) shows one verdict for the box:
 
 | Verdict | Meaning | Your options |
 | --- | --- | --- |
-| **GREEN** | Everything is aligned with what was installed. | Nothing to do. |
-| **RED** | An RGS update changed the system and the self-check could not vouch for it. | ESC — keep playing, games run exactly like stock while held. ENTER — uninstall the layer and reboot: pure stock RGS, one press. |
+| **GREEN** | Everything is aligned with what was installed. The screen shows the installed release and whether it is up to date. | Up to date: nothing to do. Update available: ENTER applies the update, ESC closes. |
+| **RED** | An RGS update changed the system and the self-check could not vouch for it. | ESC — keep playing, games run exactly like stock while held. ENTER — uninstall the layer and reboot: pure stock RGS, one press. When a newer release certified for this box is available, ENTER applies the update instead and U keeps the one-press uninstall. |
 
-Today the tool only checks. Tomorrow it updates: the same entry —
-the very place where RGS's own update scripts live in the menu — is
-designed to fetch a new version of this layer and apply it as a clean
-uninstall + install of the fresh package, one press, same guarantee.
-Deliberately built as a slot for that future; not wired today.
+When a newer release certified for this box is available, the tool
+offers it on the same screen: one press applies it as a clean removal
+of the old layer plus a fresh install of the new one, then reboots into
+it. A release built for a newer RGS than the box runs is never offered —
+update RGS itself first. With no network the tool behaves exactly as
+before: it checks, and offers only the uninstall.
 
 ## Remote access (VNC)
 
@@ -240,8 +246,12 @@ nothing is logged.
 
 ## Getting a new version of the layer
 
-This repository is republished as a chain of certified snapshots. When
-a new version is announced: download the ZIP again, uninstall, install
-from the fresh folder. No git is needed on the box — the ZIP is always
-the latest published state, and the published tree is the one that was
-tested, never a pile of development leftovers.
+Installing and updating are the same command — run it again over SSH
+and the box moves to the current release on its own:
+
+```
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+```
+
+No git is needed on the box. The same release can also arrive through
+the check tool's update choice above.
