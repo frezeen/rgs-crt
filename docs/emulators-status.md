@@ -3,7 +3,7 @@
 This layer runs INSIDE stock RGS and reverts cleanly.
 
 This is the honest per-system status of the **RGS 15 kHz CRT** profile.
-Certification box: RGS 43.43 (Batocera 43.1 base), x86_64, NVIDIA
+Certification box: RGS 43.54 (Batocera 43.1 base), x86_64, NVIDIA
 GTX 970, arcade tube in the demonstrated 13.6–16.2 kHz range — the
 measured numbers below come from it; the full layer has also been
 tested on an AMD R9 270X machine, and Intel hardware carries a

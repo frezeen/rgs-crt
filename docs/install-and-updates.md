@@ -79,6 +79,21 @@ path keeps its own authored settings. The desktop (480i) remains unchanged.
 keeps the emulators' own floor behavior; a number (e.g.
 `rgs-15khz.dotclock_min=25`) sets the floor by hand instead.
 
+## The settings the layer reads
+
+The layer reads a small set of settings from `batocera.conf`. They are
+all optional — the layer works without any of them — and they survive
+RGS updates:
+
+| Setting | What it does |
+| --- | --- |
+| `rgs-15khz.amdgpu-legacy=off` | On AMD machines with a kernel below 6.19: keep the modern display stack instead of the classic one the layer pins at install. |
+| `rgs-15khz.dotclock_min=off` | Skip the boot measurement of the lowest video clock and keep the emulators' own floor behavior. |
+| `rgs-15khz.dotclock_min=25` | Pin the lowest video clock yourself (in MHz) instead of measuring it. |
+| `crt-dual.crt_output=<port>` | Tell the layer which port the tube sits behind (when an adapter hides it). |
+| `crt-dual.analog_lcd=1` | Tell the layer that an analog port carries an LCD instead of a tube. |
+| `crt-dual.refresh=50` | Run the tube at 50 Hz (PAL) instead of the default 60 Hz (NTSC). |
+
 ## Intel machines and the display patch
 
 On Intel gen9 integrated graphics (most desktop Intel chips from roughly
@@ -96,7 +111,8 @@ patch for the exact system the box runs — **this requires the box to be
 on the network at install time**. If that is not possible, place the
 patch file yourself — the verifier prints the exact name it expects
 (`i915-patched-<your-kernel>.ko`) and the folder
-(`src/service/i915/binaries/`, inside the project folder) — before
+(`src/service/i915/binaries/`, inside the project folder — create it if
+it does not exist) — before
 installing; it warns, without failing, while the file is missing.
 
 The patch survives an RGS update the same way the rest of the layer's
@@ -197,7 +213,7 @@ the layer either re-qualifies against it or gets out of the way.
 ## The check tool
 
 An entry in the "Batocera config" menu (the same list as RGS's own
-tools) shows one verdict for the box:
+tools) — **RGS-CRT CHECK & UPDATE** — shows one verdict for the box:
 
 | Verdict | Meaning | Your options |
 | --- | --- | --- |

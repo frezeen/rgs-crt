@@ -10,13 +10,15 @@ removes itself back to the exact stock state at any time.
 
 ## What you get
 
+New releases and what changed recently: **[changelog.md](changelog.md)**.
+
 | | What you see on the screen |
 | --- | --- |
 | Native signals | A SNES game outputs a SNES signal, a Dreamcast game a 480i arcade signal, an arcade board its own native mode — crisp pixels and correct refresh. Where a system's native signal is outside what a tube can show, it runs fullscreen at the best quality alternative instead; for a few HD consoles that alternative is a deliberate full-bleed stretch, and the compatibility map marks exactly which systems those are. |
 | No fake CRT effects | Smoothing and scanline-style filters are switched off on the tube. The tube is the filter. |
 | The menu keeps working | Between games the desktop runs on the tube, on a connected LCD, or on both. Pick whichever you plugged in. |
-| It always gives things back | Every setting a game needed is reverted the moment the game exits. The desktop, the values, everything returns to what it was. |
-| A safety net you can see | A check entry in the Batocera config menu shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself in one press when a newer release is available. |
+| It gives things back | Every setting a game needed is reverted when the game exits. The desktop and the values return to what they were. |
+| A safety net you can see | A check entry in the Batocera config menu — **RGS-CRT CHECK & UPDATE** — shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself in one press when a newer release is available. |
 
 ## Three ways to plug it in
 
@@ -31,8 +33,8 @@ between games — never during one, because touching the display mid-game
 is the one thing that could disturb the tube. On the NVIDIA and AMD
 machines tested this is automatic in every direction with a single
 documented exception: on the AMD machine's analog port, plugging or
-unplugging the CRT is caught with one controller press — the setups
-page has the exact words. Rebooting is always the
+unplugging the CRT is caught with **Select + L1** on a controller — the
+setups page has the exact words. Rebooting is the
 fresh, correct state. And a word of sense: this is a powerful, complex
 feature meant for real moments — wire the screens you want before you
 boot, and reach for the hot path when you genuinely need it, not as a
@@ -59,6 +61,11 @@ your own, with every instruction available and working examples:
 
 ## Quick start
 
+**You need:** an x86_64 machine, an updated stock RGS (43.54 or newer),
+and a CRT tube. The layer has been tested on NVIDIA GTX 970 and AMD
+R9 270X graphics; Intel gen9 iGPU support exists but is not yet
+certified. Other hardware is not claimed.
+
 **Prerequisite: an updated, stock RGS.** RGS itself is what you get by
 taking an untouched Batocera and applying RGS's own installation script
 to it — the plain, official RGS, exactly as its team publishes it. One
@@ -84,7 +91,9 @@ hand.
 
 After it finishes: connect the CRT and reboot once — the first boot
 completes one display setting. Then, from the installed folder
-(`/userdata/roms/rgs_crt`), `./verify.sh` must report clean (exit 0):
+(`/userdata/roms/rgs_crt` — the folder the install uses; the deployed
+package itself lives in `/userdata/system/crt-dual`),
+`./verify.sh` must report clean (exit 0):
 that is the gate for everything else. To remove the layer entirely,
 `./uninstall.sh` from the same folder returns the box to exact stock.
 
@@ -136,8 +145,8 @@ it, and the `jammASD` folder holds its configuration plus the board's
 pinout reference for wiring:
 
 ```
-sudo python3 jammASD/install.py      # deploy + start its own service
-sudo python3 jammASD/uninstall.py    # reverse everything, reboot to finish
+python3 jammASD/install.py          # deploy + start its own service
+python3 jammASD/uninstall.py        # reverse everything, reboot to finish
 ```
 
 Honest scope: this companion is a gift within a gift — built for the
@@ -148,7 +157,7 @@ its dependencies and reports loudly.
 
 ## Status & limitations
 
-- Tested on two reference machines: RGS 43.43 (Batocera 43.1 base),
+- Tested on two reference machines: RGS 43.54 (Batocera 43.1 base),
   x86_64, one with an **NVIDIA GTX 970** and one with an **AMD R9
   270X**, arcade tube in the demonstrated 13.6–16.2 kHz range. An
   **Intel** gen9 iGPU path exists since the current revision: the install
@@ -159,28 +168,36 @@ its dependencies and reports loudly.
   verdict before it is claimed as proven. Other hardware is not claimed
   at all: `./verify.sh` plus your report is how the map grows.
 - On **AMD** machines running a kernel below 6.19, the layer pins the
-  classic display stack at install: the modern one shipped a signal on
-  digital ports only, so a CRT on the analog output stayed dark while
-  the flat panel lit up. If you prefer the modern stack regardless,
+  classic display stack at install: the modern stack has no analog
+  encoders on those kernels, so a CRT on the analog output stayed dark
+  while the flat panel lit up. If you prefer the modern stack regardless,
   set `rgs-15khz.amdgpu-legacy=off` in `batocera.conf` — the layer
   re-checks the choice at every boot.
-- The first time you launch a game on a CRT the layer measures the
+- At every boot, before the desktop appears, the layer measures the
   lowest video clock your chain can produce (a few quick mode changes on
-  the tube, once) and remembers it: games then run at their native
-  resolution when the chain supports it, and are gently widened when it
-  does not — a screen that would go black shows the game instead. The
-  desktop and the boot never depend on this. Set
-  `rgs-15khz.dotclock_min=off` in `batocera.conf` to keep the emulators'
-  own values untouched, or a number (e.g. `25`) to pin the floor yourself.
+  the tube, once per boot) and remembers it: games then run at their
+  native resolution when the chain supports it, and are gently widened
+  when it does not — a screen that would go black shows the game instead.
+  The desktop and the boot never depend on this. Set
+  `rgs-15khz.dotclock_min=off` in `batocera.conf` to skip the measurement
+  and keep the emulators' own floor behavior, or a number (e.g. `25`) to
+  pin the floor yourself. The full list of settings the layer reads is
+  in [docs/install-and-updates.md](docs/install-and-updates.md#the-settings-the-layer-reads).
 - Live screen re-plugging was used through weeks of testing and works;
   across the whole test period the box crashed two or three times
   around a plug event, every time recovered by a reboot (the setups
   page states it with the same honesty).
+- The layer ships a VNC server (x11vnc) for test and tuning sessions.
+  It starts at boot and serves port **5900 without a password** — keep
+  the box on a trusted network, or stop it when you do not need it
+  ([details](docs/install-and-updates.md#remote-access-vnc)).
 - The arcade path runs on **GroovyMAME** (the CRT-capable MAME build):
   the install fetches the tested build automatically from the project's
   public release — it is still never shipped in this repository (the VNC
   server is the exception — it ships
-  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). If the box was
+  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). The exact
+  binary, its checksum and its source are pinned in
+  [`binaries.lock`](binaries.lock). If the box was
   offline and the binary is missing, the verifier
   tells you exactly which one
   is missing and at which path to place it — and warns without
@@ -204,6 +221,14 @@ its dependencies and reports loudly.
 | [Install & updates](docs/install-and-updates.md) | You want to know exactly what the install touches, and what happens after an RGS update. |
 | [Compatibility map](docs/emulators-status.md) | You want to know if your system works — with the measured numbers. |
 | [Stock RGS notes](docs/rgs-stock-issues.md) | You hit something that looks like RGS's own behavior, not ours. |
+| [The manual map](docs/docs-map.md) | You want to know what is in this manual and where to start. |
+
+## License
+
+This project is released under the **GNU General Public License v2**
+(see [LICENSE](LICENSE)). The VNC server it ships is GPL-2.0-or-later
+with an explicit OpenSSL linking exception — full attribution and the
+written source offer live in [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ## Credits
 
@@ -221,7 +246,9 @@ which Batocera ships. Thank you — the tube experience stands on both.
 
 We diagnose from complete evidence, never from descriptions — and the
 project gives you the collector, so this is three steps, done over SSH
-with the LCD and CRT plugged in the way you want reported:
+with the LCD and CRT plugged in the way you want reported. The layer's
+own log lives in `/userdata/system/logs/` (the main one is
+`rgs-15khz.log`):
 
 1. **If a game is on screen and stuck, end it cleanly first** (the
    stock swissknife does exactly that, and the layer restores on the

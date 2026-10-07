@@ -50,9 +50,9 @@ log() { echo "  $*"; }
 
 [ "$(id -u)" = "0" ] || fail "run as root (over SSH you already are)"
 
-# Guard: a developer worktree syncs with deploy.sh, never with get.sh.
+# Guard: get.sh installs from a release archive, not from a git checkout.
 if [ -e "$SRC/.git" ]; then
-	fail "developer worktree ($SRC/.git exists); use deploy.sh"
+	fail "this folder is a git checkout ($SRC/.git exists) — get.sh installs from a release archive; download the release instead"
 fi
 
 # Every fetch carries a timeout AND follows redirects (-L): a bare fetch

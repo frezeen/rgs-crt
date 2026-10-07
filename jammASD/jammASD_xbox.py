@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
-# Part of crt-dual — https://github.com/frezeen
+# Part of rgs-crt — https://github.com/frezeen
 """
 JammASD → dual Xbox 360 uinput daemon.
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-08 — the manual matches the box, and every setting in one place
+
+**The manual now says what the box does.** Version numbers, the boot-time
+measurement of the lowest video clock, the check entry's name, the log
+location and the license are all stated where you look for them — no more
+stale numbers, no more guessing where to look.
+
+**Every setting in one table.** All six settings the layer reads from
+`batocera.conf` are now listed together with what each one does,
+including the tube refresh rate for 50 Hz screens.
+
+**A clearer message when the install refuses a git checkout.** Running
+the one-command install from a developer checkout now tells you plainly
+to download the release archive instead.
+
 ## 2026-10-07 — the PSP and the Nintendo 3DS fill the tube, and the setup survives a reboot
 
 **PlayStation Portable no longer letterboxes.** The tube profile already

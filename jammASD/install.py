@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
-# Part of crt-dual — https://github.com/frezeen
+# Part of rgs-crt — https://github.com/frezeen
 import os
 import sys
 import shutil
 import subprocess
 
-# RGS-15KHZ-EXT (2026-09-10): every path is env-overridable so the seam
-# test (tests/seams/test_jammasd_udev_deploy.sh) can run this installer
-# hermetically; defaults are the live box. No path may stay hardcoded — a
-# partial seam would leak to the live system (test-flow §Tracked seams).
+# RGS-15KHZ-EXT (2026-09-10): every path is env-overridable so the
+# installer can run hermetically in tests; defaults are the live box.
+# No path may stay hardcoded — a partial seam would leak to the live
+# system.
 JAMMDIR = os.environ.get("JAMMASD_DIR", "/userdata/system/jammASD")
 YAML = os.environ.get(
     "JAMMASD_YAML",

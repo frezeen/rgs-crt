@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
-# Part of crt-dual — https://github.com/frezeen
+# Part of rgs-crt — https://github.com/frezeen
 import os
 import sys
 import shutil
 import subprocess
 
-# RGS-15KHZ-EXT (2026-09-10): env-overridable paths (hermetic seam
-# tests/seams/test_jammasd_udev_deploy.sh); defaults are the live box.
+# RGS-15KHZ-EXT (2026-09-10): env-overridable paths (hermetic test
+# seam); defaults are the live box.
 JAMMDIR = os.environ.get("JAMMASD_DIR", "/userdata/system/jammASD")
 YAML = os.environ.get(
     "JAMMASD_YAML",

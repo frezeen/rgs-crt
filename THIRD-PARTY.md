@@ -125,9 +125,8 @@ Carnegie Mellon University (http://www.cmu.edu/computing/).
 ## Switchres (runtime dependency — NOT bundled)
 
 - **Purpose**: CRT modeline generation. Called at runtime through its C
-  wrapper API (`sr_*`, `switchres_wrapper.h`) via the ctypes helper
-  `src/engine/api/switchres_api.py` — see the engine's
-  `docs/SWITCHRES-API.md`.
+  wrapper API (`sr_*`, `switchres_wrapper.h`) via the layer's own ctypes
+  helper.
 - **License**: GPL-2.0+ (compatible with this repository's LICENSE).
 - **Provenance**: the stock shared library shipped by Batocera x86
   (verified: `/usr/lib64/libswitchres.so.2.2.1` on Batocera 43.1, the

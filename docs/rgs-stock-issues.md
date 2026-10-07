@@ -1,6 +1,6 @@
 # Stock RGS issues found along the way
 
-For the RGS team — found while certifying systems on RGS 43.41
+For the RGS team — found while certifying systems on RGS 43.54
 (Batocera 43.1 base), x86_64, NVIDIA. These are stock behaviors
 (display-independent: they reproduce on LCD too), and this layer runs
 INSIDE stock RGS and reverts cleanly — none of them is caused by it.
