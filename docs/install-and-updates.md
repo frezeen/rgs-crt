@@ -19,10 +19,10 @@ manual. This layer extends that stock RGS from the inside; it assumes
 nothing beyond it and modifies none of it permanently.
 
 One command installs the layer, and the same command updates it
-later. Over SSH, as root:
+later. Over SSH you are already root, so no sudo is needed:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 ```
 
 It fetches the current release, and when the box already has the layer
@@ -251,7 +251,7 @@ Installing and updating are the same command — run it again over SSH
 and the box moves to the current release on its own:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 ```
 
 No git is needed on the box. The same release can also arrive through

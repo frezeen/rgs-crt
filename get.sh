@@ -2,7 +2,7 @@
 # get.sh — the ONE install/update entry for rgs-crt (feed foundation).
 #
 # Usage (fresh box or update, one line, no git on the box):
-#   curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 #
 # What it does: fetches VERSION, fetches the release archive for that
 # version (tag tarball, main-branch tarball as fallback), refuses when the
@@ -48,7 +48,7 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 warn() { echo "WARN: $*" >&2; }
 log() { echo "  $*"; }
 
-[ "$(id -u)" = "0" ] || fail "run as root (pipe through sudo bash)"
+[ "$(id -u)" = "0" ] || fail "run as root (over SSH you already are)"
 
 # Guard: a developer worktree syncs with deploy.sh, never with get.sh.
 if [ -e "$SRC/.git" ]; then

@@ -71,11 +71,11 @@ that instruction printed. Everything else about obtaining, installing
 or updating RGS lives on RGS's official channels; this project
 deliberately does not duplicate those steps.
 
-Over SSH, as root, one command installs the layer — and the same
-command updates it later:
+Over SSH you are already root, so no sudo is needed. One command
+installs the layer — and the same command updates it later:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 ```
 
 Updating needs no preparation: if the layer is already installed, the

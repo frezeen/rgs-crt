@@ -6,7 +6,7 @@
 and later updates — with one command run over SSH on the box itself:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 ```
 
 An update removes the old layer and installs the new one in one go,
