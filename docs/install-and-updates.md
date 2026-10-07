@@ -29,7 +29,8 @@ It fetches the current release, and when the box already has the layer
 it removes the old one first — every version still lands fresh onto
 stock, which is what keeps the promise that removal returns you to
 exactly where you started. Then it installs the new release and checks
-itself. No git is needed on the box.
+itself. No git is needed on the box. Updating needs no preparation on
+your side: nothing has to be removed by hand first.
 
 At install the system:
 

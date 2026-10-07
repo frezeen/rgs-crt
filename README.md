@@ -78,6 +78,10 @@ command updates it later:
 curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | sudo bash
 ```
 
+Updating needs no preparation: if the layer is already installed, the
+same command removes the old one first. Nothing has to be removed by
+hand.
+
 After it finishes: connect the CRT and reboot once — the first boot
 completes one display setting. Then, from the installed folder
 (`/userdata/roms/rgs_crt`), `./verify.sh` must report clean (exit 0):

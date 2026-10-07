@@ -20,14 +20,26 @@
 # Test seams (defaults = live paths; /tmp-rooted in tests): RGS15_SRC,
 # RGS15_PKG, RGS15_TMPDIR, RGS15_VERSION_URL, RGS15_TAG_BASE,
 # RGS15_MAIN_URL, RGS15_FETCH_BIN (default curl), RGS15_FETCH_TIMEOUT.
+#
+# Source resolution: $RGS15_SRC when set, else the recorded install folder
+# ($PKG/install-source, written by install.sh), else the default folder.
+# Either way the OLD uninstall below runs from the resolved tree.
 
 set -uo pipefail
 
 VERSION_URL="${RGS15_VERSION_URL:-https://raw.githubusercontent.com/frezeen/rgs-crt/main/VERSION}"
 TAG_BASE="${RGS15_TAG_BASE:-https://codeload.github.com/frezeen/rgs-crt/tar.gz/refs/tags}"
 MAIN_URL="${RGS15_MAIN_URL:-https://codeload.github.com/frezeen/rgs-crt/tar.gz/refs/heads/main}"
-SRC="${RGS15_SRC:-/userdata/roms/rgs_crt}"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
+SRC="${RGS15_SRC:-}"
+if [ -z "$SRC" ]; then
+	_rec="$(cat "$PKG/install-source" 2>/dev/null || true)" # || true: absent on fresh boxes, the default covers it
+	if [ -n "$_rec" ] && [ -d "$_rec" ] && [ -f "$_rec/install.sh" ]; then
+		SRC="$_rec"
+	else
+		SRC="/userdata/roms/rgs_crt"
+	fi
+fi
 FETCH="${RGS15_FETCH_BIN:-curl}"
 TIMEOUT="${RGS15_FETCH_TIMEOUT:-30}"
 TMPDIR_SEAM="${RGS15_TMPDIR:-}"
@@ -61,6 +73,7 @@ cleanup() { [ "$TMP_OWN" = "1" ] && rm -rf "$TMPDIR"; }
 trap cleanup EXIT
 
 echo "=== RGS-CRT GET (install/update entry) ==="
+log "source: $SRC"
 
 # ── a) version + archive into the temp dir only (nothing touched yet) ──
 fetch "$VERSION_URL" "$TMPDIR/VERSION.remote" \
@@ -109,8 +122,8 @@ GOT="$(cat "$TREEDIR/VERSION" 2>/dev/null)"
 	|| fail "publish race: archive VERSION (${GOT:-empty}) != fetched VERSION ($VERSION) — nothing touched, retry later"
 log "coherence: archive VERSION matches ($VERSION)"
 
-# ── c) installed? run the OLD uninstall from $SRC first (install-source
-# still points at the old tree at this point) ──
+# ── c) installed? run the OLD uninstall from $SRC first ($SRC resolved
+# to the recorded install folder above, so this is the right old tree) ──
 if [ -d "$PKG/src" ]; then
 	[ -x "$SRC/uninstall.sh" ] \
 		|| fail "installed ($PKG/src exists) but $SRC/uninstall.sh is missing — refusing to strand the box (inspect by hand)"
