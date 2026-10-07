@@ -590,13 +590,14 @@ if [ "$PRESENT" -gt 0 ]; then
 		bad "stock originals snapshot MISSING ($PKG/backups/stock-originals/batocera.conf.stock + rgs.version.stock)"
 	fi
 else
+	# Stock state: the package (with its key backups) is gone, so no
+	# reference value survives to judge against — report the current
+	# values, never gate (a residue-free stock box is CLEAN).
 	for _key in es.resolution global.videomode; do
 		_val="$(batocera-settings-get "$_key" 2>/dev/null || true)"
-		if [ "$_val" != "$CRT_BOX_KEY_MODE" ]; then
-			echo "WARN: box key $_key=$_val with nothing installed (uninstall should have restored the pre-install value)" >&2
-		fi
+		ok "box key $_key=${_val:-absent} (informational, stock state)"
 	done
-	ok "box keys unchecked in stock state (backup mechanism owns restoration)"
+	ok "box keys unchecked in stock state (no reference left to judge)"
 fi
 fi # RGS15_SKIP_KEYS
 

@@ -22,6 +22,11 @@ newer RGS than the box runs is never offered — update RGS itself first.
 special MAME build; the install now fetches the tested build
 automatically, so there is nothing to hunt down and place by hand.
 
+**The clean-state check no longer fails after removal.** Removing the
+layer and then running the clean-state check used to fail on a box with
+nothing of the layer left; it now correctly reports the clean, stock
+state.
+
 ## 2026-10-07 — the Raw Thrills shooters reach the tube, and a fuller diagnostic report
 
 **Raw Thrills gun shooters on the tube.** The tube profile now covers the Raw
