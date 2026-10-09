@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-09 — the check entry gets a picture, keeps its place, and RGS 43.55 is certified
+
+**A proper picture for the check entry.** "RGS-CRT CHECK & UPDATE" now shows
+a wheel in the Batocera config menu instead of blank space. It is drawn flat
+and transparent on purpose — no glow, no 3D — because the whole point of this
+layer is text you can read on a tube, and lettering that blooms on a 480i
+phosphor is the exact fault it exists to prevent. It comes with the install,
+so a fresh box has it too: nothing to fetch or place by hand.
+
+**The entry stops vanishing.** EmulationStation rewrites its game list every
+time it records a launch, and it was quietly dropping the check entry while it
+did. The layer now puts it back at every boot, so the entry stays in the menu
+where you look for it.
+
+**Certified on RGS 43.55.** This release is built and checked against RGS
+43.55. Updating RGS and then opening the check entry is all that is needed —
+and it reports what it found, as it always has.
+
+**An RGS update that changes the rules is caught instead of ignored.** The
+layer's picture settings are read by RGS itself. If an RGS update changes the
+way they are read, the layer now notices at the next check rather than
+quietly doing nothing: the tube profile stands down, your games keep launching
+with stock behavior, and the check screen says exactly why.
+
 ## 2026-10-08 — the manual matches the box, and every setting in one place
 
 **The manual now says what the box does.** Version numbers, the boot-time

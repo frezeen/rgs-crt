@@ -1,0 +1,8 @@
+# guard-readers.tsv -- the RGS read contract of this layer: one row per stock
+# read our profile depends on. Format: key <TAB> reader-note <TAB> read-expression
+# (lines starting with # are comments). On an RGS bump the guard greps the whole
+# fix/ shadow tree for every read-expression: the read must SURVIVE the update. A
+# move is fine (whole tree, not the file named in the note); a drop is RED. A bare
+# key name is too weak: it also appears in comments and in es_features.cfg.
+play_scale	rgs/fix/namco2x6/playGenerator.py	system.config.get('play_scale')
+play_filter	rgs/fix/namco2x6/playGenerator.py	system.config.get('play_filter')

@@ -49,6 +49,9 @@ MARK="# --- CRT-DUAL PROFILE:"
 RGS_VERSION_SRC="${RGS15_RGS_VERSION_FILE:-/userdata/system/rgs.version}"
 BATOCERA_VERSION_SRC="${RGS15_BATOCERA_VERSION_FILE:-/usr/share/batocera/batocera.version}"
 MODPROBE_DST="${RGS15_MODPROBE_CONF:-/etc/modprobe.d/rgs-15khz-amdgpu-legacy.conf}"
+# The RGS read contract rows are checked against the fix/ tree (fix/ IS the
+# future configgen state — measured update model, zz_rgs_15khz header).
+RGS_FIX_SRC="${RGS15_FIX_DIR:-/userdata/system/rgs/fix}"
 
 # User-facing anchor for the reporting procedure: README step "collector"
 # uses exactly this printed value as the path prefix (printing the real
@@ -170,6 +173,35 @@ if [ -d "$PKG/src" ]; then
 		fi
 	else
 		bad "RGS version record missing ($PKG/rgs-version — pre-step7 install? uninstall.sh + install.sh to reapply)"
+	fi
+	# RGS READ CONTRACT (src/service/guard-readers.tsv — the rows the boot
+	# guard re-checks on a version bump): every stock read our profile
+	# depends on must still be present in the LIVE fix/ tree. A dropped read
+	# is NOT a drift to adopt, it means the layer is already incompatible
+	# (our profile block is inert on this RGS) -> bad, not ok. Re-derived
+	# here from the live tree (a verifier never shares the service's copy).
+	# Env seam: RGS15_FIX_DIR. Absent tree = nothing to check on this box
+	# (the gate above already judges the RGS record).
+	_rc_contract="$REPO/src/service/guard-readers.tsv"
+	if [ ! -f "$_rc_contract" ]; then
+		bad "read contract missing ($_rc_contract — repo defect: the guard would read nothing)"
+	elif [ ! -d "$RGS_FIX_SRC" ]; then
+		ok "read contract skipped (no live fix/ tree at $RGS_FIX_SRC — nothing to check)"
+	else
+		while IFS=$'\t' read -r _rkey _rnote _rexpr || [ -n "${_rkey:-}" ]; do
+			case "${_rkey:-}" in '' | \#*) continue ;; esac
+			if [ -z "${_rexpr:-}" ]; then
+				bad "read contract row for '$_rkey' carries no read expression ($_rc_contract)"
+				continue
+			fi
+			# -F literal, -l drains to EOF (never -q: SIGPIPE under
+			# pipefail, shell-quality).
+			if grep -rFl -- "$_rexpr" "$RGS_FIX_SRC" >/dev/null 2>&1; then
+				ok "RGS still reads $_rkey ($_rnote)"
+			else
+				bad "RGS no longer reads $_rkey ($_rnote) — our profile block is inert on this RGS"
+			fi
+		done <"$_rc_contract"
 	fi
 else
 	ok "package absent (stock state)"
@@ -466,6 +498,40 @@ if [ -e "$TOOL_DST" ]; then
 else
 	ok "check tool absent (stock state)"
 fi
+MARQUEE_SRC="$REPO/src/service/media/rgs_crt_check_marquee.png"
+MARQUEE_DST="${RGS15_MARQUEE:-${RGS15_RGS_DIR:-/userdata/roms/rgs}/media/marquee/rgs_crt_check.png}"
+# Both states are legitimate: INSTALLED must carry the wheel, STOCK must not.
+# `have` marks it as an installed component, so a missing wheel reads as an
+# anomaly (mixed state) instead of quietly passing on an installed box.
+if [ -e "$MARQUEE_DST" ]; then
+	have
+	cmp -s "$MARQUEE_DST" "$MARQUEE_SRC" \
+		&& ok "ES wheel byte-identical" \
+		|| bad "ES wheel DRIFT/foreign (re-run install.sh or deploy.sh)"
+else
+	ok "ES wheel absent (stock state)"
+fi
+# The wheel LINE, not just the file: ES silently deletes a <marquee> placed
+# before <video> (measured 2026-10-09), so a present file with the line in
+# the wrong place is a broken asset that still verifies clean on file bytes.
+_GL="${RGS15_RGS_DIR:-/userdata/roms/rgs}/gamelist.xml"
+if [ -f "$_GL" ]; then
+	# awk PRINTS a verdict; the shell decides ok/bad. Putting ok()/bad()
+	# inside the awk program would be a shell function called from awk —
+	# it does not exist there, so the check could never fire.
+	_ws="$(awk '
+		/<path>\.\/rgs_crt_check\.sh<\/path>/ { f=1; next }
+		f && /<video>/ { v=NR }
+		f && /<marquee>[^<]*rgs_crt_check\.png<\/marquee>/ { m=NR }
+		f && /<\/game>/ { print (m==0 ? "none" : (v && m>v ? "after" : "before")); exit }
+	' "$_GL")"
+	case "$_ws" in
+	after) ok "ES wheel line after <video> (ES keeps it)" ;;
+	before) bad "ES wheel line BEFORE <video> — ES deletes it on the next gamelist save (re-run deploy.sh)" ;;
+	none) bad "ES wheel line missing from our gamelist entry (re-run deploy.sh)" ;;
+	*) bad "ES wheel line unreadable in gamelist (state='${_ws:-empty}')" ;;
+	esac
+fi
 if [ -e "$SVCDIR/$VNC_SVC" ]; then
 	have
 	cmp -s "$SVCDIR/$VNC_SVC" "$PKG/src/service/$VNC_SVC" 2>/dev/null \
@@ -652,9 +718,11 @@ fi
 
 # ── 10. Mixed installed/absent = anomaly ──
 # Installed components counted above: package, hook, guard hook,
-# sitecustomize, S15, udev, 3 services, 2 symlinks = 11 when fully installed.
-if [ "$PRESENT" != "0" ] && [ "$PRESENT" != "11" ]; then
-	bad "mixed state ($PRESENT/11 components present — deploy.sh to sync, or uninstall.sh for a clean slate)"
+# sitecustomize, S15, udev, 3 services, 2 symlinks, ES wheel = 12 when
+# fully installed. A partial set means a half-finished install or a stale
+# deploy: either way the box is not in a state we can vouch for.
+if [ "$PRESENT" != "0" ] && [ "$PRESENT" != "12" ]; then
+	bad "mixed state ($PRESENT/12 components present — deploy.sh to sync, or uninstall.sh for a clean slate)"
 fi
 
 if [ "$FAIL" = "0" ]; then

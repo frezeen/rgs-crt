@@ -156,6 +156,14 @@ unproven — listed, never claimed:
   jaguarcd, samcoupe, apple2, apple2gs, enterprise, spectravideo,
   fmtowns, lindbergh, moonlight (needs a streaming host
   PC), vpinball, dxx-rebirth, win311, win95.
+- `globalvr`, `arcadepc` — arrived with RGS 43.55. No profile block
+  exists for either, so both run the `rgs-stock` profile (LCD-class
+  raster) until a block is measured. RGS ships its own keys for them
+  inside its tuning zone, so the video-mode request is theirs, not
+  ours. No content on the certification box.
+- `itchio`, `namcoes3` — uncovered since the RGS 43.44–43.54 range,
+  same state as the two above: no block, no content. Listed here so
+  the gap is written down instead of remembered.
 - konamigx: the base system definition is malformed, emulator truly
   unknown — needs upstream; gameandwatch: no content and no fallback —
   declared out.

@@ -274,9 +274,29 @@ else
 	echo "  WARN: resolution patch failed (anchor drift? see $LOG)"
 fi
 
-# ── 7e. gamelist entry + tile (single logic copy in the service) ──
+# ── 7d-ter. the tool's ES carousel wheel (the marquee). A SHIPPED asset,
+#    never generated at runtime: the artwork is ours, it is identical on
+#    every box, and rendering it on each install would only add a way for
+#    two machines to disagree. The gamelist line that references it is
+#    written by gamelist-ensure in 7e — which runs AFTER this, so the
+#    line never points at a file that is not there yet.
+MARQUEE_SRC="$REPO/src/service/media/rgs_crt_check_marquee.png"
+MARQUEE_DST="${RGS15_MARQUEE:-${RGS15_RGS_DIR:-/userdata/roms/rgs}/media/marquee/rgs_crt_check.png}"
+if [ ! -f "$MARQUEE_SRC" ]; then
+	fail "packaged marquee missing ($MARQUEE_SRC) — the package is incomplete"
+fi
+mkdir -p "$(dirname "$MARQUEE_DST")"
+if [ -e "$MARQUEE_DST" ] && ! cmp -s "$MARQUEE_DST" "$MARQUEE_SRC"; then
+	echo "  marquee differs from the packaged one — replacing (ours, not foreign)"
+fi
+cp "$MARQUEE_SRC" "$MARQUEE_DST"
+chmod 644 "$MARQUEE_DST"
+echo "  ES wheel -> $MARQUEE_DST"
+
+# ── 7e. gamelist entry + tile + marquee line (single logic copy in the
+#    service) ──
 bash "$SVCDIR/$OUR_SVC" gamelist-ensure \
-	&& echo "  gamelist entry + tile ensured" \
+	&& echo "  gamelist entry + tile + wheel line ensured" \
 	|| echo "  WARN: gamelist ensure failed (entry skipped)"
 
 # ── 7e. GPU dotclock floor — the measurement lives in the S30z boot hook

@@ -173,7 +173,7 @@ if [ -e "$TOOL_DST" ]; then
 	fi
 fi
 
-# ── 5c. gamelist: restore first-install backup, remove our tile image ──
+# ── 5c. gamelist: restore first-install backup, remove our tile + wheel ──
 GL="$RGS_DIR/gamelist.xml"
 GLB="$PKG/backups/rgs-gamelist.xml"
 if [ -f "$GLB" ] && [ -f "$GL" ]; then
@@ -183,6 +183,7 @@ if [ -f "$GLB" ] && [ -f "$GL" ]; then
 	fi
 fi
 rm -f "$RGS_DIR/media/images/rgs_crt_check.png"
+rm -f "$RGS_DIR/media/marquee/rgs_crt_check.png"
 
 # ── 6. Box keys: restore value-or-absence from first-install backups ──
 # + our own written key (rgs-15khz.dotclock_min — the probe's measured

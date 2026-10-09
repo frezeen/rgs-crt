@@ -193,9 +193,10 @@ proof the project certified with before any CRT feature existed.
 An RGS update changes the system under the layer — and the layer knows
 it is not the only actor, so it never silently hopes for the best:
 
-- On the first boot after an update, the layer re-checks itself against
+- Before anything needs a reboot, the layer re-checks itself against
   the **future** system state (an RGS update stages new system files
-  that activate at boot).
+  that activate at boot). The check runs on the next boot **or** the
+  moment you open the check tool — whichever comes first.
 - Everything still lines up → it quietly carries on, and re-records the
   new version. You notice nothing.
 - It cannot guarantee itself → it **holds**: the CRT-targeting profiles
@@ -209,6 +210,22 @@ it is not the only actor, so it never silently hopes for the best:
 
 "Extend, don't replace" cuts both ways: an RGS update always wins, and
 the layer either re-qualifies against it or gets out of the way.
+
+### In practice
+
+RGS's own update does not always reboot the machine, so nothing here is
+waiting on one:
+
+1. Run **RGS UPGRADE**.
+2. Open **RGS-CRT CHECK & UPDATE** and read the verdict.
+3. Reboot whenever you would have anyway — for a tube session, or when
+   RGS itself says a reboot is due.
+
+No step asks for a reboot of its own: the check tool performs the same
+verification a boot would, and its verdict already describes what the
+next boot will find. A release built for a newer RGS is only offered
+once the box actually runs that RGS — so "up to date" right after an
+RGS update is the expected answer, not an oversight.
 
 ## The check tool
 
