@@ -28,6 +28,8 @@ import contextlib
 import importlib.abc
 import logging
 import os  # RGS-15KHZ-EXT (genconfig-archive): CRT_DUAL_BACKUP_ROOT seam
+import re  # RGS-15KHZ-EXT (config-xml): <setting id="…"> matching
+import shutil  # RGS-15KHZ-EXT (ensure): stock file copy
 import sys
 from pathlib import Path
 
@@ -124,7 +126,11 @@ def _patch_emulatorlauncher(module):
 # C. <emu>.config   = <path>|<key=value;key2=value2>   post-write edits
 #    <emu>.config.drop = <path>|<key[;key2]>  post-write line REMOVAL
 #      (RGS-15KHZ-EXT: let the core's own default fire unforced)
+#    <emu>.config.xml = <path>|<id=value;id2=value2>  post-write edits to a
+#      settings XML (openMSX settings.xml), per <setting id="…"> child
 # D. <emu>.runtime_dir = <path>     mkdir -p before the emulator runs
+# E. <emu>.ensure  = <src>|<dst>   copy a stock file into place when the
+#      target is missing — idempotent REPAIR, no gameStop restore
 #
 # Call-time gate (old repo's race lesson): generator modules are imported
 # LAZY by get_generator AFTER the hoisted gameStart wrote the marker, but
@@ -141,7 +147,10 @@ PATCH_STATE = Path('/tmp/crt-dual/patches')
 # apply wins so crash-reruns keep the ORIGINAL prev). Restore lives in
 # merge.py `restore_genconfig` (gameStop). `.config.drop` archives the
 # REMOVED lines (all occurrences, original order) under the same layout —
-# a dropped line is restored byte-back at gameStop.
+# a dropped line is restored byte-back at gameStop. `.config.xml` archives
+# per setting id the previous full `<setting …>` line (or "" when the id
+# was absent) — restored in place, never appended to the file end, which
+# would land outside the element.
 _GENCONFIG_BACKUP_ROOT = Path(
     os.environ.get('CRT_DUAL_BACKUP_ROOT') or '/userdata/system/crt-dual/backups')
 
@@ -335,6 +344,144 @@ def _apply_config_drop(path: str, keys: str, name: str | None = None) -> None:
         _log.warning("crt-dual: config-drop failed %s: %s", path, e)
 
 
+# RGS-15KHZ-EXT (config-xml): an openMSX-style settings file — a root
+# <settings> holding an inner <settings> of <setting id="ID">VALUE</setting>
+# children. Deliberately a regex over LINES, not an XML parse: the openMSX
+# generator writes the DOCTYPE BEFORE the <?xml?> declaration (it opens the
+# file, writes the prolog, then minidom-serializes over it), so the file it
+# produces is NOT well-formed and a parser would reject its own output.
+_SETTING_RE = re.compile(r'<setting\s+id="([^"]+)"')
+
+
+def _setting_id(line: str) -> str:
+    """The id of a `<setting id="…">` line, else '' (mirrored in merge.py)."""
+    m = _SETTING_RE.search(line)
+    return m.group(1) if m else ''
+
+
+def _xml_settings_span(lines: list) -> tuple | None:
+    """(inner_open_index, inner_close_index) of the INNER <settings>
+    element, or None when the file has none (warn, never raise).
+    The root element is the first `<settings>` line; the inner one is the
+    first LATER `<settings>` line (the generator's nesting), and its close
+    is the first `</settings>` after that."""
+    opens = [i for i, ln in enumerate(lines) if ln.strip() == '<settings>']
+    if len(opens) < 2:
+        return None  # root only — no inner element to extend
+    inner = opens[1]
+    for j in range(inner + 1, len(lines)):
+        if lines[j].strip() == '</settings>':
+            return (inner, j)
+    return None
+
+
+def _indent_of(line: str) -> str:
+    return line[:len(line) - len(line.lstrip())]
+
+
+def _xml_child_indent(lines: list, inner: int, close: int) -> str:
+    """Indentation for a NEW child of the inner <settings>: the one its
+    EXISTING children use — the file's own formatting decides, never a
+    constant (the openMSX generator writes 2-space nesting, so children
+    sit at 4). With no child to copy, add the element's own nesting step
+    (the indentation the file uses between the root and the inner one)."""
+    for ln in lines[inner + 1:close]:
+        if _setting_id(ln):
+            return _indent_of(ln)
+    step = _indent_of(lines[inner])[len(_indent_of(lines[inner - 1])):]
+    return _indent_of(lines[close]) + (step or "  ")
+
+
+def _apply_config_xml(path: str, entries: str, name: str | None = None) -> None:
+    """C-xml: post-write edits to a settings-XML file the generator
+    rewrites each launch (openMSX share/settings.xml).
+    id present -> replace the value IN PLACE, keeping the line's own
+    indentation (one atomic write); id absent -> insert the new
+    `<setting …>` line as the LAST child of the inner <settings>, at that
+    element's indentation, so it lands inside the document and not after a
+    sibling element the generator also writes (openMSX appends a
+    <bindings> block after it).
+    RGS-15KHZ-EXT (genconfig-archive): archive the previous full line (or
+    absence) PER ID under backups/<profile>/genconfig/, first apply wins,
+    so merge.py restore_genconfig puts every line back byte-exact at
+    gameStop. Same rules as _apply_config_edits: name=None reads the
+    active profile, no profile = no archive, every failure warns and never
+    blocks the game."""
+    try:
+        if name is None:
+            name = _active_profile()
+        p = Path(path)
+        if not p.is_file():
+            _log.warning("crt-dual: config-xml file missing: %s", path)
+            return
+        lines = p.read_text(errors="replace").splitlines()
+        span = _xml_settings_span(lines)
+        if span is None:
+            _log.warning("crt-dual: config-xml no inner <settings> element: %s", path)
+            return
+        _inner, close = span
+        changed = False
+        for item in entries.split(';'):
+            sid, _, value = item.partition('=')
+            sid, value = sid.strip(), value.strip()
+            if not sid:
+                continue
+            idx = next((i for i, ln in enumerate(lines)
+                        if _setting_id(ln) == sid), None)
+            if name:
+                _archive_genconfig(path, sid, lines[idx] if idx is not None else "",
+                                   name, tag=" (xml)")
+            if idx is not None:
+                indent = _indent_of(lines[idx])
+                lines[idx] = f'{indent}<setting id="{sid}">{value}</setting>'
+                changed = True
+            else:
+                # the file's own indentation, never a constant
+                lines.insert(close, f'{_xml_child_indent(lines, _inner, close)}'
+                                    f'<setting id="{sid}">{value}</setting>')
+                close += 1  # the next id inserts AFTER this one (declared order)
+                changed = True
+        if not name:
+            _log.warning("crt-dual: config-xml with no active profile — no archive")
+        if changed:
+            with p.open('w') as _fh:
+                _fh.write('\n'.join(lines) + '\n')
+    except Exception as e:
+        _log.warning("crt-dual: config-xml failed %s: %s", path, e)
+
+
+def _apply_ensure_ops(entries: list) -> None:
+    """E. ensure: copy a stock file into place when the target is MISSING
+    (idempotent repair of a user tree copied once and never refreshed —
+    openMSX's generator `copytree` runs only when share/ does not exist,
+    so a stale user tree keeps asking for files the new package dropped).
+    Never overwrites: the target's correct state IS "the stock file is
+    there", so an existing target is already correct.
+    RGS-15KHZ-EXT (declared exception to profile-discipline 9, NOT an
+    oversight): there is NO gameStop restore. Removing the repair at exit
+    would re-break the tree for the next launch — the profile leaves the
+    stock file in place, which is where it belongs. Everything (missing
+    src, mkdir, copy) warns and never raises: a repair must not break a
+    launch."""
+    for raw in entries:
+        src, _, dst = raw.partition("|")
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            continue
+        try:
+            s, d = Path(src), Path(dst)
+            if d.exists():
+                continue  # already present — never overwrite
+            if not s.is_file():
+                _log.warning("crt-dual: ensure source missing: %s", src)
+                continue
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, d)
+            _log.info("crt-dual: ensure copied %s -> %s", src, dst)
+        except Exception as e:
+            _log.warning("crt-dual: ensure failed %s -> %s: %s", src, dst, e)
+
+
 def _patch_generic(module, short: str) -> bool:
     """Wrap the generator's generate()/getMouseMode() with call-time gates
     for the profile-declared ops. Returns True when a generator class was
@@ -348,6 +495,9 @@ def _patch_generic(module, short: str) -> bool:
 
     def patched_generate(self, *args, **kwargs):
         ops = _marker_ops(short)
+        # E. ensure: repair a stale user tree BEFORE the generator writes
+        if ops.get('ensure'):
+            _apply_ensure_ops(ops['ensure'])
         # D. runtime_dir: mkdir -p before the emulator runs
         for d in ops.get('runtime_dir', []):
             try:
@@ -367,6 +517,11 @@ def _patch_generic(module, short: str) -> bool:
             path, _, kv = entry.partition('|')
             if path and kv:
                 _apply_config_edits(path.strip(), kv)
+        # RGS-15KHZ-EXT: C-xml — <setting id="ID"> edits in a settings XML
+        for entry in ops.get('config.xml', []):
+            path, _, kv = entry.partition('|')
+            if path and kv:
+                _apply_config_xml(path.strip(), kv)
         # RGS-15KHZ-EXT: C-drop — line removal post-generate
         for entry in ops.get('config.drop', []):
             path, _, keys = entry.partition('|')

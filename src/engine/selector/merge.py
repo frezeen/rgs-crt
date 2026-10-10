@@ -787,6 +787,59 @@ def _genconfig_prev(target: str, key: str, backup_root, name: str) -> Path:
     return d / _sanitize(key)
 
 
+# RGS-15KHZ-EXT (config-xml): mirror of the wrapper's `<setting id="…">`
+# matcher. NOT `_keypatch_key` — that splits on '=', which an XML
+# attribute line does not carry.
+_SETTING_RE = re.compile(r'<setting\s+id="([^"]+)"')
+
+
+def _setting_id(line: str) -> str:
+    m = _SETTING_RE.search(line)
+    return m.group(1) if m else ""
+
+
+def _restore_config_xml(target: str, kv: str, target_root, backup_root,
+                        name: str) -> None:
+    """Restore the `.config.xml` archives: per id, put the previous
+    `<setting …>` line back IN PLACE, or remove the line when the id was
+    absent before apply.
+    IN PLACE, never appended at the file end: an appended `<setting>`
+    would land AFTER `</settings>` and break the document (mirrored
+    comment on the wrapper's insert side).
+    Mirrors restore_keypatch: no archive -> the entry was never applied,
+    leave the file alone; empty dirs are consumed either way."""
+    p = Path(target) if target.startswith("/") else Path(target_root) / target
+    base = (Path(backup_root) / name / "genconfig" / _sanitize(target))
+    if not base.is_dir():
+        return  # never applied — nothing to do
+    ids = []
+    for item in kv.split(";"):
+        k, _, _v = item.partition("=")
+        k = k.strip()
+        if k and k not in ids:
+            ids.append(k)
+    for sid in ids:
+        prev_file = _genconfig_prev(target, sid, backup_root, name)
+        if not prev_file.exists():
+            continue
+        prev = prev_file.read_text(errors="replace")
+        lines = p.read_text(errors="replace").splitlines() if p.is_file() else []
+        idx = next((i for i, ln in enumerate(lines) if _setting_id(ln) == sid), None)
+        if idx is not None:
+            if prev:
+                lines[idx] = prev          # value we replaced -> original back
+            else:                         # we added the id -> remove our line
+                del lines[idx]
+            atomic_write(p, "\n".join(lines) + ("\n" if lines else ""))
+            print(f"  genconfig: restored {target}: {sid}")
+        prev_file.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        base.rmdir()  # archives unlinked above; empty dir goes too
+    with contextlib.suppress(OSError):
+        # parent skeleton too, when no other target dirs remain
+        (Path(backup_root) / name / "genconfig").rmdir()
+
+
 def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> None:
     """Restore `.config` post-write edits from the wrapper archives
     (byte-exact lines; absence restores remove the key). Mirrors
@@ -803,8 +856,22 @@ def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> Non
             # the archive holds the removed lines; bare keys still parse
             # through the same partition("=") below (no '=' = whole key).
             # NB op=="drop" alone would collide with `cli.drop` (mid!=config).
+        elif op == "xml" and mid == "config":
+            # RGS-15KHZ-EXT: `.config.xml` — path|id=value[;id2=value2];
+            # the archive holds each id's previous full line (or "" = the
+            # id was absent). NB op=="xml" alone would not be scoped, hence
+            # the mid=="config" test (same guard class as cli.drop).
+            for one in str(value).split("\n"):
+                target, _, kv = one.partition("|")
+                target = (target or "").strip()
+                if not target or not kv.strip():
+                    continue
+                _restore_config_xml(target, kv, target_root, backup_root, name)
+            continue
         else:
-            continue  # cli.*, mouse, runtime_dir: no file residue
+            continue  # cli.*, mouse, runtime_dir, ensure: no file residue
+            # (`ensure` is a declared NO-RESTORE repair — see the op's
+            # docstring in sitecustomize._apply_ensure_ops.)
         for one in str(value).split("\n"):
             target, _, kv = one.partition("|")
             target = (target or "").strip()

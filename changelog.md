@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-10 — the tube gains the MSX family, SAM Coupe and the Namco arcade games
+
+**MSX and Spectravideo on the tube.** The emulator's own picture filter — a
+soft blur with faint scanlines — is now switched off, so the image is sharp and
+the game's text reads one-to-one. It also starts clean: no missing-font warning
+at launch, and nothing drawn over the game (the emulator's menu bar fades away
+on its own once you stop moving the mouse).
+
+**SAM Coupe fills the tube.** The machine's stock "TV aspect" correction
+stretched its 4:3 picture towards 5:3, which left black bands on the tube. The
+picture now keeps the machine's true square pixels and fills the glass edge to
+edge — no bands, no stretch — and the emulator's own on-screen readouts (speed,
+drive lights, status text) stay off the picture.
+
+**The Namco System 2x6 arcade games fill the tube.** These cabinets run 480p;
+the emulator's default framing put a 4:3 cabinet at 3:2, with black bars top and
+bottom. The true aspect is now pinned, so the picture fills the glass — no bars,
+no stretch — at the cabinet's own resolution.
+
 ## 2026-10-10 — a game that will not let go no longer strands the tube
 
 **Closing a game always brings the menu back.** Some games, closed

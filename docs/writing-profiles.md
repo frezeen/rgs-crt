@@ -181,11 +181,31 @@ talks to (keep the naming of the shipped profiles: `<something>Generator.py`):
 | `cli.set` | replace the value of an argument already present | `mame.cli.set = -video accel` |
 | `config` | after the settings file is written, force single lines | `libretro.config = /userdata/system/configs/retroarch/retroarchcustom.cfg\|video_shader_enable=false` |
 | `config.drop` | after writing, remove lines so the program's own default speaks again (restored at exit) | `mybox.config.drop = /path/file.ini\|ratio` |
+| `config.xml` | after writing, force settings in a settings XML file, one named setting at a time (restored at exit) | `openmsx.config.xml = /userdata/system/configs/openmsx/share/settings.xml\|blur=0;scanline=0;glow=0` |
 | `mouse = off` | hide the host cursor for that emulator | `xenia.mouse = off` |
 | `runtime_dir` | make sure a folder exists before the emulator runs | `azahar.runtime_dir = /userdata/saves/3ds/azahar-emu` |
+| `ensure` | before the launch, put a missing program file back into the folder the program reads | `openmsx.ensure = /usr/share/openmsx/skins/DejaVuSans.ttf.gz\|/userdata/system/configs/openmsx/share/skins/DejaVuSans.ttf.gz` |
 
 Everything here is session-scoped: archived and restored on exit like
-the rest.
+the rest — except `ensure`, which is a repair, not a change. It only
+ever copies a file that is missing (never overwrites one that is there),
+and what it copies is the program's own file where the program expects
+it, so it stays in place: taking it away at exit would break the next
+launch again.
+
+Two notes on `config.xml` and `ensure`:
+
+- **`config.xml` edits the file, it never rewrites it.** A named setting
+  already in the file keeps its place in it; a setting that is missing is
+  added inside the settings section, with the same indentation as the ones
+  around it. The rest of the file — header included — comes back exactly
+  as the program wrote it on exit. Give the setting the name the program
+  calls it and the value the program expects.
+- **`ensure` fills a hole; it never replaces.** It is for a folder the
+  program copies only once, at first use: when RGS updates, that folder
+  keeps the old files and the program looks for something that is not
+  there. Point it at the current program file and the missing copy is
+  restored once, quietly.
 
 ### 6. Asking for a specific display mode — the system's `videomode` key
 

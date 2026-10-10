@@ -57,8 +57,11 @@ What a profile may adjust for a game: which emulator or core runs the
 system, the display signal to aim for, the emulator's own options
 (shaders, filters, fullscreen behavior), command-line arguments the
 emulator is launched with, and — where an emulator reads a settings
-file — single lines rewritten for the session and restored afterwards,
-byte for byte.
+file, whether it is a plain list or a settings XML — single settings
+rewritten for the session and restored afterwards, byte for byte.
+A profile may also put a missing program file back where the program
+expects it (the tube profile repairs the MSX emulator's font folder this
+way); that one is kept, not undone, because the file belongs there.
 
 ## How many profiles can you have
 
@@ -90,7 +93,9 @@ Guarantees you get from the framework, not from the individual profile:
   failure in `./verify.sh` — and if a launch meets one anyway, it falls
   back to stock behavior instead of using it.
 - **Nothing permanent.** Whatever the profile changes at game start,
-  the exit gives back — values, files, the works.
+  the exit gives back — values, files, the works. The single exception
+  is a repair that puts one of the emulator's own files back where the
+  emulator looks for it; it stays, because the next launch needs it.
 - **Nothing invisible.** `./verify.sh` fails if any session ever
   stranded a trace of a profile behind.
 - **A hard stop is cleaned.** If the box loses power mid-game, the
