@@ -33,6 +33,44 @@ _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 
 _session_active() { [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; }
 
+# ── Deadlock breaker probes (root cause, measured 2026-10-10) ────────────
+# emulatorlauncher (ES's child, one per session) returns only when it sees
+# EOF on the game's stdout/stderr pipes. When the game's gamescope dies, the
+# processes UNDER it — gamescopereaper and the winedevice workers — are
+# reparented to init and SURVIVE, still holding the write ends. Proven from
+# the fd table: emulatorlauncher held pipe:[180915] read; gamescopereaper
+# held that same pipe write. EOF never arrives, emulatorlauncher never
+# returns, ES never runs gameStop, and the guard stays up for good: the dual
+# never returns and the frontend never reappears.
+#
+# The signature is ORPHANHOOD, not an emulator list: "my parent is dead and
+# I am not" (PPID 1) while emulatorlauncher still waits is exactly this
+# deadlock, and it says nothing about which emulator ran — so it does not
+# rot as emulators are added.
+#
+# Both probes are seamed so the breaker's LOGIC is testable without real
+# orphans (the house style: seams for live paths).
+_emu_alive() { # rc 0 while the session's emulatorlauncher waits
+	if [ -n "${CRT_DUAL_EMU_ALIVE_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_EMU_ALIVE_CMD"
+		return $?
+	fi
+	# -f (full cmdline), NOT -x (process name): "emulatorlauncher" is 16
+	# characters and comm is truncated to 15, so `pgrep -x emulatorlauncher`
+	# NEVER matches — measured on the box the first time this ran, where the
+	# breaker sat silent with the orphan right there. This is the same test
+	# the box's own batocera-es-swissknife uses (check_emurun).
+	pgrep -f -n emulatorlauncher >/dev/null 2>&1
+}
+_dead_orphans() { # pids of orphaned pipe-holders, one per line
+	if [ -n "${CRT_DUAL_ORPHANS_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_ORPHANS_CMD"
+		return 0
+	fi
+	ps -eo pid=,ppid=,comm= 2>/dev/null \
+		| awk '$2=="1" && $3 ~ /^(gamescope|gamescopereaper|wine|winedevice|wineserver|xenia)/ {print $1}'
+}
+
 SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
 _target_active() { # $1 = X output -> active mode AND kernel-enabled (the truth pair)
 	local tm td en
@@ -208,12 +246,67 @@ case "${1:---check}" in
 	prev_fp=""
 	prev_es=""
 	prev_game="idle"
+	_dead_hits=0
 	_first=1
 	settle=0
 	i=0
 	while true; do
 		i=$((i + 1))
 		if [ "$ITERS" -gt 0 ] && [ "$i" -gt "$ITERS" ]; then break; fi
+
+		# ── Deadlock breaker (root cause, measured 2026-10-10) ─────────
+		# emulatorlauncher (ES's child, one per session) returns only when
+		# it sees EOF on the game's stdout/stderr pipes. When the game's
+		# gamescope dies, the processes UNDER it — gamescopereaper and the
+		# winedevice workers — are reparented to init and SURVIVE, still
+		# holding the write ends. Proven from the fd table: emulatorlauncher
+		# held pipe:[180915] read; gamescopereaper held the same pipe write.
+		# EOF never arrives, so emulatorlauncher never returns, ES never
+		# runs gameStop, and the session guard stays up for good: the dual
+		# never returns and the frontend never reappears.
+		#
+		# The signature is ORPHANHOOD, not an emulator list: a wrapper whose
+		# parent is gone (PPID 1) while emulatorlauncher is still alive IS
+		# this deadlock — and it is emulator-agnostic, which is why it will
+		# not rot as emulators are added. Killing the orphans closes the
+		# pipes and the whole chain unwinds BY ITSELF: emulatorlauncher
+		# exits normally, ES runs gameStop, the guard clears. We therefore
+		# do NOT touch emulatorlauncher — killing it would skip the gameStop
+		# that is the point of the exercise.
+		#
+		# Evaluated BEFORE the session short-circuit below: while a session
+		# is stuck the guard is UP, so a check placed after it would never
+		# run — the exact mistake this replaces.
+		#
+		# Two consecutive polls: a wrapper that is merely mid-exit is left
+		# alone; only one that stays orphaned is a deadlock.
+		if _emu_alive; then
+			_dead_orp="$(_dead_orphans | tr '\n' ' ')"
+			if [ -n "${_dead_orp// /}" ]; then
+				_dead_hits=$((_dead_hits + 1))
+			else
+				_dead_hits=0
+			fi
+			if [ "$_dead_hits" -ge 2 ]; then
+				log "deadlock breaker: emulatorlauncher is waiting on pipes an orphaned wrapper still holds (${_dead_orp% }) — closing them"
+				_kill_set="$_dead_orp"
+				# one level of descendants: the winedevice workers live under
+				# the reaper and hold pipes of their own (55 fds, measured).
+				for _dp in $_dead_orp; do
+					_kids="$(ps -eo pid=,ppid= 2>/dev/null | awk -v p="$_dp" '$2==p {print $1}' | tr '\n' ' ')"
+					_kill_set="$_kill_set $_kids"
+				done
+				# shellcheck disable=SC2086 # a pid list is the point
+				kill $_kill_set 2>/dev/null || true
+				sleep 1
+				# shellcheck disable=SC2086 # wine helpers ignore SIGTERM
+				kill -9 $_kill_set 2>/dev/null || true
+				_dead_hits=0
+			fi
+		else
+			_dead_hits=0
+		fi
+
 		if _session_active; then
 			prev_game="active"
 			sleep "$POLL"

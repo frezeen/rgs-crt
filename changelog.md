@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-10 — a game that will not let go no longer strands the tube
+
+**Closing a game always brings the menu back.** Some games, closed
+normally, did not fully let go of the screen: the game ended, but the
+picture stayed frozen on its last frame and the menu never returned — with
+no way out from the cabinet, and the desktop left on the other screen. The
+layer now notices that the game has let go and finishes the hand-over on its
+own: the menu comes back on the tube and the desktop returns to normal, with
+no reboot, no command, and nothing to do at the cabinet.
+
+This is not specific to one system. The check is built on a property that
+holds for any game — whether the program that was running it has really
+released it — so games added later are covered without anything to update.
+
 ## 2026-10-09 — the check entry gets a picture, keeps its place, and RGS 43.55 is certified
 
 **A proper picture for the check entry.** "RGS-CRT CHECK & UPDATE" now shows

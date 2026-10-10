@@ -706,8 +706,19 @@ else
 fi
 
 # ── 9. Zero residue: no stale game-guard while no game runs ──
+# The liveness test must be BROAD or it reports the wrong thing. It used to
+# know only retroarch and `emulatorlauncher -p1`, so a WINE emulator
+# (xenia and anything RGS adds later) was invisible: a live wine session
+# read as "stale guard with no game running" — the opposite of the truth
+# (measured 2026-10-10, xbox360). gamescope covers our HD-console wrapper
+# policy; wineserver covers every wine-based emulator without naming them.
+# winedevice.exe is deliberately NOT here: it is a per-prefix helper that
+# outlives the game (it was still running 1h56m after one died).
 if [ -f /tmp/crt-dual/profile ] || [ -f /tmp/crt-dual-mode ]; then
-	if pgrep -x retroarch >/dev/null 2>&1 || pgrep -f "[e]mulatorlauncher -p1" >/dev/null 2>&1; then
+	if pgrep -x retroarch >/dev/null 2>&1 \
+		|| pgrep -x gamescope >/dev/null 2>&1 \
+		|| pgrep -x wineserver >/dev/null 2>&1 \
+		|| pgrep -f "[e]mulatorlauncher -p1" >/dev/null 2>&1; then
 		ok "game guard present but a game IS running (live session)"
 	else
 		bad "stale game guard (/tmp/crt-dual/profile or /tmp/crt-dual-mode) with no game running"
