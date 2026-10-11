@@ -217,7 +217,8 @@ RGS's own update does not always reboot the machine, so nothing here is
 waiting on one:
 
 1. Run **RGS UPGRADE**.
-2. Open **RGS-CRT CHECK & UPDATE** and read the verdict.
+2. Open **RGS-CRT CHECK & UPDATE** — it looks for a newer release and
+   re-certifies the layer by itself — and read the verdict.
 3. Reboot whenever you would have anyway — for a tube session, or when
    RGS itself says a reboot is due.
 
@@ -230,19 +231,23 @@ RGS update is the expected answer, not an oversight.
 ## The check tool
 
 An entry in the "Batocera config" menu (the same list as RGS's own
-tools) — **RGS-CRT CHECK & UPDATE** — shows one verdict for the box:
+tools) — **RGS-CRT CHECK & UPDATE** — does the whole job in one go, with
+nothing to press: opening it looks for a newer release of the layer,
+installs one on the spot if it is certified for this box, re-certifies
+the layer against the RGS version the box runs, and shows each step as it
+happens, then the verdict.
+Nothing reboots on its own — an update installs in place, and you
+restart by hand when RGS says a reboot is due.
 
 | Verdict | Meaning | Your options |
 | --- | --- | --- |
-| **GREEN** | Everything is aligned with what was installed. The screen shows the installed release and whether it is up to date. | Up to date: nothing to do. Update available: ENTER applies the update, ESC closes. |
-| **RED** | An RGS update changed the system and the self-check could not vouch for it. | ESC — keep playing, games run exactly like stock while held. ENTER — uninstall the layer and reboot: pure stock RGS, one press. When a newer release certified for this box is available, ENTER applies the update instead and U keeps the one-press uninstall. |
+| **GREEN** | Everything is aligned. The screen shows the version, which tracks the RGS the layer certified on. | Nothing to do: close with any key. |
+| **RED** | The self-check could not vouch for the layer on this system; games keep running exactly like stock while held. | ESC — keep playing. U — uninstall the layer and reboot: pure stock RGS. |
 
-When a newer release certified for this box is available, the tool
-offers it on the same screen: one press applies it as a clean removal
-of the old layer plus a fresh install of the new one, then reboots into
-it. A release built for a newer RGS than the box runs is never offered —
-update RGS itself first. With no network the tool behaves exactly as
-before: it checks, and offers only the uninstall.
+A release built for a newer RGS than the box runs is never installed —
+update RGS itself first. With no network the tool still re-certifies and
+only the update step is skipped; a failed update is shown on screen and
+in the log, never silently ignored.
 
 ## Remote access (VNC)
 
@@ -288,4 +293,4 @@ curl -fsSL https://raw.githubusercontent.com/frezeen/rgs-crt/main/get.sh | bash
 ```
 
 No git is needed on the box. The same release can also arrive through
-the check tool's update choice above.
+the check tool above.

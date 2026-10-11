@@ -18,7 +18,7 @@ New releases and what changed recently: **[changelog.md](changelog.md)**.
 | No fake CRT effects | Smoothing and scanline-style filters are switched off on the tube. The tube is the filter. |
 | The menu keeps working | Between games the desktop runs on the tube, on a connected LCD, or on both. Pick whichever you plugged in. |
 | It gives things back | Every setting a game needed is reverted when the game exits. The desktop and the values return to what they were. |
-| A safety net you can see | A check entry in the Batocera config menu — **RGS-CRT CHECK & UPDATE** — shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself in one press when a newer release is available. |
+| A safety net you can see | A check entry in the Batocera config menu — **RGS-CRT CHECK & UPDATE** — shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself: opening it looks for a newer release and installs one on its own, then re-certifies against the RGS version the box runs. |
 
 ## Three ways to plug it in
 
@@ -157,7 +157,8 @@ its dependencies and reports loudly.
 
 ## Status & limitations
 
-- Tested on two reference machines: RGS 43.54 (Batocera 43.1 base),
+- Tested on two reference machines: RGS 43.54 base (Batocera 43.1
+  base; the layer follows the RGS version, now 43.58),
   x86_64, one with an **NVIDIA GTX 970** and one with an **AMD R9
   270X**, arcade tube in the demonstrated 13.6–16.2 kHz range. An
   **Intel** gen9 iGPU path exists since the current revision: the install

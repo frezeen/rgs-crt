@@ -150,9 +150,24 @@ if [ -d "$PKG/src" ]; then
 		_b="$(basename "$_d")"
 		[ -d "$REPO/src/profiles/$_b" ] || ok "user profile present: $_b (validated above)"
 	done
-	[ -f "$PKG_VERSION_FILE" ] && [ "$(cat "$PKG_VERSION_FILE" 2>/dev/null)" = "$PKG_VERSION" ] \
-		&& ok "version marker" \
-		|| bad "version marker missing/wrong ($PKG_VERSION_FILE)"
+	# Version marker. TWO legitimate values: the release version from
+	# $REPO/VERSION, and — after the check tool certified an RGS update
+	# (zz_rgs_15khz tool-update) — <live RGS base>.0, because the layer
+	# version then rises to the RGS it just certified. Anything else is
+	# drift. An unreadable/unparsable live rgs.version yields no certified
+	# value, never a guess.
+	_cert_ver=""
+	_live_rgs_marker="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
+	# grep without -q drains to EOF (no SIGPIPE trap under pipefail).
+	if [ -n "$(printf '%s' "$_live_rgs_marker" | grep -E '^[0-9]+\.[0-9]+' || true)" ]; then
+		_cert_ver="$(printf '%s' "$_live_rgs_marker" | cut -d. -f1,2).0"
+	fi
+	_marker="$(cat "$PKG_VERSION_FILE" 2>/dev/null || true)"
+	if [ -n "$_marker" ] && { [ "$_marker" = "$PKG_VERSION" ] || [ "$_marker" = "$_cert_ver" ]; }; then
+		ok "version marker ($_marker)"
+	else
+		bad "version marker missing/wrong ($PKG_VERSION_FILE: '${_marker:-?}', want $PKG_VERSION or ${_cert_ver:-<live RGS base>.0})"
+	fi
 	[ -f "$PKG/overlay-manifest" ] \
 		&& ok "overlay manifest present" \
 		|| bad "overlay manifest missing ($PKG/overlay-manifest)"

@@ -3,7 +3,7 @@
 This layer runs INSIDE stock RGS and reverts cleanly.
 
 This is the honest per-system status of the **RGS 15 kHz CRT** profile.
-Certification box: RGS 43.54 (Batocera 43.1 base), x86_64, NVIDIA
+Certification box: RGS 43.58 (Batocera 43.1 base), x86_64, NVIDIA
 GTX 970, arcade tube in the demonstrated 13.6–16.2 kHz range — the
 measured numbers below come from it; the full layer has also been
 tested on an AMD R9 270X machine, and Intel hardware carries a
@@ -78,6 +78,9 @@ starts.
 | Raw Thrills gun shooters (rawthrills) | Both titles on this machine show the arcade picture full on the 4:3 tube, no letterbox and no stretch, each on its own engine (the native loader for Aliens Armageddon, Wine for Big Buck Hunter Pro) | common + the tube raster on the stock video-mode key (`rawthrills.videomode = 640x480i`); no emulator or core pin — the system's own engine choice is followed | TESTED 2026-10-07 |
 | Xbox 360 (xenia-canary) | The Xbox 360's 16:9 picture on the tube's 480i, stretched full-bleed to 4:3 — proportions compressed, the same declared trade as the PS3/PS4/Vita rows (no 15 kHz form of this content exists). Title text reads at one-to-one. Runs the emulator's own fullscreen on native render scale, with no upscaling or sharpening | common + gamescope 864x486@60 fullscreen stretch (pixel filter) + native render scale | TESTED-with-note 2026-10-10 |
 | Namco System 246/256 (namco2x6) | The arcade's own 4:3 picture fills the whole tube — no black bars, no stretch — drawn at the game's native scale with no upscaling or sharpening. The console emulator's default drawing mode squeezes this progressive 480p title to 3:2 and leaves bars; the profile pins the cabinet's true 4:3 proportions instead | common + the game's aspect pinned to standard 4:3 (the emulator's progressive default is 3:2) + native 1x render | TESTED 2026-10-10 |
+| Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
+| Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Verified on Arctic Thunder and Friction (4:3: full-bleed, as the cabinet shows them) and on Subway Surfers Arcade (16:9: full-bleed stretched — the same declared trade as the PS3/Xbox 360 rows) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
+| UNIS Arcade Machines (unis) | The arcade's own picture fills the whole 4:3 tube at 480i, text legible. Verified on Dino Invasion | common + the tube raster on the stock video-mode key (`unis.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
 
 **Every verdict includes the exit:** the session ends, everything
 returns to the desktop state, and the system reports clean.
@@ -160,11 +163,16 @@ unproven — listed, never claimed:
   jaguarcd, apple2, apple2gs, enterprise,
   fmtowns, lindbergh, moonlight (needs a streaming host
   PC), vpinball, dxx-rebirth, win311, win95.
-- `globalvr`, `arcadepc` — arrived with RGS 43.55. No profile block
-  exists for either, so both run the `rgs-stock` profile (LCD-class
-  raster) until a block is measured. RGS ships its own keys for them
-  inside its tuning zone, so the video-mode request is theirs, not
-  ours. No content on the certification box.
+- `globalvr`, `typex`, `typex2`, `nesicax`, `nesicax2`, `seganu`,
+  `konamipc` — the RGS Windows-arcade systems. They now carry the same
+  tube treatment as the certified Adrenaline / Arcade PC / UNIS siblings
+  (the tube raster plus the full-screen fill), so when content lands they
+  start on the tube instead of the LCD — but no content is on the
+  certification box, so no launch has been measured here: they stay in
+  this list until a game is launched on the glass. RGS ships its own
+  `max-*` video-mode keys for them inside its tuning zone, and its
+  per-game keys win over ours. `gaelco` is deliberately left out: it is a
+  MAME-driven system, not one of these Windows ones.
 - `itchio`, `namcoes3` — uncovered since the RGS 43.44–43.54 range,
   same state as the two above: no block, no content. Listed here so
   the gap is written down instead of remembered.

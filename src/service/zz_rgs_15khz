@@ -739,9 +739,14 @@ i915_patch_decide() {
 # (default curl, same shape as get.sh); RGS15_FEED_ALLOW_NET=1 opts into
 # the network — unset/0 answers OFFLINE without fetching (hermetic seams,
 # offline-safe default). Installed is read from ${PKG}.version, live RGS
-# from RGS_VERSION_SRC. tool-update runs get.sh — the ONE install/update
-# chain — from the recorded project folder, then reboots (deliberate,
-# user-launched from rgs_crt_check, same shape as tool-uninstall).
+# from RGS_VERSION_SRC.
+#
+# tool-update is the AUTOMATIC flow rgs_crt_check runs on OPEN (no
+# keypress, owner decision 2026-10-11): the SAME feed probe, get.sh — the
+# ONE install/update chain — when the feed offers a newer release, the
+# SAME guard_run the boot duty uses, then the marker re-labelled onto the
+# RGS it just certified. It NEVER reboots: an update installs in place
+# and the user restarts by hand when RGS says so.
 feed_is_rev() { # $1 -> rc 0 iff MAJOR.MINOR.REV, all numeric
 	case "${1:-}" in
 	"" | *[^0-9.]*) return 1 ;;
@@ -768,6 +773,42 @@ feed_vercmp() { # $1 $2 = MAJOR.MINOR.REV -> prints -1 / 0 / 1 (full tuple, nume
 		}
 		print 0
 	}'
+}
+
+# feed_probe prints the ONE line, rc 0 always (a probe never fails the
+# caller). ONE logic copy: the feed-check duty prints it, the automatic
+# tool-update flow reads it and decides whether to install.
+feed_probe() {
+	local _installed _live_rgs _feed_url _fetch _timeout _line _tmp _feed _cmp _target
+	_installed="$(tr -d ' \t\r\n' <"${PKG}.version" 2>/dev/null || true)"
+	_live_rgs="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
+	_feed_url="${RGS15_FEED_VERSION_URL:-https://raw.githubusercontent.com/frezeen/rgs-crt/main/VERSION}"
+	_fetch="${RGS15_FETCH_BIN:-curl}"
+	_timeout="${RGS15_FETCH_TIMEOUT:-8}"
+	_line="OFFLINE"
+	if [ "${RGS15_FEED_ALLOW_NET:-0}" = "1" ]; then
+		_tmp="$(mktemp /tmp/rgs-crt-feed.XXXXXX 2>/dev/null || true)"
+		# -L follows redirects (release-asset hosts answer 302; without
+		# it curl banks an empty body with rc 0 and the probe misreads).
+		if [ -n "$_tmp" ] && "$_fetch" -fsSL --max-time "$_timeout" -o "$_tmp" "$_feed_url" 2>/dev/null; then
+			_feed="$(tr -d ' \t\r\n' <"$_tmp" 2>/dev/null || true)"
+			if feed_is_rev "$_feed" && feed_is_rev "$_installed"; then
+				_cmp="$(feed_vercmp "$_feed" "$_installed")"
+				if [ "$_cmp" = "0" ] || [ "$_cmp" = "-1" ]; then
+					_line="CURRENT $_installed"
+				else
+					_target="$(printf '%s' "$_feed" | cut -d. -f1,2)"
+					if feed_is_base "$_live_rgs" && feed_base_ge "$_live_rgs" "$_target"; then
+						_line="UPDATE $_feed"
+					else
+						_line="BLOCKED $_feed $_target"
+					fi
+				fi
+			fi
+		fi
+		rm -f "$_tmp" 2>/dev/null || true # benign: the probe must leave no temp file behind
+	fi
+	printf '%s\n' "$_line"
 }
 
 # ── the ES tool's gamelist row (gamelist-ensure) ─────────────────────────
@@ -1104,61 +1145,96 @@ feed-check)
 	# the update feed probe for rgs_crt_check (UI parses the first
 	# word; empty/garbage => OFFLINE on the UI side). Exactly ONE line
 	# on stdout, always; exit 0 always (a probe never fails the caller).
-	_installed="$(tr -d ' \t\r\n' <"${PKG}.version" 2>/dev/null || true)"
-	_live_rgs="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
-	_feed_url="${RGS15_FEED_VERSION_URL:-https://raw.githubusercontent.com/frezeen/rgs-crt/main/VERSION}"
-	_fetch="${RGS15_FETCH_BIN:-curl}"
-	_timeout="${RGS15_FETCH_TIMEOUT:-8}"
-	_line="OFFLINE"
-	if [ "${RGS15_FEED_ALLOW_NET:-0}" = "1" ]; then
-		_tmp="$(mktemp /tmp/rgs-crt-feed.XXXXXX 2>/dev/null || true)"
-		# -L follows redirects (release-asset hosts answer 302; without
-		# it curl banks an empty body with rc 0 and the probe misreads).
-		if [ -n "$_tmp" ] && "$_fetch" -fsSL --max-time "$_timeout" -o "$_tmp" "$_feed_url" 2>/dev/null; then
-			_feed="$(tr -d ' \t\r\n' <"$_tmp" 2>/dev/null || true)"
-			if feed_is_rev "$_feed" && feed_is_rev "$_installed"; then
-				_cmp="$(feed_vercmp "$_feed" "$_installed")"
-				if [ "$_cmp" = "0" ] || [ "$_cmp" = "-1" ]; then
-					_line="CURRENT $_installed"
-				else
-					_target="$(printf '%s' "$_feed" | cut -d. -f1,2)"
-					if feed_is_base "$_live_rgs" && feed_base_ge "$_live_rgs" "$_target"; then
-						_line="UPDATE $_feed"
-					else
-						_line="BLOCKED $_feed $_target"
-					fi
-				fi
-			fi
-		fi
-		rm -f "$_tmp" 2>/dev/null || true # benign: the probe must leave no temp file behind
-	fi
+	# Logic lives in feed_probe — the automatic tool-update flow uses the
+	# SAME copy, never a second one.
+	_line="$(feed_probe)"
 	echo "$_line"
 	log "tool: feed-check $_line"
 	exit 0
 	;;
 tool-update)
-	# DELIBERATE update from the rgs_crt_check tool (user-launched, no
-	# game launch in flight): run get.sh — the ONE install/update chain —
-	# from the recorded project folder, then reboot into the updated
-	# layer. Missing source/get.sh = loud log + non-zero exit, NO reboot
-	# (fail-safe: never reboot a box that could not be updated); a
-	# failing get.sh likewise aborts the reboot.
-	_src="${RGS15_SRC:-$(cat "$PKG/install-source" 2>/dev/null || true)}"
-	_get="${RGS15_UPDATE_GET:-$_src/get.sh}"
-	if [ -z "$_src" ] || [ ! -f "$_get" ]; then
-		log "tool: update requested but no usable get.sh (src='${_src:-?}' get='${_get:-?}') — run get.sh from the project folder by hand"
+	# AUTOMATIC update + certify flow (owner decision 2026-10-11): the
+	# rgs_crt_check tool runs this ON OPEN, with no keypress and NO reboot
+	# anywhere — an update installs in place and the user restarts by
+	# hand when RGS says so. Steps: (1) feed check (the caller exports
+	# RGS15_FEED_ALLOW_NET=1, the same probe the feed-check duty prints),
+	# (2) get.sh — the ONE install/update chain — only when the feed
+	# offers a newer release certified for THIS RGS, (3) the SAME
+	# guard_run the boot duty uses, (4) on a green certify the marker
+	# becomes <live RGS base>.0: our version rises to the RGS it just
+	# certified. stdout is GREEN|RED for the window; rc 0 = certified and
+	# nothing left to install, 2 = certified but the install failed (LOUD
+	# in the log, no re-label: the next tool open retries it), 1 = the
+	# layer could not be certified at all.
+	_pending=0
+	log "update: checking new version"
+	_feed_line="$(feed_probe)"
+	_feed="${_feed_line%% *}"
+	_feed_ver="$(printf '%s' "$_feed_line" | cut -d' ' -f2 -s)"
+	case "$_feed" in
+	UPDATE)
+		log "update: found $_feed_ver"
+		log "update: download"
+		log "update: install"
+		_src="${RGS15_SRC:-$(cat "$PKG/install-source" 2>/dev/null || true)}"
+		_get="${RGS15_UPDATE_GET:-$_src/get.sh}"
+		if [ -n "$_src" ] && [ -f "$_get" ]; then
+			if bash "$_get" >>"$LOG" 2>&1; then
+				log "update: installed $_feed_ver"
+			else
+				_rc=$?
+				log "update: ERROR get.sh failed (rc=$_rc, $_get) — the version is NOT re-labelled"
+				_pending=1
+			fi
+		else
+			log "update: ERROR no usable get.sh (src='${_src:-?}' get='${_get:-?}') — run get.sh from the project folder by hand"
+			_pending=1
+		fi
+		;;
+	*)
+		# CURRENT / BLOCKED / OFFLINE (and any unknown word): never
+		# install — a lower feed version is not an update and a BLOCKED
+		# release is not certified for this RGS. The certify still runs:
+		# the layer state does not depend on the feed.
+		log "update: $_feed"
+		;;
+	esac
+
+	_live="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
+	log "update: certify RGS ${_live:-?}"
+	guard_run
+	if [ "$_guard_hold" = "1" ]; then
+		# the HOLD line is already in the log (guard_run); nothing else
+		# to say and nothing to re-label.
+		echo "RED"
 		exit 1
 	fi
-	log "tool: update requested (deliberate, from rgs_crt_check) — running $_get then reboot"
-	if bash "$_get" >>"$LOG" 2>&1; then
-		log "tool: update complete — rebooting into the updated layer"
-		reboot
-		exit 0
-	else
-		_rc=$?
-		log "tool: update returned non-zero (rc=$_rc) — reboot ABORTED (inspect the log)"
-		exit "$_rc"
+	if [ "$_pending" = "1" ]; then
+		log "update: certified on RGS ${_live:-?} — a newer release is still pending installation (not re-labelled)"
+		echo "GREEN"
+		exit 2
 	fi
+	# Certified: our version rises to the RGS it just certified. Guarded —
+	# an unparsable live rgs.version is a loud WARN and the marker keeps
+	# the release version, never a garbage value.
+	_ver="not re-labelled"
+	if feed_is_base "$_live"; then
+		_base="$(printf '%s' "$_live" | cut -d. -f1,2)"
+		# atomic (tmp + mv, same shape as deploy.sh's marker rewrite)
+		if printf '%s.0\n' "$_base" >"${PKG}.version.update.$$" 2>/dev/null \
+			&& mv -f "${PKG}.version.update.$$" "${PKG}.version" 2>/dev/null; then
+			_ver="${_base}.0"
+		else
+			_wrc=$?
+			rm -f "${PKG}.version.update.$$" 2>/dev/null || true # benign: never leave a half-written marker behind
+			log "update: WARN could not write ${PKG}.version (rc=$_wrc) — the marker keeps the release version"
+		fi
+	else
+		log "update: WARN live rgs.version '${_live:-?}' is not MAJOR.MINOR — no certified base to re-label"
+	fi
+	log "update: all green and certified — version $_ver"
+	echo "GREEN"
+	exit 0
 	;;*)
 	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
 	exit 1

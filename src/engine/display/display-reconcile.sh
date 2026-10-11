@@ -70,6 +70,42 @@ _dead_orphans() { # pids of orphaned pipe-holders, one per line
 	ps -eo pid=,ppid=,comm= 2>/dev/null \
 		| awk '$2=="1" && $3 ~ /^(gamescope|gamescopereaper|wine|winedevice|wineserver|xenia)/ {print $1}'
 }
+_game_alive() { # rc 0 while the session's GAME runs (not merely its launcher)
+	if [ -n "${CRT_DUAL_GAME_ALIVE_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_GAME_ALIVE_CMD"
+		return $?
+	fi
+	# A HEALTHY wine session reparents wineserver and the winedevice workers to
+	# init BY DESIGN — they are PPID 1 for the whole game, so orphanhood alone
+	# is NOT a deadlock (measured 2026-10-11: matching them killed the wine
+	# bootstrap of every wine game ~1 s in). The real deadlock is a CLOSED game
+	# whose orphans still hold the pipes. The discriminator is therefore the
+	# LIVE GAME, not the orphan: it is a non-shell descendant of
+	# emulatorlauncher (the game runs UNDER the launcher), while the
+	# reparented wine servers are not descendants at all. No live game +
+	# emulatorlauncher still waiting = the deadlock.
+	local _roots
+	_roots="$(pgrep -f emulatorlauncher 2>/dev/null | tr '\n' ' ')"
+	[ -n "${_roots// /}" ] || return 1
+	ps -eo pid=,ppid=,comm= 2>/dev/null | awk -v roots="$_roots" '
+		{ kids[$2] = kids[$2] " " $1; comm[$1] = $3 }
+		END {
+			nr = split(roots, r, " ")
+			for (i = 1; i <= nr; i++) if (r[i] != "") { q[++qn] = r[i]; seen[r[i]] = 1 }
+			h = 1; alive = 0
+			while (h <= qn) {
+				p = q[h++]
+				n = split(kids[p], ch, " ")
+				for (j = 1; j <= n; j++) {
+					c = ch[j]
+					if (c == "" || seen[c]) continue
+					seen[c] = 1; q[++qn] = c
+					if (comm[c] !~ /^(sh|bash|dash|python|python3|head|tee|sleep|setsid|timeout|cat|ps|awk|grep|sed|tr|wc|batocera|batocera-wine)$/) alive = 1
+				}
+			}
+			print (alive ? "1" : "0")
+		}'
+}
 
 SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
 _target_active() { # $1 = X output -> active mode AND kernel-enabled (the truth pair)
@@ -265,14 +301,17 @@ case "${1:---check}" in
 		# runs gameStop, and the session guard stays up for good: the dual
 		# never returns and the frontend never reappears.
 		#
-		# The signature is ORPHANHOOD, not an emulator list: a wrapper whose
-		# parent is gone (PPID 1) while emulatorlauncher is still alive IS
-		# this deadlock — and it is emulator-agnostic, which is why it will
-		# not rot as emulators are added. Killing the orphans closes the
-		# pipes and the whole chain unwinds BY ITSELF: emulatorlauncher
-		# exits normally, ES runs gameStop, the guard clears. We therefore
-		# do NOT touch emulatorlauncher — killing it would skip the gameStop
-		# that is the point of the exercise.
+		# The signature is a CLOSED GAME, not orphanhood: orphanhood alone is
+		# NORMAL for wine (wineserver/winedevice are reparented to init by
+		# design for the whole game — measured 2026-10-11, where keying on it
+		# killed every wine bootstrap ~1 s in). The deadlock is emulatorlauncher
+		# still waiting while NO live game runs under it: the game is gone and
+		# only its orphans hold the pipes. So fire only when the game is dead
+		# (_game_alive false) AND orphans are present. Killing the orphans
+		# closes the pipes and the whole chain unwinds BY ITSELF:
+		# emulatorlauncher exits normally, ES runs gameStop, the guard clears.
+		# We therefore do NOT touch emulatorlauncher — killing it would skip
+		# the gameStop that is the point of the exercise.
 		#
 		# Evaluated BEFORE the session short-circuit below: while a session
 		# is stuck the guard is UP, so a check placed after it would never
@@ -280,7 +319,7 @@ case "${1:---check}" in
 		#
 		# Two consecutive polls: a wrapper that is merely mid-exit is left
 		# alone; only one that stays orphaned is a deadlock.
-		if _emu_alive; then
+		if _emu_alive && ! _game_alive; then
 			_dead_orp="$(_dead_orphans | tr '\n' ' ')"
 			if [ -n "${_dead_orp// /}" ]; then
 				_dead_hits=$((_dead_hits + 1))
