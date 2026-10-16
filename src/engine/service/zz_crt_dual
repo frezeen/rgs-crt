@@ -32,6 +32,49 @@
 
 set -uo pipefail
 
+# ── Auto-capture on non-convergence (U2) ──────────────────────────────
+# The reconciler failed its ONE boot pass. Snapshot the box ONCE, while the
+# fault is still live — the user is never asked to press anything. Guards:
+# a non-blocking flock (a concurrent start cannot double-capture) and a
+# per-boot marker in the state dir (tmpfs, cleared at reboot) so the dump
+# happens at most once per boot. It NEVER loops: one shot, then return.
+# State file (shell-quality §7): $CRT_DUAL_STATE_DIR/diag-not-converged.done
+# — writer/reader = this function, cleaned = reboot (tmpfs).
+diag_capture_not_converged() {
+	# Both roots are caller contract (set in `start` before the early apply).
+	# Guard anyway: with LOG_DIR unset the output path would degrade to
+	# `/diag/...` — a write at the filesystem root (leak found by the
+	# early-apply seam driving this line without LOG_DIR, 2026-10-16).
+	if [ -z "${LOG_DIR:-}" ] || [ -z "${PKG_ROOT:-}" ]; then
+		echo "  diag: LOG_DIR/PKG_ROOT unset — non-convergence snapshot skipped"
+		return 0
+	fi
+	local _dir="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
+	local _mark="$_dir/diag-not-converged.done"
+	local _outdir="$LOG_DIR/diag"
+	[ -f "$_mark" ] && { echo "  diag: non-convergence snapshot already taken this boot"; return 0; }
+	mkdir -p "$_dir" "$_outdir" 2>/dev/null || true
+	exec 8>"$_mark.lock" 2>/dev/null || true
+	if command -v flock >/dev/null 2>&1; then
+		flock -n 8 2>/dev/null || { echo "  diag: non-convergence snapshot skipped (lock busy)"; return 0; }
+	fi
+	[ -f "$_mark" ] && { echo "  diag: non-convergence snapshot already taken this boot"; return 0; }
+	local _dump="$PKG_ROOT/src/tools/diag-dump.sh"
+	if [ -f "$_dump" ]; then
+		local _out="$_outdir/diag-not-converged-$(date +%Y%m%d-%H%M%S).txt"
+		# why-or-true: the snapshot is best-effort — a failing diag-dump must
+		# not block the boot; the marker is set so it is not retried forever.
+		bash "$_dump" >"$_out" 2>&1 || true
+		: >"$_mark"
+		echo "  diag: non-convergence snapshot -> $_out"
+	else
+		echo "  diag: non-convergence snapshot skipped (no $_dump)"
+	fi
+	command -v flock >/dev/null 2>&1 && flock -u 8 2>/dev/null
+	exec 8>&- 2>/dev/null || true
+	return 0
+}
+
 	case "$1" in
 	start)
 		PKG_ROOT="/userdata/system/crt-dual"
@@ -132,7 +175,7 @@ set -uo pipefail
 		# apply -> verify, one writer. This early pass runs it once (no
 		# session guard yet); the daemon below owns the retries. A missing
 		# module degrades to the WARN branch (never kills the boot).
-		if bash "$PKG_ROOT/src/display/display-reconcile.sh" --once; then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — the reconcile loop owns the retry"; fi
+		if bash "$PKG_ROOT/src/display/display-reconcile.sh" --once; then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — the reconcile loop owns the retry"; diag_capture_not_converged; fi
 
 		# -- X11 conf: regenerate ALWAYS (revert of tonight's slimming) --
 		# The early hook owns PRE-X generation, but this pass must STILL

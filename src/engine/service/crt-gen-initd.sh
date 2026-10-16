@@ -34,15 +34,11 @@
 # shadowed stock xrandr on NVIDIA, verify ANOMALY 2026-09-03).
 source /userdata/system/crt-dual/src/lib/gpu-lib.sh 2>/dev/null || true
 detect_gpu 2>/dev/null || true
-# BOOT_TRACE (temporary instrument, 2026-08-31): a file in the package
-# root turns the wrapper's gated FULL logging on BEFORE the burst, so one
-# boot's complete call inventory lands in display-trace.log. Create it to
-# investigate, remove it when done.
-if [ -f /userdata/system/crt-dual/BOOT_TRACE ]; then
-	mkdir -p /tmp/crt-dual 2>/dev/null || true
-	: >/tmp/crt-dual/display-trace.log 2>/dev/null || true
-	touch /tmp/crt-dual/display-trace-on 2>/dev/null || true
-fi
+# One boot's complete call inventory: the trace log is truncated HERE —
+# before the wrapper is placed and before the boot burst — because the
+# service starts late and truncating it there would wipe the burst this
+# instrument exists to capture. The log is always on (U4, 2026-10-16).
+: >/userdata/system/logs/display-trace.log 2>/dev/null || true
 
 if [ "${GPU_VENDOR:-}" = "amd" ] && [ -f /userdata/system/crt-dual/src/tools/xrandr-wrapper.sh ]; then
 	cp -f /userdata/system/crt-dual/src/tools/xrandr-wrapper.sh /usr/bin/xrandr && chmod +x /usr/bin/xrandr &&

@@ -273,6 +273,19 @@ _sysfp() { # DRM status fingerprint (no display contact)
 	printf '%s' "$out" | tr ' ' '\n' | sort | tr '\n' ' '
 }
 
+# The live display pass. CRT_DUAL_APPLY_CMD is a seam knob, same pattern as
+# the breaker probes below: it lets a hermetic test drive the loop WITHOUT
+# performing a real mode apply. Measured 2026-10-16: the deadlock-breaker
+# seam paid ~2.3s per case for an apply it never asserts on (12 cases = 28s
+# of an 81s seam) — a live tool inherited by a hermetic seam is exactly the
+# defect test-flow names (precedent: CRT_DUAL_MODETEST).
+_apply_pass() { # "$@" = --apply (from _reconcile) | nothing (settle re-check)
+	if [ -n "${CRT_DUAL_APPLY_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_APPLY_CMD"
+		return $?
+	fi
+	bash "$HERE/display-apply.sh" "$@"
+}
 _reconcile() {
 	_reconcile_lock || return 1
 	if _session_active; then # the guard may have gone up while we waited for the lock
@@ -282,7 +295,7 @@ _reconcile() {
 	fi
 	_write_detect_state
 	local out rc
-	out=$(bash "$HERE/display-apply.sh" --apply 2>&1)
+	out=$(_apply_pass --apply 2>&1)
 	rc=$?
 	if [ "$rc" = "0" ]; then
 		# Follow the screen, then repaint. Two owner-observed effects on
@@ -487,7 +500,7 @@ case "${1:---check}" in
 			_reconcile && settle=3 || true
 		elif [ "$settle" -gt 0 ]; then
 			settle=$((settle - 1))
-			if ! bash "$HERE/display-apply.sh" >/dev/null 2>&1; then
+			if ! _apply_pass >/dev/null 2>&1; then
 				log "settle-recheck: broken after a converged apply → reconcile"
 				_reconcile && settle=3 || true
 			fi

@@ -43,9 +43,20 @@
 #   xorg/              complete X server log (stock, current boot)
 #   dmesg-display.txt  kernel display lines (drm/gpu drivers), bounded
 #   metadata.txt       host, dates, free space, our version marker
+#   status.txt         the bundle self-check: STATUS: OK|BROKEN + one
+#                      reason per line (U1b). A missing decisive field
+#                      (no Transform: line while X is up, empty
+#                      detect-state while the reconciler ran, empty
+#                      reconcile log while the daemon runs) makes the
+#                      collector exit non-zero AFTER writing the zip.
+#   99-crt.conf        convenience copy of /etc/X11/xorg.conf.d/99-crt.conf
+#   switchres.ini      convenience copy of /etc/switchres.ini (both are
+#                      already inside diag-dump.txt; own files are for diff)
 #
 # Env seams (tests): RGS15_REPORT_DIR staging/zip parent (default =
-# this folder), RGS15_LOGS_DIR, RGS15_PKG, RGS15_TMPMARK. Defaults are
+# this folder), RGS15_LOGS_DIR, RGS15_PKG, RGS15_TMPMARK (the engine
+# state dir for the self-check), RGS15_DIAG_DUMP (diag-dump.sh under
+# test), RGS15_X11_CONF, RGS15_SYS_SWITCHRES, RGS15_PGREP. Defaults are
 # the live paths. ASCII only (product surface).
 set -u
 
@@ -72,6 +83,11 @@ esac
 OUTDIR="${RGS15_REPORT_DIR:-$REPO}"
 LOGS_DIR="${RGS15_LOGS_DIR:-/userdata/system/logs}"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
+DIAG_DUMP="${RGS15_DIAG_DUMP:-$REPO/src/engine/tools/diag-dump.sh}"
+MARK_DIR="${RGS15_TMPMARK:-/tmp/crt-dual}"
+X11_CONF="${RGS15_X11_CONF:-/etc/X11/xorg.conf.d/99-crt.conf}"
+SYS_SWITCHRES="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
+PGREP="${RGS15_PGREP:-pgrep}"
 STAGE="$OUTDIR/report-staging"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ZIP="$OUTDIR/rgs-crt-report-$STAMP.zip"
@@ -83,21 +99,28 @@ mkdir -p "$STAGE/logs" "$STAGE/package" "$STAGE/engine-tmp"
 
 echo "collecting (this takes a few seconds)..."
 
+# The three collectors below are READ-ONLY and write to DIFFERENT files, so
+# they run CONCURRENTLY (2026-10-16): a bundle build was 4.4s of pure sequence
+# (diag-dump 1.4 + edid-info 0.4 + verify.sh 2.2), and this is the script the
+# OWNER runs while a bug is still fresh — and the seam that certifies it.
+# Same members, same content, same exit notes; the staging copies in steps
+# 3-5b run while they work, and `wait` below joins them before anything READS
+# their output (step 7c reads diag-dump.txt).
 # 1. The engine diagnostic snapshot (self-sufficient; read from the
 #    extracted repo so it works even if the deploy folder moved).
-bash "$REPO/src/engine/tools/diag-dump.sh" >"$STAGE/diag-dump.txt" 2>&1 \
-	|| echo "diag-dump exited $? (kept its output anyway)" >>"$STAGE/diag-dump.txt"
+( bash "$DIAG_DUMP" >"$STAGE/diag-dump.txt" 2>&1 \
+	|| echo "diag-dump exited $? (kept its output anyway)" >>"$STAGE/diag-dump.txt" ) &
 
 # 1b. Adapter/EDID forensics (2026-09-20, adapter incident): which adapter
 #     sits between the box and the tube, and whether an EDID is a real
 #     display's or a fabrication. Facts only; the class line comes from
 #     display-detect.sh (single source of truth).
-bash "$REPO/src/engine/tools/edid-info.sh" >"$STAGE/adapters.txt" 2>&1 \
-	|| echo "edid-info exited $? (kept its output anyway)" >>"$STAGE/adapters.txt"
+( bash "$REPO/src/engine/tools/edid-info.sh" >"$STAGE/adapters.txt" 2>&1 \
+	|| echo "edid-info exited $? (kept its output anyway)" >>"$STAGE/adapters.txt" ) &
 
 # 2. The gate verdict.
-bash "$REPO/verify.sh" >"$STAGE/verify.txt" 2>&1
-echo "verify.sh exit code: $?" >>"$STAGE/verify.txt"
+( bash "$REPO/verify.sh" >"$STAGE/verify.txt" 2>&1
+  echo "verify.sh exit code: $?" >>"$STAGE/verify.txt" ) &
 
 # 3. Runtime logs — ours and the stock display/launch ones (full copies;
 #    missing ones are benign: some never exist before first use).
@@ -162,6 +185,11 @@ mkdir -p "$STAGE/boot"
 mkdir -p "$STAGE/xorg"
 [ -f /var/log/Xorg.0.log ] && cp -a /var/log/Xorg.0.log "$STAGE/xorg/Xorg.0.log" 2>/dev/null || true
 
+# The three collectors launched at step 1-2 are joined HERE — before any step
+# that READS their output (7c reads diag-dump.txt) — so the overlap above is
+# the copies (3-5b), never a race on a half-written file.
+wait
+
 # 6. Kernel display truth, bounded.
 dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \
 	>"$STAGE/dmesg-display.txt" || echo "(dmesg unavailable to this user)" >"$STAGE/dmesg-display.txt"
@@ -179,6 +207,51 @@ dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \
 	mount | grep -E " / |overlay|squashfs" || true
 } >"$STAGE/metadata.txt"
 
+# 7b. Convenience copies of the two living display configs (read-only). Both
+#     already live inside diag-dump.txt; their OWN files make a direct diff
+#     possible without cutting a section out by hand.
+[ -f "$X11_CONF" ] && cp -a "$X11_CONF" "$STAGE/99-crt.conf" 2>/dev/null || true
+[ -f "$SYS_SWITCHRES" ] && cp -a "$SYS_SWITCHRES" "$STAGE/switchres.ini" 2>/dev/null || true
+
+# 7c. Self-check (U1b): a bundle must not look OK when a decisive field is
+#     missing. Reasons are ACCUMULATED (never stop at the first), written
+#     into status.txt (zip root) and reported on stderr AFTER the bundle is
+#     packed, with a non-zero exit: the zip is still produced (it is the
+#     evidence), but the collector refuses to exit green. Reason set:
+#       - X answered an xrandr query (XRANDR FULL section present, no
+#         "not available") but diag-dump has no Transform: line;
+#       - detect-state exists with no CRT/LCD role while the reconcile log
+#         shows the reconciler ran (RECONCILE lines);
+#       - the reconcile log is empty while the daemon is running.
+_report_reasons=()
+_report_broken=0
+_report_section() { # $1 = start header, $2 = next header
+	awk -v s="$1" -v e="$2" 'index($0,s){f=1;next} f&&index($0,e){exit} f{print}' \
+		"$STAGE/diag-dump.txt" 2>/dev/null
+}
+_dump="$STAGE/diag-dump.txt"
+_x_full="$(_report_section 'XRANDR (FULL' 'XRANDR VERBOSE')"
+if [ -n "$_x_full" ] && ! printf '%s' "$_x_full" | grep -q 'not available'; then
+	grep -q 'Transform:' "$_dump" \
+		|| _report_reasons+=("X is up but diag-dump has no Transform: line (xrandr --verbose missing — the scaling truth)")
+fi
+if [ -e "$MARK_DIR/detect-state" ] \
+	&& ! grep -qE '^(CRT_OUTS|CRT_OUT)=[^[:space:]]' "$MARK_DIR/detect-state" 2>/dev/null \
+	&& grep -q 'RECONCILE' "$LOGS_DIR/display-reconcile.log" 2>/dev/null; then
+	_report_reasons+=("detect-state holds no role while the reconciler ran ($MARK_DIR/detect-state)")
+fi
+if ! [ -s "$LOGS_DIR/display-reconcile.log" ]; then
+	_v_daemons="$("$PGREP" -f 'display-reconcil[e].sh --daemon' 2>/dev/null | wc -l)"
+	[ "${_v_daemons:-0}" -ge 1 ] \
+		&& _report_reasons+=("display-reconcile.log is empty while the daemon is running ($_v_daemons process)")
+fi
+if [ "${#_report_reasons[@]}" -gt 0 ]; then
+	{ echo "STATUS: BROKEN"; printf '%s\n' "${_report_reasons[@]}"; } >"$STAGE/status.txt"
+	_report_broken=1
+else
+	echo "STATUS: OK" >"$STAGE/status.txt"
+fi
+
 # 8. Pack (python3 is guaranteed present on RGS; zip CLI is not).
 python3 - "$STAGE" "$ZIP" <<'PY'
 import os, pathlib, sys, zipfile
@@ -194,6 +267,12 @@ if [ "$rc" = "0" ] && [ -s "$ZIP" ]; then
 	echo ""
 	echo "DONE — send this single file to the developers:"
 	echo "  $ZIP  ($(wc -c <"$ZIP") bytes)"
+	if [ "$_report_broken" = "1" ]; then
+		echo "" >&2
+		echo "STATUS: BROKEN — the bundle is missing decisive fields (send it anyway):" >&2
+		for _r in "${_report_reasons[@]}"; do echo "  - $_r" >&2; done
+		exit 1
+	fi
 else
 	echo "ERROR: packaging failed (rc=$rc) — keep $OUTDIR/report-staging and report this" >&2
 	[ -d "$STAGE" ] && exit 1

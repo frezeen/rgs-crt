@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-16 — the layer follows RGS 43.63, and a problem report is collected twice as fast
+
+**Works on the current RGS.** This release is built and checked against RGS
+43.63. When RGS updates, the layer re-checks itself against the new version at
+boot or when you open the check tool, and the version it shows follows the
+RGS it was checked against.
+
+**Sending a problem report is about twice as fast.** The report you produce
+when something goes wrong gathered its pieces one after another; they are
+independent of each other, so they are now gathered together. Same report,
+same contents, roughly half the wait.
+
+**A problem report now says when it is incomplete.** The report carries a
+small status file: OK, or BROKEN with one line per decisive field that is
+missing (for instance a screen snapshot with no scaling detail). When
+something decisive is missing the tool also exits with an error, so a report
+can no longer look fine while it is not — the report itself is still
+produced.
+
+**The consistency check no longer says "all fine" while the screen is
+unmanaged.** If the layout names a screen that is not connected, or the
+program that manages the screen is not running exactly once, the check now
+fails loudly instead of reporting a clean state.
+
 ## 2026-10-16 — the layer follows RGS 43.62, and the check tool stops offering the same update twice
 
 **Works on the current RGS.** This release is built and checked against RGS

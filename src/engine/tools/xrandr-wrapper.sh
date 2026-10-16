@@ -32,10 +32,15 @@ set -uo pipefail
 # Stock binary: the immutable overlay lower (same /overlay/base* glob the
 # pre-X hook uses). xrandr.stock is the legacy backup name; if neither
 # exists, fail LOUD — exec'ing /usr/bin/xrandr here would be THIS wrapper
-# again (infinite self-exec; audit 2026-09-19).
-STOCK=""
-for _b in /overlay/base*/usr/bin/xrandr; do [ -x "$_b" ] && { STOCK="$_b"; break; }; done
-[ -n "$STOCK" ] || STOCK="/usr/bin/xrandr.stock"
+# again (infinite self-exec; audit 2026-09-19). CRT_DUAL_XRANDR_STOCK is the
+# test seam: it lets the seam suite run THIS file against a stub without
+# reaching the live X server (a hardcoded path made the pre-seam file
+# untestable off-box).
+STOCK="${CRT_DUAL_XRANDR_STOCK:-}"
+if [ -z "$STOCK" ]; then
+	for _b in /overlay/base*/usr/bin/xrandr; do [ -x "$_b" ] && { STOCK="$_b"; break; }; done
+	[ -n "$STOCK" ] || STOCK="/usr/bin/xrandr.stock"
+fi
 [ -x "$STOCK" ] || { echo "xrandr-wrapper: no stock xrandr found (overlay lower missing) — refusing to self-exec" >&2; exit 1; }
 
 # ── shared translation core (AMD gate + desktop-name rewrite + _TRANS) ──
@@ -45,30 +50,30 @@ for _b in /overlay/base*/usr/bin/xrandr; do [ -x "$_b" ] && { STOCK="$_b"; break
 # lives here only, so divergence cannot make trace-on-AMD unfaithful to
 # prod. If the shared file is missing, degrade to plain stock passthrough —
 # never a broken xrandr.
-if [ -r /userdata/system/crt-dual/src/tools/xrandr-shared.sh ]; then
+if [ -r "${CRT_DUAL_SHARED_LIB:-/userdata/system/crt-dual/src/tools/xrandr-shared.sh}" ]; then
 	# shellcheck source=/dev/null
-	source /userdata/system/crt-dual/src/tools/xrandr-shared.sh
+	source "${CRT_DUAL_SHARED_LIB:-/userdata/system/crt-dual/src/tools/xrandr-shared.sh}"
 else
 	exec "$STOCK" "$@"
 fi
 
-# ── gated FULL logging (merged instrument, 2026-08-31 owner directive) ──
-# ONE wrapper: the prod dispatch + the display-trace logging, active only
-# while /tmp/crt-dual/display-trace-on exists. Toggled by the PRE-X hook
-# when the package root has BOOT_TRACE (boot-burst debug) or manually
-# (touch/rm the marker — no CLI tool ships). Marker off = zero cost beyond
-# one [ -f ]. The logging sits BEFORE the AMD gate on purpose: the gate's
-# own failure (it returned 0 on a real AMD GPU for three days — bug found
-# 2026-08-31) is exactly the kind of behavior the instrument must see.
-if [ -f /tmp/crt-dual/display-trace-on ]; then
-	_ts=$(date '+%s.%N %H:%M:%S'); _epoch=${_ts% *}; _ht=${_ts#* }
-	_caller=$(tr '\0' ' ' <"/proc/$PPID/cmdline" 2>/dev/null); _chain=""; _last=""; _p="$PPID"
-	for _i in 1 2 3 4 5 6; do _c=$(tr '\0' ' ' <"/proc/$_p/cmdline" 2>/dev/null) || break; _t=$(printf '%s' "${_c%% *}" | sed 's#.*/##'); [ -n "$_t" ] && [ "$_t" != "$_last" ] && { _chain="${_chain:+$_chain -> }$_t"; _last="$_t"; }; _pp=$(awk '{print $4}' "/proc/$_p/stat" 2>/dev/null); [ -n "$_pp" ] && [ "$_pp" -gt 1 ] && [ "$_pp" != "$_p" ] || break; _p="$_pp"; done
-	if [[ " $* " =~ (--mode|--rate|--primary|--noprimary|--off|--newmode|--addmode|--delmode|--transform|--scale|--pos|--right-of|--left-of|--above|--below|--same-as|--rotate|--reflect|--gamma|--brightness|--fb|--size|--panning|--dpi|--set|--dryrun) ]]; then _cls=W
-	elif [[ " $* " =~ (--query|--verbose|--prop|--properties|--listmonitors|--listactivemonitors|--listproviders|--listPrimary|--listModes|--listConnectedOutputs|--currentResolution|--currentRotation) ]]; then _cls=G
-	elif [[ " $* " =~ --current ]]; then _cls=R; else _cls=G; fi
-	printf '%s %s %s PID=%s CHAIN=[%s] CALLER=[%s] ARGS=%s\n' "$_epoch" "$_cls" "$_ht" "$PPID" "$_chain" "${_caller:0:80}" "$*" >>"${CRT_DUAL_TRACE:-/tmp/crt-dual/display-trace.log}" 2>/dev/null || true
-fi
+# ── FULL logging, ALWAYS ON (U4, 2026-10-16 owner decision) ──
+# ONE wrapper: the prod dispatch + the display-trace logging. Since U4 the log
+# is UNCONDITIONAL — the 2026-08-31 marker switch is retired, because a fault
+# that only shows while a marker is armed is exactly the fault we cannot see —
+# and PERSISTENT: display-trace.log lives in the box log dir
+# (/userdata/system/logs) beside every other crt-dual log and is truncated at
+# boot by zz_rgs_15khz's TRUNCATE_LIST. The logging sits BEFORE the AMD gate on
+# purpose: the gate's own failure (it returned 0 on a real AMD GPU for three
+# days — bug found 2026-08-31) is exactly the kind of behavior the instrument
+# must see.
+_ts=$(date '+%s.%N %H:%M:%S'); _epoch=${_ts% *}; _ht=${_ts#* }
+_caller=$(tr '\0' ' ' <"/proc/$PPID/cmdline" 2>/dev/null); _chain=""; _last=""; _p="$PPID"
+for _i in 1 2 3 4 5 6; do _c=$(tr '\0' ' ' <"/proc/$_p/cmdline" 2>/dev/null) || break; _t=$(printf '%s' "${_c%% *}" | sed 's#.*/##'); [ -n "$_t" ] && [ "$_t" != "$_last" ] && { _chain="${_chain:+$_chain -> }$_t"; _last="$_t"; }; _pp=$(awk '{print $4}' "/proc/$_p/stat" 2>/dev/null); [ -n "$_pp" ] && [ "$_pp" -gt 1 ] && [ "$_pp" != "$_p" ] || break; _p="$_pp"; done
+if [[ " $* " =~ (--mode|--rate|--primary|--noprimary|--off|--newmode|--addmode|--delmode|--transform|--scale|--pos|--right-of|--left-of|--above|--below|--same-as|--rotate|--reflect|--gamma|--brightness|--fb|--size|--panning|--dpi|--set|--dryrun) ]]; then _cls=W
+elif [[ " $* " =~ (--query|--verbose|--prop|--properties|--listmonitors|--listactivemonitors|--listproviders|--listPrimary|--listModes|--listConnectedOutputs|--currentResolution|--currentRotation) ]]; then _cls=G
+elif [[ " $* " =~ --current ]]; then _cls=R; else _cls=G; fi
+printf '%s %s %s PID=%s CHAIN=[%s] CALLER=[%s] ARGS=%s\n' "$_epoch" "$_cls" "$_ht" "$PPID" "$_chain" "${_caller:0:80}" "$*" >>"${CRT_DUAL_TRACE:-/userdata/system/logs/display-trace.log}" 2>/dev/null || true
 
 # AMD gate — shared core (cached: lspci once per boot, then /tmp file;
 # per-call lspci would add ~5ms ×45 at boot). DISPLAY-CLASS RESTRICTED:

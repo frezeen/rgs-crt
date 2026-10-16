@@ -139,7 +139,7 @@ if [ -d "$PKG/src" ]; then
 	_engine_drift=""
 	for _d in "$REPO"/src/engine/*/; do
 		_b="$(basename "$_d")"
-		case "$_b" in docs|tests) continue ;; esac
+		case "$_b" in docs|dev-docs|tests) continue ;; esac
 		diff -r --exclude=overlay-manifest --exclude=backups --exclude=__pycache__ --exclude=libcrypt.so.1 \
 			"$REPO/src/engine/$_b" "$PKG/src/$_b" >/dev/null 2>&1 \
 			|| _engine_drift="$_engine_drift $_b"
@@ -841,6 +841,67 @@ if [ -s "$PKG/src/api/switchres_api.py" ]; then
 		ok "API bridge functional smoke (dummy calc) produced a modeline"
 	else
 		bad "API bridge functional smoke produced no modeline — reinstall/upgrade check needed"
+	fi
+fi
+
+# ── 9c. Live display probe (U5, INSTALLED only). verify.sh used to report
+# CLEAN while the display was broken: it never probed xrandr nor the
+# reconciler. The truth is the engine's own snapshot (`CRT_OUTS`/`CRT_OUT` in
+# detect-state), the live connection state of that CRT, and the reconcile
+# daemon count. A SKIP is legitimate (no snapshot yet, LCD-only, xrandr
+# absent); a named CRT that is NOT connected, or a reconciler that is not
+# running exactly once, is a LOUD FAIL: the live layout is unmanaged.
+# `--current`, never `--query` — no DAC re-probe, the tube never blips (the
+# wrapper translates --query, stock does not: --current is silent in both).
+# Seams: RGS15_DETECT_STATE, RGS15_PGREP, RGS15_RECONCILE_PGREP (the count's
+# own process lister, so a seam can keep the OTHER pgrep consumers mocked),
+# RGS15_RECONCILE_PROC (+ the 9a RGS15_XRANDR / RGS15_XRANDR_STOCK pair).
+if [ "$PRESENT" -gt 0 ]; then
+	_ds="${RGS15_DETECT_STATE:-/tmp/crt-dual/detect-state}"
+	_pgrep_bin="${RGS15_PGREP:-pgrep}"
+	_recon_pgrep="${RGS15_RECONCILE_PGREP:-$_pgrep_bin}"
+	_recon_proc="${RGS15_RECONCILE_PROC:-display-reconcil[e].sh --daemon}"
+	if [ ! -s "$_ds" ]; then
+		ok "display probe skipped: no engine snapshot ($_ds) — nothing to compare"
+	else
+		_crt="$(sed -n 's/^CRT_OUT=//p' "$_ds" | tail -1)"
+		if [ -z "$_crt" ]; then
+			_crt_outs="$(sed -n 's/^CRT_OUTS=//p' "$_ds" | tail -1)"
+			_crt="${_crt_outs%% *}"
+		fi
+		# Count match TREES, not processes (measured 2026-10-16 on the live
+		# box): a forked bash subshell keeps its PARENT's cmdline, so
+		# `pgrep -fc` saw the daemon AND the subshell it forks for every
+		# command substitution — the count read 2 on a healthy box and this
+		# probe failed verify.sh at random. A match whose PARENT is also a
+		# match is a child of the daemon, not another daemon; the roots of
+		# the match forest are the daemons.
+		_pids="$("$_recon_pgrep" -f "$_recon_proc" 2>/dev/null | tr '\n' ' ' || true)"
+		_daemons=0
+		if [ -n "$_pids" ]; then
+			_daemons="$(ps -o pid=,ppid= -p $_pids 2>/dev/null | awk -v m=" $_pids " '
+				{ pid[$1] = $2; seen[$1] = 1 }
+				END { c = 0; for (p in seen) if (index(m, " " pid[p] " ") == 0) c++; print c }')"
+			_daemons="${_daemons:-0}"
+		fi
+		if [ -z "$_crt" ]; then
+			ok "display probe skipped: LCD-only (no CRT named in $_ds)"
+		elif [ "$_daemons" != "1" ]; then
+			bad "display: reconcile daemon count is $_daemons (expected exactly 1 — the live layout is unmanaged, games launch on a stale mode)"
+		elif [ ! -x "$_xrandr" ]; then
+			ok "display probe skipped: xrandr not present ($_xrandr)"
+		elif ! { cmp -s "$_xrandr" "$_xrandr_stock" 2>/dev/null || grep -q 'glitch-free wrapper' "$_xrandr" 2>/dev/null; }; then
+			ok "display probe skipped: $_xrandr is neither stock nor our wrapper (9a owns the verdict)"
+		else
+			_x_current="$("$_xrandr" --current 2>/dev/null)" || _x_current=""
+			if [ -z "$_x_current" ]; then
+				ok "display probe skipped: xrandr --current returned nothing (no DISPLAY / X unreachable)"
+			elif printf '%s\n' "$_x_current" | grep -q "^${_crt} connected"; then
+				ok "display: CRT $_crt connected, one reconcile daemon"
+			else
+				bad "display: CRT $_crt named in $_ds is NOT connected ($(printf '%s\n' "$_x_current" | grep -m1 -F "$_crt " || printf 'output absent from xrandr --current'))"
+			fi
+		fi
 	fi
 fi
 
