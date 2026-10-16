@@ -2,6 +2,7 @@
 # report.sh — one-command diagnostic bundle (user-facing, exported).
 # Run from the extracted project folder after a problem is observed:
 #     ./report.sh
+#     ./report.sh --version     (print the project version; collect nothing)
 # It writes rgs-crt-report-YYYYmmdd-HHMM.zip next to itself and prints
 # the path; send that file to the developers. Everything is COPIED —
 # the script moves/resets/deletes nothing on the box (only its own
@@ -21,8 +22,7 @@
 #   verify.txt         ./verify.sh full output + exit code (the gate)
 #   logs/              our runtime logs (/userdata/system/logs/:
 #                      rgs-15khz.log <- zz service, selector-core.log <-
-#                      selector, selector.log, sr-owner.log (legacy
-#                      residue), service.log = engine writers;
+#                      selector, selector.log, service.log = engine writers;
 #                      display-reconcile.log <- the reconciler's event
 #                      narrative, gamepad-reprobe.log; display-detect.log
 #                      = engine writers) + stock (display.log,
@@ -50,6 +50,25 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
+
+# --version: print the project version — the root VERSION file is the
+# single source of truth and ships beside this script — and exit WITHOUT
+# collecting anything. Any other argument is a typo: refuse loud instead
+# of silently building a bundle the caller did not ask for.
+case "${1:-}" in
+--version)
+	if [ -s "$REPO/VERSION" ]; then
+		echo "report.sh $(cat "$REPO/VERSION")"
+	else
+		echo "ERROR: VERSION missing or empty beside report.sh ($REPO/VERSION)" >&2
+		exit 1
+	fi
+	exit 0
+	;;
+"") ;;
+*) echo "usage: report.sh [--version]" >&2; exit 2 ;;
+esac
+
 OUTDIR="${RGS15_REPORT_DIR:-$REPO}"
 LOGS_DIR="${RGS15_LOGS_DIR:-/userdata/system/logs}"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
@@ -82,7 +101,7 @@ echo "verify.sh exit code: $?" >>"$STAGE/verify.txt"
 
 # 3. Runtime logs — ours and the stock display/launch ones (full copies;
 #    missing ones are benign: some never exist before first use).
-for _f in rgs-15khz.log selector-core.log selector.log sr-owner.log \
+for _f in rgs-15khz.log selector-core.log selector.log \
 	display-reconcile.log gamepad-reprobe.log \
 	display-detect.log service.log display.log udev.log es_launch_stdout.log \
 	es_launch_stderr.log es_script_stdout.log es_script_stderr.log \

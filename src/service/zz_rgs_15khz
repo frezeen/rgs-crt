@@ -383,7 +383,7 @@ dotclock_crt_present() { # CRT-only/dual = active; LCD-only = inert.
 	# display layer's authoritative source; the ONLY one that works pre-X,
 	# where the S30z hook runs — without it the boot gate answered "no
 	# CRT" and the measured floor was never written, observed 2026-09-20),
-	# then the X-time sources (detect_outputs -> CRT_OUTS, detect-state).
+	# then the X-time sources (the detect module -> CRT_OUTS, detect-state).
 	if [ -n "${RGS15_CRT_PRESENT:-}" ]; then
 		[ "$RGS15_CRT_PRESENT" = "1" ]
 		return
@@ -392,15 +392,6 @@ dotclock_crt_present() { # CRT-only/dual = active; LCD-only = inert.
 	if [ -r "$_detect" ] && bash "$_detect" --list 2>/dev/null | grep -qE '^[^[:space:]]+[[:space:]]+analog[[:space:]]'; then
 		return 0
 	fi
-	[ -n "${CRT_OUTS:-}" ] && return 0
-	if ! command -v detect_outputs >/dev/null 2>&1; then
-		local _lib
-		for _lib in "$PKG/src/lib/gpu-lib.sh" "$PKG/src/lib/display-lib.sh"; do
-			# shellcheck disable=SC1090  # dynamic package path
-			[ -r "$_lib" ] && source "$_lib" 2>/dev/null
-		done
-	fi
-	command -v detect_outputs >/dev/null 2>&1 && detect_outputs 2>/dev/null
 	[ -n "${CRT_OUTS:-}" ] && return 0
 	local _crt
 	_crt="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
@@ -1167,6 +1158,7 @@ tool-update)
 	# in the log, no re-label: the next tool open retries it), 1 = the
 	# layer could not be certified at all.
 	_pending=0
+	_installed=0
 	log "update: checking new version"
 	_feed_line="$(feed_probe)"
 	_feed="${_feed_line%% *}"
@@ -1181,6 +1173,7 @@ tool-update)
 		if [ -n "$_src" ] && [ -f "$_get" ]; then
 			if bash "$_get" >>"$LOG" 2>&1; then
 				log "update: installed $_feed_ver"
+				_installed=1
 			else
 				_rc=$?
 				log "update: ERROR get.sh failed (rc=$_rc, $_get) — the version is NOT re-labelled"
@@ -1214,11 +1207,19 @@ tool-update)
 		echo "GREEN"
 		exit 2
 	fi
-	# Certified: our version rises to the RGS it just certified. Guarded —
-	# an unparsable live rgs.version is a loud WARN and the marker keeps
-	# the release version, never a garbage value.
+	# Certified. Two cases, kept apart on purpose:
+	#   - a release was INSTALLED this run: install.sh already wrote the
+	#     marker = the release version (at or above the live base).
+	#     Re-basing it to <base>.0 would drop it BELOW the release and
+	#     feed_probe compares the feed against this marker, so the SAME
+	#     release would be re-offered on every open (loop) — keep it.
+	#   - no release (CURRENT/OFFLINE/BLOCKED): the marker rises to the RGS
+	#     it just certified, <live base>.0. Guarded — an unparsable live
+	#     rgs.version is a loud WARN and the marker keeps its value.
 	_ver="not re-labelled"
-	if feed_is_base "$_live"; then
+	if [ "$_installed" = "1" ]; then
+		_ver="$_feed_ver (installed: the marker keeps the release version)"
+	elif feed_is_base "$_live"; then
 		_base="$(printf '%s' "$_live" | cut -d. -f1,2)"
 		# atomic (tmp + mv, same shape as deploy.sh's marker rewrite)
 		if printf '%s.0\n' "$_base" >"${PKG}.version.update.$$" 2>/dev/null \

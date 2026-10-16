@@ -67,6 +67,11 @@ bad() {
 ok() {
 	echo "  OK: $*"
 }
+# Non-fatal by design: stale residue that the boot re-derives (see
+# XRANDR-WRAPPER.md). Never sets FAIL.
+warn() {
+	echo "  WARN: $*"
+}
 have() {
 	PRESENT=$((PRESENT + 1))
 }
@@ -77,6 +82,26 @@ have() {
 
 is_registered() {
 	batocera-settings-get system.services 2>/dev/null | tr ' ' '\n' | grep -qx "$1"
+}
+
+# GPU family, re-derived from the kernel's own boot lines (the same facts
+# channel as the boot generator). Seams: RGS15_GPU_VENDOR, RGS15_DMESG_SRC.
+box_gpu_vendor() {
+	if [ -n "${RGS15_GPU_VENDOR:-}" ]; then
+		printf '%s' "$RGS15_GPU_VENDOR"
+		return
+	fi
+	local _d
+	if [ -n "${RGS15_DMESG_SRC:-}" ]; then
+		_d="$(cat "$RGS15_DMESG_SRC" 2>/dev/null || true)"
+	else
+		_d="$(dmesg 2>/dev/null || true)"
+	fi
+	case "$_d" in
+	*"Initialized i915"*) printf 'intel' ;;
+	*"kernel modesetting ("*|*"Initialized amdgpu"*) printf 'amd' ;;
+	*) printf 'nvidia' ;;
+	esac
 }
 
 # ── 0. Spec validation (repo specs AND the package copies — the package
@@ -135,11 +160,12 @@ if [ -d "$PKG/src" ]; then
 	[ -e "$REPO/src/engine/profiles" ] && bad "repo: engine demo profiles present (not part of the product)"
 	# Repo profiles must be byte-identical in the package; user-added
 	# profile folders are legitimate (documented on-box authoring) — they
-	# are validated in section 0, never drift.
+	# are validated in section 0, never drift. binaries/ is user-procured
+	# and never committed (.gitignore **/binaries/): its presence is not drift.
 	_pkg_drift=""
 	for _d in "$REPO"/src/profiles/*/; do
 		_b="$(basename "$_d")"
-		if [ ! -d "$PKG/profiles/$_b" ] || ! diff -r "$_d" "$PKG/profiles/$_b" >/dev/null 2>&1; then
+		if [ ! -d "$PKG/profiles/$_b" ] || ! diff -r -x binaries "$_d" "$PKG/profiles/$_b" >/dev/null 2>&1; then
 			_pkg_drift="$_pkg_drift $_b"
 		fi
 	done
@@ -632,20 +658,7 @@ if [ "$PRESENT" -gt 0 ]; then
 	# report): the branch below was nvidia-only, so amd/intel installs
 	# read DIRTY with the CORRECT value in place. Seam: RGS15_GPU_VENDOR
 	# (+ RGS15_DMESG_SRC); live = dmesg i915/amdgpu, default nvidia.
-	if [ -n "${RGS15_GPU_VENDOR:-}" ]; then
-		_v_gpu="$RGS15_GPU_VENDOR"
-	else
-		if [ -n "${RGS15_DMESG_SRC:-}" ]; then
-			_v_dmesg="$(cat "$RGS15_DMESG_SRC" 2>/dev/null || true)"
-		else
-			_v_dmesg="$(dmesg 2>/dev/null || true)"
-		fi
-		case "$_v_dmesg" in
-		*"Initialized i915"*) _v_gpu="intel" ;;
-		*"kernel modesetting ("*|*"Initialized amdgpu"*) _v_gpu="amd" ;;
-		*) _v_gpu="nvidia" ;;
-		esac
-	fi
+	_v_gpu="$(box_gpu_vendor)"
 	if [ "$_v_gpu" = "nvidia" ]; then
 		if [ -z "$_vo2" ]; then
 			ok "box key global.videooutput2 absent (nvidia keeps stock auto)"
@@ -692,6 +705,16 @@ for _cfg in /userdata/system/batocera.conf /userdata/system/configs/retroarch/re
 		ok "no marked blocks in $(basename "$_cfg")"
 	fi
 done
+# The master conf is read by every registered service at boot: an empty or
+# missing one takes them all down (INSTALL-LIFECYCLE, both states).
+_master="${RGS15_CONF:-/userdata/system/batocera.conf}"
+if [ ! -e "$_master" ]; then
+	bad "batocera.conf missing ($_master): every registered service fails at boot"
+elif [ ! -s "$_master" ]; then
+	bad "batocera.conf is empty ($_master): a 0-byte master breaks every registered service at boot"
+else
+	ok "batocera.conf non-empty ($_master)"
+fi
 
 # ── 8b. Conf preserved-zone invariants (measured update model). An RGS
 # update rebuilds batocera.conf keeping everything BEFORE "RGS TUNING"
@@ -740,6 +763,85 @@ if [ -f /tmp/crt-dual/profile ] || [ -f /tmp/crt-dual-mode ]; then
 	fi
 else
 	ok "no game guard (no live session)"
+fi
+
+# The boot-generated X11 conf (99-crt.conf) is absent on LCD-only boxes and
+# legitimate there; present-but-empty is a broken generation (INSTALL-LIFECYCLE).
+_x11_conf="${RGS15_X11_CONF:-/etc/X11/xorg.conf.d/99-crt.conf}"
+if [ ! -e "$_x11_conf" ]; then
+	ok "no generated X11 conf (legitimate on LCD-only): $_x11_conf"
+elif [ ! -s "$_x11_conf" ]; then
+	bad "X11 conf empty ($_x11_conf): the boot generator wrote nothing"
+else
+	ok "X11 conf present and non-empty ($_x11_conf)"
+fi
+
+# ── 9a. AMD X11 OutputClass + /usr/bin/xrandr identity (ported from the
+# orphaned src/engine/verify.sh §5b, judged loud). Seams: RGS15_X11_DIR,
+# RGS15_XRANDR, RGS15_XRANDR_STOCK, RGS15_GPU_VENDOR.
+_x11_dir="${RGS15_X11_DIR:-/etc/X11/xorg.conf.d}"
+_xrandr="${RGS15_XRANDR:-/usr/bin/xrandr}"
+_xrandr_stock="${RGS15_XRANDR_STOCK:-/overlay/base/usr/bin/xrandr}"
+_v_vendor="$(box_gpu_vendor)"
+if [ "$_v_vendor" = "amd" ]; then
+	if [ -f "$_x11_dir/20-modesetting.conf" ] &&
+		grep -q 'MatchDriver "amdgpu"' "$_x11_dir/20-modesetting.conf" &&
+		grep -q 'Driver "modesetting"' "$_x11_dir/20-modesetting.conf"; then
+		ok "20-modesetting.conf forces modesetting for amdgpu"
+	else
+		bad "20-modesetting.conf missing/incorrect — X will not start on AMD ($_x11_dir)"
+	fi
+	if [ -e "$_x11_dir/20-amdgpu.conf" ]; then
+		bad "stock 20-amdgpu.conf still present — X fails (no amdgpu xorg DDX)"
+	else
+		ok "stock 20-amdgpu.conf neutralized"
+	fi
+	if [ -f "$_x11_dir/20-amdgpu.conf.bak" ]; then
+		ok "20-amdgpu.conf.bak restore point present"
+	else
+		warn "20-amdgpu.conf.bak missing — uninstall cannot restore stock"
+	fi
+fi
+# /usr/bin/xrandr is the stock binary, our wrapper (AMD only, placed
+# volatile by the pre-X hook), or the dev trace wrapper. Anything else is a
+# foreign file replacing a stock one.
+if [ ! -f "$_xrandr_stock" ]; then
+	ok "xrandr identity unverifiable (no stock reference at $_xrandr_stock)"
+elif cmp -s "$_xrandr" "$_xrandr_stock"; then
+	ok "xrandr is STOCK"
+elif grep -q 'xrandr TRACE wrapper' "$_xrandr" 2>/dev/null; then
+	ok "xrandr is the CRT-DUAL trace wrapper (evidence logging ON, debug)"
+elif grep -q 'xrandr-wrapper.sh' "$_xrandr" 2>/dev/null || grep -q 'glitch-free wrapper' "$_xrandr" 2>/dev/null; then
+	if [ "$_v_vendor" = "amd" ]; then
+		ok "xrandr is the CRT-DUAL glitch-free wrapper (AMD, volatile, service-owned)"
+	else
+		warn "xrandr is the AMD glitch-free wrapper but GPU is $_v_vendor (stale residue, self-heals at boot)"
+	fi
+else
+	bad "/usr/bin/xrandr is neither stock nor our wrapper (foreign file: $_xrandr)"
+fi
+
+# ── 9b. Switchres API bridge ABI gate (INSTALLED only). A Batocera upgrade
+# that changes the stock libswitchres must surface HERE as FAIL, never as a
+# silent runtime misbehaviour. Pure computation (dummy calc): no display.
+if [ -s "$PKG/src/api/switchres_api.py" ]; then
+	SR_LIB="$(ls /usr/lib64/libswitchres.so.* /usr/lib/libswitchres.so.* 2>/dev/null | sort -V | tail -1)"
+	if [ -n "$SR_LIB" ]; then
+		ok "stock switchres library present ($SR_LIB)"
+	else
+		bad "stock libswitchres.so not found — the mode-setting API bridge cannot run"
+	fi
+	if SR_VERSION="$("$PKG/src/api/switchres_api.py" version 2>/dev/null)" && [ -n "$SR_VERSION" ]; then
+		ok "API bridge version probe: $SR_VERSION"
+	else
+		bad "API bridge version probe failed — library ABI drift after a Batocera upgrade? reinstall"
+	fi
+	if SR_SMOKE="$("$PKG/src/api/switchres_api.py" calc 640 480 60 --ini /etc/switchres.ini 2>/dev/null)" &&
+		printf '%s\n' "$SR_SMOKE" | grep -q '^Modeline '; then
+		ok "API bridge functional smoke (dummy calc) produced a modeline"
+	else
+		bad "API bridge functional smoke produced no modeline — reinstall/upgrade check needed"
+	fi
 fi
 
 # ── 10. Mixed installed/absent = anomaly ──

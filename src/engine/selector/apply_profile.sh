@@ -30,7 +30,6 @@ TARGET_ROOT="${CRT_DUAL_TARGET_ROOT:-/userdata/system}"
 BACKUP_ROOT="${CRT_DUAL_BACKUP_ROOT:-$PKG_ROOT/backups}"
 PROFILES_ROOT="$PKG_ROOT/profiles"
 MERGE="$PKG_ROOT/src/selector/merge.py"
-LIB="$PKG_ROOT/src/lib/display-lib.sh"
 
 [ $# -ge 1 ] || {
 	echo "usage: apply_profile.sh <profile-name> [<system>]" >&2
@@ -62,7 +61,7 @@ if ! python3 "$MERGE" apply "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT"
 	exit 2
 fi
 
-# ── 3. Display switch — thin sender over the SR-OWNER want-file (ADR 001) ──
+# ── 3. Display switch — sender to the reconciler, ADR 002 ──
 # RGS-15KHZ-EXT (single-topology pass-through, 2026-09-13): the per-launch
 # engine display work (the two-step primary/positions dance) is needed ONLY
 # in dual topology, where the stock flow cannot choose the primary. In any

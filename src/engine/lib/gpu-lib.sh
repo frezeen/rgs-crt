@@ -54,8 +54,11 @@ detect_gpu() {
 
 # Correct X name from DRM name (e.g. DVI-I-1 -> DVI-I-0)
 # REMOVED 2026-08-12 (audit finding M2): zero callers — the DRM->X
-# mapping now lives in display-lib.sh _drm_to_x (single source, both
-# directions). Kept out so the two mappings cannot diverge.
+# mapping now lives in the display-detect module
+# (src/display/display-detect.sh): _pure_x_name is the pre-X naming rule
+# (drops the [A-Z] slot, applies the per-family index offset), _x_name_of
+# matches it against the live xrandr rows. Single source, both directions.
+# Kept out so the two mappings cannot diverge.
 
 get_xorg_configs() {
 	# Generates the appropriate Xorg.conf.d files for the detected GPU.

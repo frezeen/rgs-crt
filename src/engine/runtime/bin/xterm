@@ -1,0 +1,64 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+#
+# xterm — session font wrapper (engine runtime tool, NOT a stock binary).
+#
+# WHY: the stock RGS utilities launch xterm with a FIXED point size —
+# `DISPLAY=:0.0 xterm -fs 16 -maximized -fg white -bg black -fa
+# DejaVuSansMono -e …` (e.g. /userdata/roms/rgs/rgs_upgrade.sh:16,20,25,35,
+# and rgs_crt_check's siblings). 16pt is sized for a 1080p LCD; on the
+# 640x480i tube the same size is roughly twice too large to read. `-fs` is a
+# command-line option, so it BEATS any X resource — the only in-band lever
+# is the argument itself.
+#
+# HOW: a profile prepends THIS directory to PATH for the utility session and
+# declares the size in RGS_CRT_XTERM_FS (the [runtime] section's
+# `path.prepend` + `env`; both applied IN-PROCESS, so they are session-scoped
+# and die with the launch). The bare `xterm` the stock script calls then
+# resolves here, the size is rewritten, and the REAL xterm is exec'd. No
+# stock RGS file is edited, nothing is global.
+#
+# SELF-IDENTIFICATION: invoked via PATH, $0 is the RESOLVED path (measured:
+# `PATH=dir:$PATH xterm` -> $0=/…/dir/xterm), so the real xterm is the first
+# `xterm` in PATH whose realpath is NOT this file — the wrapper can never
+# exec itself.
+set -u
+
+fs="${RGS_CRT_XTERM_FS:-}"
+self="$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")"
+
+real=""
+IFS=: read -r -a _dirs <<<"$PATH"
+for _d in "${_dirs[@]}"; do
+	[ -n "$_d" ] || continue
+	_c="$_d/xterm"
+	[ -x "$_c" ] || continue
+	_r="$(readlink -f -- "$_c" 2>/dev/null || printf '%s' "$_c")"
+	[ "$_r" = "$self" ] && continue # that is us — never recurse
+	real="$_c"
+	break
+done
+if [ -z "$real" ]; then
+	echo "xterm(wrapper): real xterm not found on PATH" >&2
+	exit 127
+fi
+
+# No size requested -> pass everything through untouched (stock behavior).
+if [ -z "$fs" ]; then
+	exec "$real" "$@"
+fi
+
+# Rewrite only the value of -fs, keeping every other argument verbatim.
+args=()
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "-fs" ] && [ "$#" -ge 2 ]; then
+		args+=("-fs" "$fs")
+		shift 2
+	else
+		args+=("$1")
+		shift
+	fi
+done
+exec "$real" "${args[@]}"

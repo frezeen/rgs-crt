@@ -98,7 +98,7 @@ for _f in "${TRACKED_FILES[@]}" $OPT_GLOB; do
 done
 
 # ── 3. Stale runtime state (a boot must start clean) ──
-for _s in crt-dual-mode crt-dual-profile crt-dual-probe-ok; do
+for _s in crt-dual-mode crt-dual-profile; do
 	if [ -f "$STATE_ROOT/$_s" ]; then
 		rm -f "$STATE_ROOT/$_s" || true # best-effort; absence is the clean state
 		echo "CRT-DUAL-CRASH-CLEAN: removed stale state $STATE_ROOT/$_s"

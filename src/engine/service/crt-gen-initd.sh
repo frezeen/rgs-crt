@@ -17,7 +17,7 @@
 # zero drift by construction.
 #
 # Pre-X safety of the generator (verified): DISPLAY unset ->
-# detect_outputs uses the sysfs path (disconnected analogs land in
+# the detect module reads the sysfs path (disconnected analogs land in
 # CRT_PRESUMED -> crt_all includes them -> their Monitor sections +
 # 480i modelines are emitted); modelines come from the switchres API
 # dummy-screen calc (no X needed); structural validation is file-only.

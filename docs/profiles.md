@@ -62,6 +62,12 @@ rewritten for the session and restored afterwards, byte for byte.
 A profile may also put a missing program file back where the program
 expects it (the tube profile repairs the MSX emulator's font folder this
 way); that one is kept, not undone, because the file belongs there.
+For the rare need that is none of those, a profile can run a **small
+command** when the game starts and its declared undo when the game ends
+— both halves are mandatory, so a change that cannot be undone is
+rejected before it ever ships. The same section can also hand the game
+extra environment entries (a variable, a folder searched for programs)
+that only that game's launch ever sees.
 
 ## How many profiles can you have
 

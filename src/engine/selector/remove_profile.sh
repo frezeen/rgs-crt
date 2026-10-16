@@ -24,7 +24,6 @@ TARGET_ROOT="${CRT_DUAL_TARGET_ROOT:-/userdata/system}"
 BACKUP_ROOT="${CRT_DUAL_BACKUP_ROOT:-$PKG_ROOT/backups}"
 PROFILES_ROOT="$PKG_ROOT/profiles"
 MERGE="$PKG_ROOT/src/selector/merge.py"
-LIB="$PKG_ROOT/src/lib/display-lib.sh"
 
 [ $# -ge 1 ] || {
 	echo "usage: remove_profile.sh <profile-name> [<system>]" >&2

@@ -175,7 +175,8 @@ with — a green `verify.sh` is the definition of "this system is fine".
 
 When something needs reporting to the developers, `./report.sh` (the
 companion next to these three) bundles every log they need into one
-zip — the project README explains the two-minute flow.
+zip — the project README explains the two-minute flow. `./report.sh
+--version` prints the version of the collector and collects nothing.
 
 ## Removing
 

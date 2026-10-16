@@ -16,6 +16,11 @@ by apply_profile.sh / remove_profile.sh. Parses a profile spec and:
   - swaps/restores profile binaries (symlink over the stock binary,
     overlay-safe pattern: the stock binary is the immutable overlay
     lower, so a symlink + rm restores stock with zero copy)
+  - runs/restores [runtime] command pairs (RGS-15KHZ-EXT: the generic
+    session-scoped "execute/undo" class — a profile runs a shell command
+    at gameStart and its declared undo at gameStop when the need is NOT
+    a key, a file or a binary; plus in-process env/path.prepend, whose
+    marker sitecustomize applies in the configgen process)
 
 Stock files are NEVER touched outside our keypatched keys / provided
 file; everything else in the file is preserved byte-for-byte .
@@ -51,7 +56,7 @@ class SpecError(Exception):
 # plus the path/extension rule below.
 _KNOWN_SECTIONS = frozenset((
     "display", "batocera", "batocera.conf", "config.files",
-    "configs", "binaries", "patches",
+    "configs", "binaries", "patches", "runtime",
 ))
 
 # Duplicate batocera key precedence: least -> most specific. The runtime
@@ -64,7 +69,7 @@ def _is_section_header(header: str) -> bool:
     """True = a FILE section, False = a SYSTEM BLOCK ([global], [mame]).
 
     File sections are the known names ([display], [batocera.conf],
-    [config.files], [binaries], [configs], [patches]), the legacy
+    [config.files], [binaries], [configs], [patches], [runtime]), the legacy
     per-emulator [patches.<emu>], the key-injection [configs/<path>], and
     any header carrying a path/extension (a generator file like
     [mameGenerator.py], a bare target file like [mame.ini]) — a system
@@ -93,13 +98,16 @@ def parse_spec(profile_dir: Path):
     patches: dict key -> value (RAM patches the profile activates, [patches])
     keypatch: dict target_path -> list[(block, key_line)] (RGS-15KHZ-EXT:
         [keypatch/<path>] sections — per-key live patch with restore)
+    runtime: {"cmds": id -> {apply|undo: cmd}, "env": [NAME=value, ...],
+        "prepend": [dir, ...]} (RGS-15KHZ-EXT: [runtime] section — the
+        session-scoped execute/undo class + in-process env entries)
 
     Block syntax: a profile
     is grouped in SYSTEM blocks `[mame]` / `[snes]` (applied ONLY when a
     game of that system starts) plus a `[global]` block (applied on
     every launch). Inside a block, the sections are named after the FILE
     they modify: [batocera.conf], [mameGenerator.py], [config.files],
-    [keypatch/<path>], [binaries]. Both blocks and sections use [..] (so
+    [keypatch/<path>], [binaries], [runtime]. Both blocks and sections use [..] (so
     Notepad++ INI coloring colors them all); the parser disambiguates: an
     unknown header is a SYSTEM BLOCK, a known file-section name is a
     section (_is_section_header). The parser QUALIFIES every key with the
@@ -126,6 +134,7 @@ def parse_spec(profile_dir: Path):
     configs = {}            # full-file configs: profile_rel_file -> target
     binaries = {}           # binary swap: profile_rel_binary -> target
     keypatch = {}           # RGS-15KHZ-EXT: per-key live patch: target -> [(block, line)]
+    runtime = {"cmds": {}, "env": [], "prepend": []}  # RGS-15KHZ-EXT: [runtime]
     blocks = set()          # blocks declared ([mame], [global], [system.mame]...)
     block_of = {}           # section -> block it belongs to (runtime filter)
     block_type = {}         # block name -> match kind: always/system/emulator/core
@@ -137,6 +146,7 @@ def parse_spec(profile_dir: Path):
     in_configs = False
     in_binaries = False
     in_keypatch = False     # RGS-15KHZ-EXT
+    in_runtime = False     # RGS-15KHZ-EXT ([runtime] section)
     patches_prefix = ""
 
     def _key(k: str) -> str:
@@ -165,7 +175,7 @@ def parse_spec(profile_dir: Path):
             blocks.add(block)
             block_type.setdefault(block, "global" if block == "global" else "system")
             current_keypatch = None
-            in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = False
+            in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = in_runtime = False
             patches_prefix = ""
             continue
         if stripped.startswith("[") and stripped.endswith("]"):
@@ -192,7 +202,7 @@ def parse_spec(profile_dir: Path):
                     block_type.setdefault(block, "global" if block == "global" else "system")
                 blocks.add(block)
                 current_keypatch = None
-                in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = False
+                in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = in_runtime = False
                 patches_prefix = ""
                 continue
             in_display = header == "display"
@@ -201,15 +211,16 @@ def parse_spec(profile_dir: Path):
             in_configs = header in ("configs", "config.files")
             in_binaries = header == "binaries"
             in_keypatch = header.startswith("keypatch/")
+            in_runtime = header == "runtime"
             patches_prefix = ""
             if header.startswith("patches."):
                 # per-emulator patch section: [patches.mame] -> the
                 # emulator name is prepended to every key inside, so the
                 # marker stays flat (mame.cli.drop=-sound) and the RAM
-                # patcher is unchanged. docs/PROFILES.md §1 [patches].
+                # patcher is unchanged. src/engine/dev-docs/PROFILES.md §1 [patches].
                 in_patches = True
                 patches_prefix = header[len("patches."):].strip() + "."
-            if header in ("display", "configs", "binaries", "batocera", "batocera.conf", "patches") or in_patches or in_configs or in_binaries or in_keypatch:
+            if header in ("display", "configs", "binaries", "batocera", "batocera.conf", "patches", "runtime") or in_patches or in_configs or in_binaries or in_keypatch or in_runtime:
                 current_keypatch = None
                 if in_keypatch:
                     # RGS-15KHZ-EXT: the block is stored per entry (targets
@@ -278,6 +289,29 @@ def parse_spec(profile_dir: Path):
             if key:
                 binaries[key] = value
             continue
+        if in_runtime:
+            # RGS-15KHZ-EXT (runtime section): the session execute/undo
+            # class. <id>.apply/<id>.undo form ONE mandatory pair per id
+            # (the pairing gate lives in do_validate — spec errors never
+            # reach gameStart); env/path.prepend accumulate IN ORDER (the
+            # marker is applied in-process by sitecustomize — an env
+            # change inside the gameStart subprocess never reaches the
+            # game, configgen/emulatorlauncher.py:417).
+            if key == "env":
+                runtime["env"].append(value)
+            elif key == "path.prepend":
+                runtime["prepend"].append(value)
+            elif key.endswith((".apply", ".undo")):
+                op = key.rsplit(".", 1)[1]
+                rid = key[: -len(op) - 1]
+                if not rid:
+                    raise SpecError(f"[runtime] command id missing: '{key} = {value}'")
+                runtime["cmds"].setdefault(rid, {})[op] = value
+            else:
+                raise SpecError(
+                    f"[runtime] unknown key '{key}' (want <id>.apply/<id>.undo "
+                    "pairs, env = NAME=value, path.prepend = <dir>)")
+            continue
         if in_keypatch:
             # RGS-15KHZ-EXT: block stored per entry (targets unique).
             if key and current_keypatch:
@@ -291,7 +325,8 @@ def parse_spec(profile_dir: Path):
         # leniency for top-level label/description placement — not extended).
         continue
     return (label, desc, display_target, batocera, patches,
-            configs, binaries, blocks, block_of, block_type, keypatch)
+            configs, binaries, blocks, block_of, block_type, keypatch,
+            runtime)
 
 
 def parse_mappings(profile_dir: Path):
@@ -1020,6 +1055,116 @@ def restore_binaries(profile_dir: Path, binaries: dict, target_root: Path,
 
 
 # ──────────────────────────────────────────────────────────────
+# [runtime] section (RGS-15KHZ-EXT, runtime capability): the session-scoped
+# "execute/undo" class for profile needs that are NOT a key, a file or a
+# binary (profile-discipline 3 — the standing generic-[runtime] candidate).
+# Two op families:
+#   <id>.apply / <id>.undo  shell commands run at gameStart / gameStop
+#                           (/bin/sh -c in the hook's root context;
+#                           warn-not-fail, apply_profile.sh:87 style);
+#   env / path.prepend      applied IN-PROCESS in the configgen process —
+#                           the gameStart hook is a subprocess.call child
+#                           (configgen/emulatorlauncher.py:407-417) and the
+#                           game env is rebuilt from the CONFIGGEN process
+#                           os.environ (emulatorlauncher.py:585-587, Popen
+#                           596), so an env change inside the hook never
+#                           reaches the game. merge.py only WRITES the
+#                           marker (/tmp/crt-dual/runtime-env, read by
+#                           sitecustomize after the gameStart hooks).
+# Crash-safety mirrors configs/binaries: a successful apply records
+# `<id>.applied` under <backup_root>/<name>/runtime/; the next apply's
+# pre-clean and the remove run the recorded id's undo in REVERSE
+# declaration order and consume the record. env/path.prepend are
+# in-process only (they die with the per-launch configgen process) — the
+# marker file is their whole state, removed at gameStop.
+# ──────────────────────────────────────────────────────────────
+RUNTIME_ENV_STATE = "/tmp/crt-dual/runtime-env"
+
+
+def _runtime_record(backup_root, name: str, rid: str) -> Path:
+    # Path ONLY: the WRITER (apply_runtime) creates the parent. A read
+    # (undo_runtime) must never have a directory-creation side effect.
+    return Path(backup_root) / name / "runtime" / f"{rid}.applied"
+
+
+def _run_runtime_cmd(rid: str, verb: str, cmd: str) -> int | None:
+    """Run one [runtime] command (/bin/sh -c). Output is captured and
+    reported; a non-zero exit WARNs and never breaks the launch (mirror
+    of the display hand-over style, apply_profile.sh:87). Returns the
+    exit code, or None when the command could not be started at all."""
+    try:
+        proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
+                              text=True, errors="replace")
+    except OSError as e:
+        print(f"  WARN: runtime {verb} {rid}: cannot run: {e}")
+        return None
+    for stream in (proc.stdout, proc.stderr):
+        for line in (stream or "").splitlines():
+            print(f"    runtime {rid}: {line}")
+    if proc.returncode != 0:
+        print(f"  WARN: runtime {verb} {rid} exited {proc.returncode} (continuing)")
+    return proc.returncode
+
+
+def apply_runtime(cmds: dict, backup_root, name: str) -> None:
+    """Run every filtered `<id>.apply` in DECLARATION order; a successful
+    run (exit 0) records `<id>.applied` so the undo is crash-safe."""
+    for rid, ops in cmds.items():
+        cmd = ops.get("apply")
+        if not cmd:
+            continue  # undo-only id — the pairing gate is do_validate's
+        print(f"  runtime: {rid} apply")
+        if _run_runtime_cmd(rid, "apply", cmd) == 0:
+            rec = _runtime_record(backup_root, name, rid)
+            rec.parent.mkdir(parents=True, exist_ok=True)
+            rec.touch()
+        else:
+            print(f"  WARN: runtime {rid} not recorded (apply failed — its undo will not fire)")
+
+
+def undo_runtime(cmds: dict, backup_root, name: str) -> None:
+    """Run the undo of every id carrying an `.applied` record, in REVERSE
+    declaration order, and consume the record. The record is the truth:
+    an id with no record was never applied — its undo never runs (skips
+    cleanly on a crash-clean re-run, like restore_configs)."""
+    for rid, ops in reversed(cmds.items()):
+        rec = _runtime_record(backup_root, name, rid)
+        if not rec.exists():
+            continue  # never applied — nothing to undo
+        cmd = ops.get("undo")
+        if cmd:
+            print(f"  runtime: {rid} undo")
+            _run_runtime_cmd(rid, "undo", cmd)
+        else:
+            # pairing is a do_validate gate — this is the loud fallback
+            # for a spec that reached the box without passing validate.
+            print(f"  WARN: runtime {rid}: .applied record without an undo command")
+        rec.unlink(missing_ok=True)
+
+
+def apply_runtime_env(name: str, envs: list, prepends: list) -> None:
+    """Write the in-process env marker sitecustomize reads (profile
+    header + `env NAME=value` + `prepend <dir>` lines, in declaration
+    order). An EMPTY filtered set removes a stale marker instead: no
+    entries = stock env (a crash-stranded marker must not leak)."""
+    p = Path(RUNTIME_ENV_STATE)
+    if not envs and not prepends:
+        p.unlink(missing_ok=True)
+        return
+    lines = [f"profile={name}"]
+    lines += [f"env {e}" for e in envs]
+    lines += [f"prepend {d}" for d in prepends]
+    atomic_write(p, "\n".join(lines) + "\n")
+    print(f"  runtime-env: {len(envs)} env, {len(prepends)} prepend -> {p}")
+
+
+def restore_runtime_env() -> None:
+    """Remove the in-process env marker at gameStop (next launch =
+    stock; the env itself dies with the configgen process)."""
+    Path(RUNTIME_ENV_STATE).unlink(missing_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
 # Apply / remove / validate
 # ──────────────────────────────────────────────────────────────
 PATCH_STATE = "/tmp/crt-dual/patches"
@@ -1238,7 +1383,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
-    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
 
     # per-system filter (block syntax): apply only the launched system's
     # block (+ always + legacy). system=None -> everything (validate path).
@@ -1254,6 +1399,11 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     patches = _filter_for_system(patches, system, block_of, "mameGenerator.py", blocks, emulator, core, block_type)
     configs = _filter_for_system(configs, system, block_of, "config.files", blocks, emulator, core, block_type)
     binaries = _filter_for_system(binaries, system, block_of, "binaries", blocks, emulator, core, block_type)
+    # RGS-15KHZ-EXT (runtime section): the WHOLE [runtime] section belongs
+    # to one block (block_of is per section name, like [binaries]), so one
+    # _filter_for_system call scopes the commands AND the env/prepend
+    # entries together ({} = block mismatch = stock behavior).
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, emulator, core, block_type)
 
     # pre-clean (crash level 1): half-provided files from a previous
     # session that ended without gameStop. Idempotent, no-op when clean —
@@ -1261,12 +1411,23 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     # before applying fresh.
     restore_configs(profile_dir, configs, target_root, backup_root, name)
     restore_binaries(profile_dir, binaries, target_root, backup_root, name)
+    # RGS-15KHZ-EXT (runtime section): the DECLARED ids are pre-cleaned,
+    # not the filtered ones — an .applied record is the truth that the
+    # command ran once, so even a record stranded by a changed block
+    # match gets its undo before the fresh apply (self-healing; the
+    # remove path filters, its records were created by a matching apply).
+    undo_runtime(runtime.get("cmds", {}), backup_root, name)
 
     # provide full configs + swap binaries + batocera keys + RAM patches
     provide_configs(profile_dir, configs, target_root, backup_root, name)
     swap_binaries(profile_dir, binaries, target_root, backup_root, name)
     apply_batocera(batocera, backup_root, name)
     apply_patches(patches)
+    # RGS-15KHZ-EXT (runtime section): command ops in declaration order,
+    # then the in-process env marker (its own state: no archive, the
+    # configgen process is per launch — sitecustomize applies it).
+    apply_runtime(runtime_f.get("cmds", {}), backup_root, name)
+    apply_runtime_env(name, runtime_f.get("env", []), runtime_f.get("prepend", []))
     # RGS-15KHZ-EXT (post-pin resolve): configgen resolves AT LAUNCH, AFTER
     # this apply's own keys landed (the [mame] block pins mame.emulator=mame).
     # The runtime consumers must match the launch that will actually run,
@@ -1284,7 +1445,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
-    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
 
     # per-system filter (mirror of do_apply): with the launched system
     # (gameStop passes it — first_script.sh remove_profile "$2"), only the
@@ -1304,6 +1465,14 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     restore_batocera(batocera, backup_root, name, remove_missing=bool(system))
     restore_patches(patches)
     _em, _co = (emulator, core) if system else (None, None)
+    # RGS-15KHZ-EXT (runtime section): same judge as do_apply (the
+    # resolve-record lesson), then undo the recorded ids in REVERSE
+    # declaration order and drop the in-process env marker (the env dies
+    # with the configgen process — the marker must not outlive the
+    # session).
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, _em, _co, block_type)
+    undo_runtime(runtime_f.get("cmds", {}), backup_root, name)
+    restore_runtime_env()
     restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co),
                      target_root, backup_root, name)
     # RGS-15KHZ-EXT (genconfig-archive): the SAME patches filter as
@@ -1354,12 +1523,22 @@ def _validate_rasters(batocera: dict):
 
 def do_validate(profile_dir: Path, name: str, target_root: Path):
     """Static spec validation — called at install/verify, NEVER at gameStart."""
-    label, _desc, display_target, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch = parse_spec(profile_dir)
+    label, _desc, display_target, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
     if not label:
         raise SpecError("spec has no label")
     if display_target not in ("crt", "lcd"):
         raise SpecError(f"invalid [display] target: {display_target}")
     _validate_rasters(batocera)
+    # RGS-15KHZ-EXT (runtime section): undo is MANDATORY — an <id> with
+    # .apply but no .undo (or vice versa) is a design error
+    # (profile-discipline 9) and fails HERE, at install/verify, never at
+    # gameStart (profile-discipline 4).
+    for rid, ops in runtime.get("cmds", {}).items():
+        if not ops.get("apply") or not ops.get("undo"):
+            raise SpecError(
+                f"[runtime] '{rid}': <id>.apply and <id>.undo are both "
+                "required (undo is mandatory — a change that cannot be "
+                "undone is a design error)")
     configs, binaries = parse_mappings(profile_dir)
     for rel in configs:
         if not (profile_dir / "configs" / rel).is_file():

@@ -51,6 +51,53 @@ def _active_profile() -> str:
     return ''
 
 
+# ──────────────────────────────────────────────────────────────
+# [runtime] env marker (RGS-15KHZ-EXT, runtime capability): in-process
+# application of a profile's `env = NAME=value` / `path.prepend = <dir>`
+# entries. The gameStart hook is a subprocess.call child
+# (configgen/emulatorlauncher.py:407-417) and the game environment is
+# rebuilt from the CONFIGGEN process os.environ (emulatorlauncher.py:
+# 585-587, Popen 596) — so an env/PATH change inside the hook never
+# reaches the game, while an in-process write here DOES. merge.py writes
+# this marker at gameStart (after its apply ran inside the hook) and
+# removes it at gameStop; the read happens AFTER the hoisted gameStart
+# calls and BEFORE orig_start_rom builds the game environment. Naturally
+# session-scoped: the configgen process is per launch, so the env dies
+# with it (reversible by construction, profile-discipline 9).
+# ──────────────────────────────────────────────────────────────
+RUNTIME_ENV_STATE = Path('/tmp/crt-dual/runtime-env')
+
+
+def _apply_runtime_env() -> None:
+    """Apply the [runtime] env marker IN-PROCESS: `env NAME=value` lines
+    into os.environ, `prepend <dir>` at the front of PATH — only when the
+    marker's line-1 `profile=` header matches the active profile.
+    Never raises: a missing or garbled marker is stock behavior."""
+    try:
+        active = _active_profile()
+        if not active or not RUNTIME_ENV_STATE.is_file():
+            return
+        lines = RUNTIME_ENV_STATE.read_text(errors="replace").splitlines()
+        if not lines or not lines[0].startswith("profile="):
+            _log.warning("crt-dual: runtime-env marker malformed (%s) — skipped", RUNTIME_ENV_STATE)
+            return
+        if lines[0][len("profile="):].strip() != active:
+            _log.warning("crt-dual: runtime-env marker profile mismatch (%s vs %s) — skipped",
+                         lines[0], active)
+            return
+        for line in lines[1:]:
+            if line.startswith("env "):
+                key, sep, val = line[len("env "):].partition("=")
+                if sep and key.strip():
+                    os.environ[key.strip()] = val
+            elif line.startswith("prepend "):
+                d = line[len("prepend "):].strip()
+                if d and d not in os.environ.get('PATH', '').split(os.pathsep):
+                    os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
+    except Exception as e:  # patch-discipline: never break a launch
+        _log.warning("crt-dual: runtime-env apply failed (%s): %s", RUNTIME_ENV_STATE, e)
+
+
 # ──────────────────────────────────────────────
 # PATCH: emulatorlauncher — gameStart BEFORE the emulator is resolved
 # ──────────────────────────────────────────────
@@ -98,6 +145,13 @@ def _patch_emulatorlauncher(module):
         _orig_ces(_user_scripts, "gameStart", [system_name, "", "", original_rom])
         _gs_ran[0] = True
         module.callExternalScripts = _patched_ces
+        # RGS-15KHZ-EXT (runtime env marker): AFTER the gameStart hooks
+        # (they ran merge.py apply, which wrote /tmp/crt-dual/runtime-env)
+        # and BEFORE the game env is rebuilt from this process's os.environ
+        # (configgen/emulatorlauncher.py:585-587, Popen 596) — in-process
+        # is the only channel env/PATH can reach the game through (the hook
+        # is a subprocess.call child, emulatorlauncher.py:407-417).
+        _apply_runtime_env()
         try:
             return orig_start_rom(args, maxnbplayers, rom, original_rom)
         finally:
@@ -109,7 +163,7 @@ def _patch_emulatorlauncher(module):
     return True
 
 
-# GENERIC profile-driven patch engine ( / docs/PROFILES.md)
+# GENERIC profile-driven patch engine ( / src/engine/dev-docs/PROFILES.md)
 # ──────────────────────────────────────────────
 # The universal system: the PROFILE declares WHAT to touch in its [patches]
 # spec section, the ENGINE writes the marker (/tmp/crt-dual/patches), and

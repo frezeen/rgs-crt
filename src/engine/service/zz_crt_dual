@@ -57,10 +57,10 @@ set -uo pipefail
 		echo "=== CRT-DUAL BOOT SERVICE (minimal) — $(date) ==="
 
 		# Libs from the package (installed by install.sh).
-		for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh" "$PKG_ROOT/src/lib/display-lib.sh"; do
+		for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh"; do
 			[ -r "$_lib" ] && source "$_lib" 2>/dev/null || true # libs may be missing on a broken install; boot must continue
 		done
-		# Classification vars must exist even if detect_outputs never runs
+		# Classification vars must exist even if the detect module never ran
 		# (broken install, X down): set -u makes an unset var an error.
 		CRT_OUTS="${CRT_OUTS:-}"
 		CRT_PRESUMED_OUTS="${CRT_PRESUMED_OUTS:-}"
@@ -104,7 +104,6 @@ set -uo pipefail
 			xrandr --current 2>/dev/null | grep -q " connected" && break
 			sleep 2
 		done
-		detect_outputs 2>/dev/null || true
 		echo "  Outputs — CRT confirmed: ${CRT_OUTS:-none} | presumed: ${CRT_PRESUMED_OUTS:-none} | LCD: ${LCD_OUTS:-none}"
 
 		# ── Boot layout — EARLY (before the generator + overlay save) ──
@@ -116,10 +115,12 @@ set -uo pipefail
 		# state (LCD native + CRT dark). Previously the apply ran AFTER the
 		# generator + batocera-save-overlay (a 61MB image save — many seconds),
 		# leaving a ~10-20s broken window. The watcher's first pass then only
-		# verifies (it accepts any 15kHz-class CRT active mode — layout-watch
-		# canonicalization). Re-detect here collects a probe promotion first.
-		crt_probe 2>/dev/null || true
-		detect_outputs 2>/dev/null || true
+		# verifies (it accepts any 15kHz-class CRT active mode — layout-watch <!-- historical -->
+		# canonicalization). <!-- historical -->
+		# The probe re-detect that ran here (crt_probe + detect_outputs) was
+		# REMOVED: neither function exists on disk any more — ADR-002 gave the
+		# classification to display-detect.sh, which the reconciler call below
+		# reads on its own.
 		# Box keys (es.resolution + global.videomode) are install-owned and
 		# permanently "auto" (2026-09-14, AMD R9 270X, two verbose-proven
 		# boots: with auto the standalone ES picks 640x480i *current on the

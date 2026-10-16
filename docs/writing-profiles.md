@@ -229,6 +229,43 @@ Advanced: the shipped tube profile uses this key for the systems it
 has measured (the compatibility map shows which ones) — reach for it
 for another system only after you have measured it yourself.
 
+### 7. A command pair for the session — `[runtime]`
+
+For example, adjusting a helper program's font size while you play
+(hypothetical — a recipe, not a shipped profile):
+
+```
+[+rgs]
+[runtime]
+font.apply = sed -i 's/-fs 16/-fs 10/' /userdata/system/crt-dual/session/xterm.args
+font.undo = sed -i 's/-fs 10/-fs 16/' /userdata/system/crt-dual/session/xterm.args
+env = RGS_CRT_XTERM_FS=10
+path.prepend = /userdata/system/crt-dual/src/runtime/bin
+```
+
+The section belongs to the block above it, and that block is the system's
+identifier written exactly as the menu names it — here `+rgs` (the stock
+utility menu), not `rgs`. A block naming a system that does not exist is
+accepted and simply never applies, so take the name from your emulator's
+system list rather than from the folder you think it is.
+
+This is the **last resort** of the toolbox: reach for it only when the
+need is not a setting (1), a line in a settings file (2), a whole file
+(3), a program (4) or a launch option (5). `<id>.apply` runs at game
+start, its `<id>.undo` runs at game exit in reverse order, with the
+same rights the launcher itself has. **Both halves are mandatory:**
+`./verify.sh` rejects a profile whose command has no undo — a change
+that cannot be undone is a design error, not a profile.
+
+`env` and `path.prepend` hand the game itself extra environment entries
+(a variable, a folder searched for programs) for that one launch. They
+must be declared this way and never faked inside a command: the
+launcher only passes its own environment to the game, so the entries
+are planted in the launcher's own process and die with it — gone by
+construction, nothing to undo. One `[runtime]` section per block, like
+the binaries above. A command that fails logs a warning and the game
+runs anyway; its undo still fires at exit.
+
 ## Recipes that do the rounds
 
 **"Give my arcade games the real MAME":** the `[mame]` block of the

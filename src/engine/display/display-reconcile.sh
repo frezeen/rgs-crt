@@ -33,23 +33,24 @@ _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 
 _session_active() { [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; }
 
-# ── Deadlock breaker probes (root cause, measured 2026-10-10) ────────────
+# ── Deadlock breaker probes (root cause, measured 2026-10-10/11) ─────────
 # emulatorlauncher (ES's child, one per session) returns only when it sees
-# EOF on the game's stdout/stderr pipes. When the game's gamescope dies, the
-# processes UNDER it — gamescopereaper and the winedevice workers — are
-# reparented to init and SURVIVE, still holding the write ends. Proven from
-# the fd table: emulatorlauncher held pipe:[180915] read; gamescopereaper
-# held that same pipe write. EOF never arrives, emulatorlauncher never
-# returns, ES never runs gameStop, and the guard stays up for good: the dual
-# never returns and the frontend never reappears.
+# EOF on the game's stdout/stderr pipes. When the game's renderer dies, the
+# processes UNDER it — gamescopereaper, the winedevice workers, the game
+# itself — are reparented to init and SURVIVE, still holding the write ends.
+# Proven from the fd table: emulatorlauncher held pipe:[180915] read; a
+# wrapper held that same pipe write. EOF never arrives, emulatorlauncher
+# never returns, ES never runs gameStop, and the guard stays up for good.
 #
-# The signature is ORPHANHOOD, not an emulator list: "my parent is dead and
-# I am not" (PPID 1) while emulatorlauncher still waits is exactly this
-# deadlock, and it says nothing about which emulator ran — so it does not
-# rot as emulators are added.
+# The trigger is a CLOSED GAME, and the only honest signal for that is the
+# WINDOW (_game_alive): process signals cannot separate a running game from
+# a closed one (a wine session keeps a live launch stub AND reparents its
+# daemons for the WHOLE game — measured 2026-10-11). The close, once
+# decided, is the pipe-writer set (_pipe_writers), read from the fd table,
+# never from a process name.
 #
-# Both probes are seamed so the breaker's LOGIC is testable without real
-# orphans (the house style: seams for live paths).
+# Both probes are seamed so the breaker's LOGIC is testable without a live
+# game (the house style: seams for live paths).
 _emu_alive() { # rc 0 while the session's emulatorlauncher waits
 	if [ -n "${CRT_DUAL_EMU_ALIVE_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_EMU_ALIVE_CMD"
@@ -62,49 +63,97 @@ _emu_alive() { # rc 0 while the session's emulatorlauncher waits
 	# the box's own batocera-es-swissknife uses (check_emurun).
 	pgrep -f -n emulatorlauncher >/dev/null 2>&1
 }
-_dead_orphans() { # pids of orphaned pipe-holders, one per line
-	if [ -n "${CRT_DUAL_ORPHANS_CMD:-}" ]; then
-		bash -c "$CRT_DUAL_ORPHANS_CMD"
+_pipe_writers() { # $@ = launcher pids -> who holds a WRITE end of a pipe the launcher READS
+	if [ -n "${CRT_DUAL_PIPEWRITERS_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_PIPEWRITERS_CMD"
 		return 0
 	fi
-	ps -eo pid=,ppid=,comm= 2>/dev/null \
-		| awk '$2=="1" && $3 ~ /^(gamescope|gamescopereaper|wine|winedevice|wineserver|xenia)/ {print $1}'
+	# Who keeps emulatorlauncher from seeing EOF is decided by the fd table,
+	# not by a process name or an orphan list: every process holding a WRITE
+	# end of a pipe the launcher has open for READING is a blocker (measured
+	# 2026-10-11, Candy Crush wedge: 13 holders — wine daemons, the launch
+	# stub and the game — of which the retired PPID-1 wine-name probe named
+	# only 3, so killing it never closed the pipes).
+	#
+	# ONE `ls` over every fd table, parsed by awk (measured 2026-10-12: the
+	# per-fd fork loop cost 2.6 s — it forked once per fd of every process —
+	# and the breaker paid it on the RECOVERY path, which is the latency the
+	# owner sees; the single pass is 0.013 s, the same answer).
+	local _emu _inodes="" _skip="" _emu_r
+	for _emu in "$@"; do
+		_emu_r="$(ls -l "/proc/$_emu/fd" 2>/dev/null \
+			| sed -n 's/.*pipe:\[\([0-9]\{1,\}\)\].*/\1/p' | tr '\n' ' ')"
+		_inodes="$_inodes $_emu_r"
+		_skip="$_skip $_emu "
+	done
+	_inodes="$(printf '%s' "$_inodes" | tr -s ' ')"
+	[ -n "${_inodes// /}" ] || return 0
+	ls -l /proc/[0-9]*/fd 2>/dev/null | awk -v want=" $_inodes " -v skip="$_skip" '
+		/^\/proc\/[0-9]+\/fd:$/ { n = split($0, a, "/"); pid = a[3]; next }
+		/^l-w/ && / -> pipe:\[/ {
+			if (index(skip, " " pid " ") > 0) next
+			if (!match($0, /pipe:\[[0-9]+\]/)) next
+			ino = substr($0, RSTART + 6, RLENGTH - 7)
+			if (index(want, " " ino " ") > 0 && !seen[pid]++) print pid
+		}' | sort -un
 }
-_game_alive() { # rc 0 while the session's GAME runs (not merely its launcher)
+_game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES window)
 	if [ -n "${CRT_DUAL_GAME_ALIVE_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_GAME_ALIVE_CMD"
 		return $?
 	fi
-	# A HEALTHY wine session reparents wineserver and the winedevice workers to
-	# init BY DESIGN — they are PPID 1 for the whole game, so orphanhood alone
-	# is NOT a deadlock (measured 2026-10-11: matching them killed the wine
-	# bootstrap of every wine game ~1 s in). The real deadlock is a CLOSED game
-	# whose orphans still hold the pipes. The discriminator is therefore the
-	# LIVE GAME, not the orphan: it is a non-shell descendant of
-	# emulatorlauncher (the game runs UNDER the launcher), while the
-	# reparented wine servers are not descendants at all. No live game +
-	# emulatorlauncher still waiting = the deadlock.
-	local _roots
-	_roots="$(pgrep -f emulatorlauncher 2>/dev/null | tr '\n' ' ')"
-	[ -n "${_roots// /}" ] || return 1
-	ps -eo pid=,ppid=,comm= 2>/dev/null | awk -v roots="$_roots" '
-		{ kids[$2] = kids[$2] " " $1; comm[$1] = $3 }
-		END {
-			nr = split(roots, r, " ")
-			for (i = 1; i <= nr; i++) if (r[i] != "") { q[++qn] = r[i]; seen[r[i]] = 1 }
-			h = 1; alive = 0
-			while (h <= qn) {
-				p = q[h++]
-				n = split(kids[p], ch, " ")
-				for (j = 1; j <= n; j++) {
-					c = ch[j]
-					if (c == "" || seen[c]) continue
-					seen[c] = 1; q[++qn] = c
-					if (comm[c] !~ /^(sh|bash|dash|python|python3|head|tee|sleep|setsid|timeout|cat|ps|awk|grep|sed|tr|wc|batocera|batocera-wine)$/) alive = 1
-				}
-			}
-			print (alive ? "1" : "0")
-		}'
+	# The game's liveness is its WINDOW, not a process (measured 2026-10-11,
+	# Candy Crush/adrenaline wedge). A wine session keeps its launch stub
+	# (start.exe) a live descendant of emulatorlauncher AND reparents
+	# wineserver/winedevice/the game to init for the WHOLE game, so no
+	# process signal separates a running game from a closed one: the old
+	# "non-shell descendant" test stayed true with the window gone and the
+	# game frozen. The window does separate them — while the game renders, a
+	# LARGE viewable X window that is not EmulationStation's exists; ALT+F4
+	# unmaps it and only ES remains. Size matters: wine spawns a cloud of
+	# tiny helper windows (IME 1x1, 160x20, Input 111x1) that come and go
+	# during boot and would arm the latch on their own (measured 2026-10-11:
+	# a relaunch was false-fired 3 s in by exactly that). Fail safe: with no
+	# way to query X we assume the game is on screen, so a blind probe never
+	# fires.
+	command -v xdotool >/dev/null 2>&1 || return 0
+	local _all _eswins _win _geo _w _h
+	# Fail safe: if the X query itself fails we assume the game is on screen.
+	_all="$(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible --class '.' 2>/dev/null)" || return 0
+	# EmulationStation is identified by its WINDOW CLASS, not a pid: the window
+	# is owned by the `emulationstation` process while the session launcher is
+	# its `dbus-run-session` parent (measured: window pid 6859 vs launcher
+	# 6844), so a pid comparison would mistake ES's own window for the game.
+	_eswins=" $(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible --class emulationstation 2>/dev/null | tr '\n' ' ') "
+	for _win in $_all; do
+		case "$_eswins" in *" $_win "*) continue ;; esac
+		_geo="$(DISPLAY="${DISPLAY:-:0}" xdotool getwindowgeometry "$_win" 2>/dev/null \
+			| sed -n 's/.*Geometry: \([0-9]*\)x\([0-9]*\).*/\1 \2/p')"
+		_w="${_geo% *}"; _h="${_geo#* }"
+		case "$_w" in '' | *[!0-9]*) continue ;; esac
+		case "$_h" in '' | *[!0-9]*) continue ;; esac
+		if [ "$_w" -ge 320 ] && [ "$_h" -ge 240 ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+_breaker_standsdown() { # rc 0 = la sessione NON e' un gioco: il breaker non spara
+	if [ -n "${CRT_DUAL_BREAKER_STANDDOWN_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_BREAKER_STANDDOWN_CMD"
+		return $?
+	fi
+	# Il menu `+rgs` (il system "Batocera config" di RGS) e' un insieme di
+	# script di UTILITA' lanciati esattamente come un gioco (`/bin/bash <rom>`,
+	# configgen shGenerator) e l'update di sistema stock guida una SEQUENZA di
+	# xterm massimizzati di breve durata. La premessa del breaker — una sola
+	# finestra di gioco per tutta la sessione — li' NON vale: il buco fra due
+	# xterm e' indistinguibile da un'uscita del gioco, e il breaker ha ABORTITO
+	# l'rgs update dell'owner a meta' (misurato 2026-10-12: xterm del tema
+	# chiuso, il successivo non ancora mappato -> "game closed (window gone)"
+	# -> pipe writer uccisi). Per questa classe si sta giu'. Il pattern non
+	# tocca /userdata/roms/rgs_crt/ (serve la "/" dopo "rgs").
+	pgrep -f '/userdata/roms/rgs/[^ ]*\.sh' >/dev/null 2>&1
 }
 
 SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
@@ -161,12 +210,38 @@ _session_start() { # $1 = crt|lcd — hand the display to the game (stock owns t
 	else
 		other="$crt"
 		tname="$lcd"
-		# two calls (AMD R9 270X, measured): off both, then a clean takeover —
-		# the dual mirror leaves a stale transform on the panel and a single
-		# --primary is a silent no-op in that state.
-		_err=$(xrandr --output "$crt" --off --output "$lcd" --off 2>&1) || { log "session-start: outputs off FAILED: $_err"; rc=1; }
+		# Non-destructive takeover — THREE requests, panel first, CRT last
+		# (owner bug 2026-10-13, measured live on the box).
+		#
+		# WHY NOT OFF-BOTH (what ADR-002 shipped): `--output $crt --off
+		# --output $lcd --off` destroys EmulationStation's GL surface — ES
+		# runs `emulationstation --windowed` under openbox ON the CRT — and
+		# nothing re-creates it. After that round-trip ES content measured
+		# 0% (black) and NO X stimulus recovered it: resize to a very
+		# different size and back, windowmove, F5/F11/keys, mouse,
+		# unmap/map, windowactivate. Only killing ES (it respawns) brought
+		# the menu back. So the ORDER is the contract: the panel is taken
+		# primary+native while BOTH outputs are still ON (ES's screen moves
+		# to the panel, its output never disappears), and only THEN is the
+		# CRT freed.
+		#
+		# WHY STEP 1 EXISTS: the dual plan writes `--scale-from 640x480` on
+		# the panel (display-model.sh:70-72 -> display-apply.sh:232), live
+		# as the panel's Transform 0.333328/0.444443 — that is what lets
+		# the panel share the 640x480 screen, and the residue makes a bare
+		# `--primary` a silent no-op. The OLD owner cleared it the same way
+		# and called it mandatory (clone scale persists otherwise). ADR-002
+		# dropped that verb and compensated with the destructive off-both.
+		#
+		# Three requests, never merged: `--transform` is never mixed with
+		# another output's `--scale-from` in one request (NVIDIA answers
+		# rc=0 and puts it on the wrong CRTC).
+		_err=$(xrandr --output "$lcd" --transform none 2>&1) || { log "session-start: $lcd transform-clear FAILED: $_err"; rc=1; }
 		if [ "$rc" = "0" ]; then
 			_err=$(xrandr --output "$lcd" --primary --auto 2>&1) || { log "session-start: $lcd takeover FAILED: $_err"; rc=1; }
+		fi
+		if [ "$rc" = "0" ]; then
+			_err=$(xrandr --output "$crt" --off 2>&1) || { log "session-start: $crt off FAILED: $_err"; rc=1; }
 		fi
 	fi
 	if [ "$rc" = "0" ] && _target_active "$tname"; then
@@ -282,7 +357,21 @@ case "${1:---check}" in
 	prev_fp=""
 	prev_es=""
 	prev_game="idle"
-	_dead_hits=0
+	_game_seen=0
+	_win_on=0
+	_win_gone=0
+	_emu_polls=0
+	_prev_sess=0
+	_sd_logged=0
+	# Minimum launcher age (polls) before the breaker may fire: it rides out
+	# the whole wine boot (several seconds of a window that is still coming
+	# up) so a slow launch is never aborted. Seam knob for fast tests.
+	EMU_MIN_POLLS="${CRT_DUAL_BREAKER_MIN_POLLS:-16}"
+	# A window that has been on screen continuously for this many polls means
+	# the session is ESTABLISHED: its disappearance is the exit, so the grace
+	# drops to ONE poll (the owner feels the latency). While the window has
+	# only just appeared the full grace applies — that is the boot transient.
+	STABLE_POLLS="${CRT_DUAL_BREAKER_STABLE_POLLS:-10}"
 	_first=1
 	settle=0
 	i=0
@@ -290,63 +379,79 @@ case "${1:---check}" in
 		i=$((i + 1))
 		if [ "$ITERS" -gt 0 ] && [ "$i" -gt "$ITERS" ]; then break; fi
 
-		# ── Deadlock breaker (root cause, measured 2026-10-10) ─────────
-		# emulatorlauncher (ES's child, one per session) returns only when
-		# it sees EOF on the game's stdout/stderr pipes. When the game's
-		# gamescope dies, the processes UNDER it — gamescopereaper and the
-		# winedevice workers — are reparented to init and SURVIVE, still
-		# holding the write ends. Proven from the fd table: emulatorlauncher
-		# held pipe:[180915] read; gamescopereaper held the same pipe write.
-		# EOF never arrives, so emulatorlauncher never returns, ES never
-		# runs gameStop, and the session guard stays up for good: the dual
-		# never returns and the frontend never reappears.
-		#
-		# The signature is a CLOSED GAME, not orphanhood: orphanhood alone is
-		# NORMAL for wine (wineserver/winedevice are reparented to init by
-		# design for the whole game — measured 2026-10-11, where keying on it
-		# killed every wine bootstrap ~1 s in). The deadlock is emulatorlauncher
-		# still waiting while NO live game runs under it: the game is gone and
-		# only its orphans hold the pipes. So fire only when the game is dead
-		# (_game_alive false) AND orphans are present. Killing the orphans
-		# closes the pipes and the whole chain unwinds BY ITSELF:
-		# emulatorlauncher exits normally, ES runs gameStop, the guard clears.
-		# We therefore do NOT touch emulatorlauncher — killing it would skip
-		# the gameStop that is the point of the exercise.
+		# ── Deadlock breaker (root cause, measured 2026-10-10/11) ───────
+		# emulatorlauncher returns only on EOF of the game's pipes; a closed
+		# game whose pipe-holders survive keeps it blocked for ever and the
+		# guard with it. The game is "closed" when its WINDOW is gone — the
+		# one signal that separates a running game from a wedged one
+		# (_game_alive, measured 2026-10-11). Three guards keep a STARTING
+		# game out of reach, so a slow boot is never aborted:
+		#   - the latch (_game_seen) needs the window ON SCREEN first;
+		#   - the latch resets on the session's rising edge (guard down->up),
+		#     so a lingering launcher cannot leak it into the next launch;
+		#   - a minimum launcher age (EMU_MIN_POLLS) rides out the wine boot.
+		# Firing closes the pipes by killing their WRITE holders
+		# (_pipe_writers); emulatorlauncher is left alone so gameStop still
+		# runs — that is the point.
 		#
 		# Evaluated BEFORE the session short-circuit below: while a session
 		# is stuck the guard is UP, so a check placed after it would never
 		# run — the exact mistake this replaces.
-		#
-		# Two consecutive polls: a wrapper that is merely mid-exit is left
-		# alone; only one that stays orphaned is a deadlock.
-		if _emu_alive && ! _game_alive; then
-			_dead_orp="$(_dead_orphans | tr '\n' ' ')"
-			if [ -n "${_dead_orp// /}" ]; then
-				_dead_hits=$((_dead_hits + 1))
-			else
-				_dead_hits=0
-			fi
-			if [ "$_dead_hits" -ge 2 ]; then
-				log "deadlock breaker: emulatorlauncher is waiting on pipes an orphaned wrapper still holds (${_dead_orp% }) — closing them"
-				_kill_set="$_dead_orp"
-				# one level of descendants: the winedevice workers live under
-				# the reaper and hold pipes of their own (55 fds, measured).
-				for _dp in $_dead_orp; do
-					_kids="$(ps -eo pid=,ppid= 2>/dev/null | awk -v p="$_dp" '$2==p {print $1}' | tr '\n' ' ')"
-					_kill_set="$_kill_set $_kids"
-				done
-				# shellcheck disable=SC2086 # a pid list is the point
-				kill $_kill_set 2>/dev/null || true
-				sleep 1
-				# shellcheck disable=SC2086 # wine helpers ignore SIGTERM
-				kill -9 $_kill_set 2>/dev/null || true
-				_dead_hits=0
+		_sess_now=0
+		_session_active && _sess_now=1
+		if [ "$_sess_now" = 1 ] && [ "${_prev_sess:-0}" = 0 ]; then
+			_game_seen=0
+			_win_on=0
+			_win_gone=0
+			_emu_polls=0
+			_sd_logged=0
+		fi
+		_prev_sess=$_sess_now
+
+		if _emu_alive; then
+			_emu_polls=$((_emu_polls + 1))
+			if _breaker_standsdown; then
+				# sessione non-gioco (+rgs): non si spezza mai (vedi la probe)
+				if [ "${_sd_logged:-0}" = 0 ]; then
+					log "deadlock breaker stood down: non-game session (rgs system scripts)"
+					_sd_logged=1
+				fi
+				_game_seen=0
+				_win_on=0
+				_win_gone=0
+			elif _game_alive; then
+				_game_seen=1
+				_win_on=$((_win_on + 1))
+				_win_gone=0
+			elif [ "${_game_seen:-0}" = 1 ]; then
+				_win_gone=$((_win_gone + 1))
+				# adaptive grace: an ESTABLISHED session (the window was on
+				# screen continuously) is the exit -> fire on the first gone
+				# poll; a just-appeared window keeps the full 3-poll grace so a
+				# boot transient is never read as an exit.
+				if [ "$_win_on" -ge "$STABLE_POLLS" ]; then _grace=1; else _grace=3; fi
+				if [ "$_win_gone" -ge "$_grace" ] && [ "$_emu_polls" -ge "$EMU_MIN_POLLS" ]; then
+					_emu_pids="$(pgrep -f emulatorlauncher 2>/dev/null | tr '\n' ' ')"
+					_writers="$(_pipe_writers $_emu_pids | tr '\n' ' ')"
+					if [ -n "${_writers// /}" ]; then
+						log "deadlock breaker: game closed (window gone) while emulatorlauncher waits — closing its pipe writers (${_writers% })"
+						# shellcheck disable=SC2086 # a pid list is the point
+						kill $_writers 2>/dev/null || true
+						sleep 0.3
+						# shellcheck disable=SC2086 # wine helpers ignore SIGTERM
+						kill -9 $_writers 2>/dev/null || true
+					fi
+					_win_gone=0
+				fi
 			fi
 		else
-			_dead_hits=0
+			_game_seen=0
+			_win_on=0
+			_win_gone=0
+			_emu_polls=0
 		fi
 
-		if _session_active; then
+		if [ "$_sess_now" = 1 ]; then
 			prev_game="active"
 			sleep "$POLL"
 			continue

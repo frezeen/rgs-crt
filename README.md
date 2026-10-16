@@ -283,3 +283,5 @@ own log lives in `/userdata/system/logs/` (the main one is
    which socket the CRT hangs off, and what you saw. For picture
    quality questions, a photo of the actual glass still beats any
    description.
+
+<!-- smoke 2026-10-12 -->

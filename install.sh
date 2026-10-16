@@ -3,8 +3,9 @@
 #
 # Deploys: engine package (+ our profiles), gameStart hook, RAM hoist
 # (sitecustomize), pre-X S15 hook, engine boot-service shim, our RGS
-# service, udev rule, VNC, owned box keys (es.resolution = 640x480i.60.00,
-# global.videomode = max-640x480 pin, first-install backup; splash trio backup-only).
+# service, udev rule, VNC; box keys are BACKUP-ONLY (the layer pins NO boot
+# key — §11 backs up es.resolution, global.videomode, global.videooutput,
+# splash.screen.resize and global.videooutput2; first-install backup only).
 # Overlay writes are manifest-tracked ($PKG/overlay-manifest) so the boot
 # service re-deploys them after rgs_config / upgrades. The live
 # RGS/Batocera versions are recorded ($PKG/rgs-version) so verify.sh can
