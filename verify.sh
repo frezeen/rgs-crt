@@ -76,6 +76,79 @@ have() {
 	PRESENT=$((PRESENT + 1))
 }
 
+# ── RGS15_PROBE_ONLY: run ONLY the display probe ───────────────────────────
+# The hermetic path for the seam that owns the probe (2026-10-16). The probe
+# reads NOTHING but its own seams (RGS15_DETECT_STATE, RGS15_RECONCILE_PGREP,
+# RGS15_RECONCILE_PROC, RGS15_XRANDR, RGS15_XRANDR_STOCK), so a test can
+# exercise it without pretending the whole layer is installed. A fixture that
+# DID pretend (a fake package plus one hook) made every installed-only section
+# read the live box: 13 FAIL lines the seam never asserted, ~2s per run, and a
+# "hermetic" claim that was not true. With this flag the run touches the seams
+# only, and the seam asserts exactly that.
+_finish() {
+	if [ "$FAIL" = "0" ]; then
+		echo "verify.sh: CLEAN (exit 0)"
+		exit 0
+	fi
+	echo "verify.sh: DIRTY (exit 1)" >&2
+	exit 1
+}
+display_probe() {
+	_xrandr="${RGS15_XRANDR:-/usr/bin/xrandr}"
+	_xrandr_stock="${RGS15_XRANDR_STOCK:-/overlay/base/usr/bin/xrandr}"
+
+	_ds="${RGS15_DETECT_STATE:-/tmp/crt-dual/detect-state}"
+	_pgrep_bin="${RGS15_PGREP:-pgrep}"
+	_recon_pgrep="${RGS15_RECONCILE_PGREP:-$_pgrep_bin}"
+	_recon_proc="${RGS15_RECONCILE_PROC:-display-reconcil[e].sh --daemon}"
+	if [ ! -s "$_ds" ]; then
+		ok "display probe skipped: no engine snapshot ($_ds) — nothing to compare"
+	else
+		_crt="$(sed -n 's/^CRT_OUT=//p' "$_ds" | tail -1)"
+		if [ -z "$_crt" ]; then
+			_crt_outs="$(sed -n 's/^CRT_OUTS=//p' "$_ds" | tail -1)"
+			_crt="${_crt_outs%% *}"
+		fi
+		# Count match TREES, not processes (measured 2026-10-16 on the live
+		# box): a forked bash subshell keeps its PARENT's cmdline, so
+		# `pgrep -fc` saw the daemon AND the subshell it forks for every
+		# command substitution — the count read 2 on a healthy box and this
+		# probe failed verify.sh at random. A match whose PARENT is also a
+		# match is a child of the daemon, not another daemon; the roots of
+		# the match forest are the daemons.
+		_pids="$("$_recon_pgrep" -f "$_recon_proc" 2>/dev/null | tr '\n' ' ' || true)"
+		_daemons=0
+		if [ -n "$_pids" ]; then
+			_daemons="$(ps -o pid=,ppid= -p $_pids 2>/dev/null | awk -v m=" $_pids " '
+				{ pid[$1] = $2; seen[$1] = 1 }
+				END { c = 0; for (p in seen) if (index(m, " " pid[p] " ") == 0) c++; print c }')"
+			_daemons="${_daemons:-0}"
+		fi
+		if [ -z "$_crt" ]; then
+			ok "display probe skipped: LCD-only (no CRT named in $_ds)"
+		elif [ "$_daemons" != "1" ]; then
+			bad "display: reconcile daemon count is $_daemons (expected exactly 1 — the live layout is unmanaged, games launch on a stale mode)"
+		elif [ ! -x "$_xrandr" ]; then
+			ok "display probe skipped: xrandr not present ($_xrandr)"
+		elif ! { cmp -s "$_xrandr" "$_xrandr_stock" 2>/dev/null || grep -q 'glitch-free wrapper' "$_xrandr" 2>/dev/null; }; then
+			ok "display probe skipped: $_xrandr is neither stock nor our wrapper (9a owns the verdict)"
+		else
+			_x_current="$("$_xrandr" --current 2>/dev/null)" || _x_current=""
+			if [ -z "$_x_current" ]; then
+				ok "display probe skipped: xrandr --current returned nothing (no DISPLAY / X unreachable)"
+			elif printf '%s\n' "$_x_current" | grep -q "^${_crt} connected"; then
+				ok "display: CRT $_crt connected, one reconcile daemon"
+			else
+				bad "display: CRT $_crt named in $_ds is NOT connected ($(printf '%s\n' "$_x_current" | grep -m1 -F "$_crt " || printf 'output absent from xrandr --current'))"
+			fi
+		fi
+	fi
+}
+if [ -n "${RGS15_PROBE_ONLY:-}" ]; then
+	display_probe
+	_finish
+fi
+
 # Single-source version gate (judged here: bad() exists from this point).
 [ -n "$PKG_VERSION" ] \
 	|| bad "repo VERSION missing or empty ($REPO/VERSION — the single source of truth)"
@@ -857,52 +930,7 @@ fi
 # own process lister, so a seam can keep the OTHER pgrep consumers mocked),
 # RGS15_RECONCILE_PROC (+ the 9a RGS15_XRANDR / RGS15_XRANDR_STOCK pair).
 if [ "$PRESENT" -gt 0 ]; then
-	_ds="${RGS15_DETECT_STATE:-/tmp/crt-dual/detect-state}"
-	_pgrep_bin="${RGS15_PGREP:-pgrep}"
-	_recon_pgrep="${RGS15_RECONCILE_PGREP:-$_pgrep_bin}"
-	_recon_proc="${RGS15_RECONCILE_PROC:-display-reconcil[e].sh --daemon}"
-	if [ ! -s "$_ds" ]; then
-		ok "display probe skipped: no engine snapshot ($_ds) — nothing to compare"
-	else
-		_crt="$(sed -n 's/^CRT_OUT=//p' "$_ds" | tail -1)"
-		if [ -z "$_crt" ]; then
-			_crt_outs="$(sed -n 's/^CRT_OUTS=//p' "$_ds" | tail -1)"
-			_crt="${_crt_outs%% *}"
-		fi
-		# Count match TREES, not processes (measured 2026-10-16 on the live
-		# box): a forked bash subshell keeps its PARENT's cmdline, so
-		# `pgrep -fc` saw the daemon AND the subshell it forks for every
-		# command substitution — the count read 2 on a healthy box and this
-		# probe failed verify.sh at random. A match whose PARENT is also a
-		# match is a child of the daemon, not another daemon; the roots of
-		# the match forest are the daemons.
-		_pids="$("$_recon_pgrep" -f "$_recon_proc" 2>/dev/null | tr '\n' ' ' || true)"
-		_daemons=0
-		if [ -n "$_pids" ]; then
-			_daemons="$(ps -o pid=,ppid= -p $_pids 2>/dev/null | awk -v m=" $_pids " '
-				{ pid[$1] = $2; seen[$1] = 1 }
-				END { c = 0; for (p in seen) if (index(m, " " pid[p] " ") == 0) c++; print c }')"
-			_daemons="${_daemons:-0}"
-		fi
-		if [ -z "$_crt" ]; then
-			ok "display probe skipped: LCD-only (no CRT named in $_ds)"
-		elif [ "$_daemons" != "1" ]; then
-			bad "display: reconcile daemon count is $_daemons (expected exactly 1 — the live layout is unmanaged, games launch on a stale mode)"
-		elif [ ! -x "$_xrandr" ]; then
-			ok "display probe skipped: xrandr not present ($_xrandr)"
-		elif ! { cmp -s "$_xrandr" "$_xrandr_stock" 2>/dev/null || grep -q 'glitch-free wrapper' "$_xrandr" 2>/dev/null; }; then
-			ok "display probe skipped: $_xrandr is neither stock nor our wrapper (9a owns the verdict)"
-		else
-			_x_current="$("$_xrandr" --current 2>/dev/null)" || _x_current=""
-			if [ -z "$_x_current" ]; then
-				ok "display probe skipped: xrandr --current returned nothing (no DISPLAY / X unreachable)"
-			elif printf '%s\n' "$_x_current" | grep -q "^${_crt} connected"; then
-				ok "display: CRT $_crt connected, one reconcile daemon"
-			else
-				bad "display: CRT $_crt named in $_ds is NOT connected ($(printf '%s\n' "$_x_current" | grep -m1 -F "$_crt " || printf 'output absent from xrandr --current'))"
-			fi
-		fi
-	fi
+	display_probe
 fi
 
 # ── 10. Mixed installed/absent = anomaly ──
@@ -914,9 +942,4 @@ if [ "$PRESENT" != "0" ] && [ "$PRESENT" != "12" ]; then
 	bad "mixed state ($PRESENT/12 components present — deploy.sh to sync, or uninstall.sh for a clean slate)"
 fi
 
-if [ "$FAIL" = "0" ]; then
-	echo "verify.sh: CLEAN (exit 0)"
-	exit 0
-fi
-echo "verify.sh: DIRTY (exit 1)" >&2
-exit 1
+_finish

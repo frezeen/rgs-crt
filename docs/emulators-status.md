@@ -3,10 +3,10 @@
 This layer runs INSIDE stock RGS and reverts cleanly.
 
 This is the honest per-system status of the **RGS 15 kHz CRT** profile.
-Certification box: RGS 43.58 (Batocera 43.1 base), x86_64, NVIDIA
-GTX 970, arcade tube in the demonstrated 13.6–16.2 kHz range — the
-measured numbers below come from it; the full layer has also been
-tested on an AMD R9 270X machine, and Intel hardware carries a
+Certification box: RGS 43.63 (live 2026-10-16; Batocera 43.1
+base), x86_64, arcade tube in the demonstrated 13.6–16.2 kHz range —
+the recent verdicts were measured on the AMD R9 270X machine, and the
+layer is also certified on an NVIDIA GTX 970; Intel hardware carries a
 pending re-test. Every TESTED verdict
 below comes from a real launch on that tube with the resulting signal
 measured — a glance is never a verdict.
@@ -63,6 +63,7 @@ starts.
 | PlayStation Portable (psp) | The portable's 16:9 picture fills the whole 4:3 tube with no black bars; the render stays at the console's native scale with sharp (nearest) filtering, so the image is enlarged, not softened | common + full-screen stretch (the display-stretch key, set inside the emulator's own Graphics section) + native render scale + nearest filtering | TESTED 2026-10-07 |
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
 | SAM Coupe (samcoupe) | The machine's 4:3 picture fills the tube exactly — native square-pixel aspect, no black bands and no stretch; menu text legible one-to-one. Runs full-screen with sharp (nearest) rendering and no on-screen emulator overlays | common + native 4:3 pixel aspect (the emulator's TV-aspect correction off), full-screen, smoothing off, drive-lights/status/speed overlays off | TESTED 2026-10-10 |
+| Apple IIgs (apple2gs) | The machine's picture fills the tube at 640x480i — gameplay full-frame with the machine's own blue border, score and text legible one-to-one. The native attempt ran the same day (320x240p desktop, GSplus fills it by itself): 480i won — strokes 3.89px vs 1.93px with cleaner edges, owner finds it more legible, flicker not bothersome. No profile block: the emulator's system-ROM path points at a file that is not on the box and it plays anyway | common only (no per-system keys) | TESTED 2026-10-17 |
 | MSX / Spectravideo (spectravideo, msx1, msx2, msx2+, msxturbor, colecovision) | The machine's picture fills the 4:3 tube at 640x480i, and the emulator's own CRT filter — a soft blur with faint scanlines — is switched off, so the image is sharp and the game's text reads one-to-one. It starts clean, too: no on-screen menu or status overlays over the game (the menu bar fades out on its own) and no missing-font warnings (the emulator's user folder is completed with the current font). The internal picture is enlarged uniformly to fill the tube; no re-scaling tricks | common + the emulator's own effect settings off (blur/scanline/glow, in its settings file each launch) + its stale user folder repaired with the current font | TESTED-with-note 2026-10-10 |
 | BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
 | Doom (PrBoom), Mr. Boom | Native 320x200, full HUD, all edges | common + RA family | TESTED 2026-09-06 |
@@ -73,10 +74,14 @@ starts.
 | PS4 (shadps4) | HD 16:9 content on the tube's 480i, full-bleed stretched — same policy as the PS3/Vita rows. The window wrapper is what fills the glass: without it the emulator letterboxes by itself (its own file offers no stretch control). Render at the game's own scale, no sharpening or smoothing | common + gamescope 864x486@60 fullscreen stretch + native render | TESTED 2026-09-10 |
 | PS Vita (vita3k) | The Vita's native panel (960x544) has no 15kHz form (its interlaced variant needs ~17.3kHz — beyond the tube's demonstrated edge), so the game runs full-bleed stretched to the tube's 480i — same policy as the PS3 row. The internal render stays at the console's native scale, no sharpening or smoothing. A true-proportions letterbox mode exists (a two-key change) | common + gamescope 864x486@60 fullscreen stretch + native render scale | TESTED-with-note 2026-09-10 |
 | PS3 (rpcs3) | HD 16:9 console on a 15kHz tube: no native mode exists, so the tube shows it full-bleed stretched to 4:3 — the proportions are compressed (16:9 content in a 4:3 glass). Render at the game's native scale (no artificial upscaling), no sharpening or smoothing. The letterboxed alternative (true proportions with black bars) exists as a one-key change if you ever prefer it | common + rpcs3 native render scale (100%) + gamescope 864x486 fullscreen stretch | TESTED-with-note 2026-09-10 |
+| Atari Jaguar CD (jaguarcd) | The add-on's picture fills the tube at 480i — measured `Ants` homebrew full-frame from the emulator's pixel-perfect 2x (native 320x228 raster doubled, zero filter); the 24-line bottom band is blank at the source. The native attempt ran the same day (320x240p desktop, A/B): 480i won — strokes 5.23px vs 2.63px, finer grain, owner finds it more legible. No bios needed | common only (no per-system keys) | TESTED 2026-10-17 |
+| Visual Pinball (vpinball) | The table fills the tube at 480i — measured `X-Men LE (Stern 2012)` full-frame with the table's own side artwork left and right (no stock bezel anywhere in the chain; 1:1 framebuffer mapping, so the bands are the table's frame and stay). Score and instruction text legible one-to-one | common only (no per-system keys; the table carries its own VPinMAME rom) | TESTED 2026-10-17 |
 | Xbox / Chihiro (xemu) | Native 640x480 on the tube's 480i signal — gameplay fills the glass edge to edge (the title art keeps its own dark frame); title text legible 1:1. Runs the stock Xbox emulator with a 1:1 render scale and no extra image tricks (sharpness and smoothing stay off) | common + gamescope 640x480@60 window (pixel filter, no sharpening, fullscreen stretch) + native render scale | TESTED 2026-09-10 |
 | GameCube / Triforce / Wii (dolphin family) | Native 640x480 raster shown on the tube's 480i signal (the console's own 480p is a 31kHz signal a 15kHz tube cannot show progressively) — full-bleed. The internal render runs at an even 2x for crisper geometry and text | common + dolphin stretch-to-window fill, internal render 2x | TESTED 2026-09-10 |
 | Raw Thrills gun shooters (rawthrills) | Both titles on this machine show the arcade picture full on the 4:3 tube, no letterbox and no stretch, each on its own engine (the native loader for Aliens Armageddon, Wine for Big Buck Hunter Pro) | common + the tube raster on the stock video-mode key (`rawthrills.videomode = 640x480i`); no emulator or core pin — the system's own engine choice is followed | TESTED 2026-10-07 |
 | Xbox 360 (xenia-canary) | The Xbox 360's 16:9 picture on the tube's 480i, stretched full-bleed to 4:3 — proportions compressed, the same declared trade as the PS3/PS4/Vita rows (no 15 kHz form of this content exists). Title text reads at one-to-one. Runs the emulator's own fullscreen on native render scale, with no upscaling or sharpening | common + gamescope 864x486@60 fullscreen stretch (pixel filter) + native render scale | TESTED-with-note 2026-10-10 |
+| Arcade — Sega Model 3 (model3) | The arcade's 3D picture fills the whole 4:3 tube at 480i — measured `Daytona USA 2` full-frame from the board's native raster, no upscale chain, no stretch | common + native render (upscale off, 640x480) | TESTED 2026-10-17 |
+| Arcade — Sega Hikaru (hikaru) | The arcade's 3D picture fills the whole 4:3 tube at 480i — measured `Air Trix` full-frame, no bars, no stretch: the emulator renders its native 640x480 raster and the window wrapper presents it 1:1 | common + gamescope 640x480@60 fullscreen (pixel filter, the wrapper is a 1:1 present here) + native render (`demulRatio=1`) | TESTED 2026-10-17 |
 | Namco System 246/256 (namco2x6) | The arcade's own 4:3 picture fills the whole tube — no black bars, no stretch — drawn at the game's native scale with no upscaling or sharpening. The console emulator's default drawing mode squeezes this progressive 480p title to 3:2 and leaves bars; the profile pins the cabinet's true 4:3 proportions instead | common + the game's aspect pinned to standard 4:3 (the emulator's progressive default is 3:2) + native 1x render | TESTED 2026-10-10 |
 | Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
 | Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Verified on Arctic Thunder and Friction (4:3: full-bleed, as the cabinet shows them) and on Subway Surfers Arcade (16:9: full-bleed stretched — the same declared trade as the PS3/Xbox 360 rows) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
@@ -159,10 +164,10 @@ No content on the certification box, or one specific behavior still
 unproven — listed, never claimed:
 
 - switch,
-  model3, hikaru, daphne, singe,
-  jaguarcd, apple2, apple2gs, enterprise,
+  daphne, singe,
+  apple2, enterprise,
   fmtowns, lindbergh, moonlight (needs a streaming host
-  PC), vpinball, dxx-rebirth, win311, win95.
+  PC), dxx-rebirth, win311, win95.
 - `globalvr`, `typex`, `typex2`, `nesicax`, `nesicax2`, `seganu`,
   `konamipc` — the RGS Windows-arcade systems. They now carry the same
   tube treatment as the certified Adrenaline / Arcade PC / UNIS siblings

@@ -1,7 +1,7 @@
 # Stock RGS issues found along the way
 
-For the RGS team — found while certifying systems on RGS 43.54
-(Batocera 43.1 base), x86_64, NVIDIA. These are stock behaviors
+For the RGS team — found while certifying systems on RGS 43.54–43.63
+(Batocera 43.1 base), x86_64, NVIDIA and AMD. These are stock behaviors
 (display-independent: they reproduce on LCD too), and this layer runs
 INSIDE stock RGS and reverts cleanly — none of them is caused by it.
 
@@ -64,3 +64,40 @@ accusation against the platform this project is a gift to.
   A user-level demonstration of "extend, don't replace" — not a
   substitute for the configgen rule above, which would make every
   stock box behave well by default.
+
+## 3. FM Towns: a `.chd` is offered by the system list and cannot be read by the shipped emulator
+
+- What you see: a `.chd` for `fmtowns` is listed like any other game.
+  Launching it boots the Towns BIOS (logo on screen) and stops at
+  "Please set the system disk" (the Japanese-localized on-screen
+  message) — insert the system disk — with the CD-ROM device empty. The owner also reports a warning at launch that the
+  emulator does not support this format. The warning names the format, not
+  the cause, so there is no path from the message to the fault.
+- Measured (2026-10-16, RGS 43.63, AMD box, launch log): the generator built
+  `Tsugaru_CUI <bios>/fmtowns … -FD0 "<game>.chd"` — a CD image handed to the
+  FLOPPY device. The shipped `/usr/bin/Tsugaru_CUI`'s own `-HELP` is the
+  authority: `-CD image-file-name` takes **ISO or CUE**. A `.chd` is a format
+  this emulator does not read, on either device.
+- The routing half: the stock `tsugaruGenerator.py` maps only `.iso/.cue/.bin`
+  to `-CD` and sends everything else — a `.chd` included — to `-FD0`. So even
+  a hypothetical CHD-capable build would still receive the disc as a floppy.
+- Why it cannot work today: three stock surfaces disagree. The system's
+  accepted-extension list advertises `.chd` (the same list is written into the
+  system's `_info.txt` inside the roms folder), the generator has no `-CD`
+  route for it, and the emulator cannot read it. Any one of them alone would be
+  survivable; together they make a list entry that can never boot.
+- Not ours (the page's inclusion test): no file, key or hook of this layer is
+  in this path — there is no `fmtowns` block in the profile, and the launched
+  argv is the stock generator's, token for token. The failure is independent of
+  the display too: it is a content-format failure and would be identical on the
+  LCD.
+- Workaround today: convert the image to CUE/BIN (`chdman extractcd`, shipped on
+  the box at `/usr/bin/chdman`) or supply the game as `.cue`/`.iso` — the
+  generator then routes `-CD` by itself.
+- Suggested fix: remove `.chd` from the FM Towns accepted extensions (it is the
+  only CD-class entry there the emulator cannot read), or keep it and give the
+  generator a `-CD` route for it once the emulator can read CHD. Either way the
+  list and the emulator stop contradicting each other.
+- Observed in the same delivery (2026-10-11): the system's `gamelist.xml` lists
+  a second title whose file is not present in the roms folder — a list entry
+  that can only fail.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-17 — the check no longer fails a healthy box at random
+
+**A healthy setup passes the display check every time.** The check that
+verifies the screen is being managed used to count the screen-manager
+program by listing processes — and one helper process it spawns while doing
+any work counted as a second copy of the manager. On some boxes the check
+then failed even though nothing was wrong, saying the screen is unmanaged,
+at random and without any real fault. It now counts the manager programs
+and their own helpers the way they are actually related, so it sees exactly
+one manager on a healthy setup, every time.
+
 ## 2026-10-16 — the layer follows RGS 43.63, and a problem report is collected twice as fast
 
 **Works on the current RGS.** This release is built and checked against RGS
@@ -135,28 +146,4 @@ no reboot, no command, and nothing to do at the cabinet.
 This is not specific to one system. The check is built on a property that
 holds for any game — whether the program that was running it has really
 released it — so games added later are covered without anything to update.
-
-## 2026-10-09 — the check entry gets a picture, keeps its place, and RGS 43.55 is certified
-
-**A proper picture for the check entry.** "RGS-CRT CHECK & UPDATE" now shows
-a wheel in the Batocera config menu instead of blank space. It is drawn flat
-and transparent on purpose — no glow, no 3D — because the whole point of this
-layer is text you can read on a tube, and lettering that blooms on a 480i
-phosphor is the exact fault it exists to prevent. It comes with the install,
-so a fresh box has it too: nothing to fetch or place by hand.
-
-**The entry stops vanishing.** EmulationStation rewrites its game list every
-time it records a launch, and it was quietly dropping the check entry while it
-did. The layer now puts it back at every boot, so the entry stays in the menu
-where you look for it.
-
-**Certified on RGS 43.55.** This release is built and checked against RGS
-43.55. Updating RGS and then opening the check entry is all that is needed —
-and it reports what it found, as it always has.
-
-**An RGS update that changes the rules is caught instead of ignored.** The
-layer's picture settings are read by RGS itself. If an RGS update changes the
-way they are read, the layer now notices at the next check rather than
-quietly doing nothing: the tube profile stands down, your games keep launching
-with stock behavior, and the check screen says exactly why.
 
