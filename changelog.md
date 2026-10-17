@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-10-17 — five more machines reach the tube
+
+**Five more systems are certified for the tube: Apple IIgs, Atari Jaguar
+CD, Visual Pinball, Sega Model 3 and Sega Hikaru.** Each fills the 4:3
+tube with the machine's own picture on its interlaced signal, full frame
+with no black bars, and text and scores legible one to one:
+
+- **Apple IIgs** — the computer's picture fills the tube at 640x480i,
+  its blue border included. No per-game settings: the common profile is
+  enough, and the machine plays even though the emulator looks for a
+  system ROM file this box does not carry.
+- **Atari Jaguar CD** — the add-on's games fill the tube at 480i, and
+  there is no BIOS to find or place.
+- **Visual Pinball** — the pinball table fills the tube edge to edge,
+  its own side artwork left and right exactly as the maker drew it. The
+  table brings its own pinball ROM, nothing to add.
+- **Sega Model 3** — the board's 3D arcade games fill the tube at 480i,
+  drawn straight from the board's own raster.
+- **Sega Hikaru** — the arcade's 3D picture fills the tube the same
+  way: no bars, no stretch.
+
+**A .chd game for FM Towns will not open, and the fault is in RGS.** The
+system list offers a .chd for FM Towns like any other game, but the
+emulator RGS ships cannot read that format: the machine reaches the Towns
+logo and then waits for a system disk with the drive empty. Sitting in
+RGS, not in the layer, it is not something the layer can fix — until RGS
+changes its emulator, keep FM Towns games in a format the emulator reads.
+
 ## 2026-10-17 — the check no longer fails a healthy box at random
 
 **A healthy setup passes the display check every time.** The check that
