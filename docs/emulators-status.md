@@ -86,6 +86,8 @@ starts.
 | Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
 | Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Verified on Arctic Thunder and Friction (4:3: full-bleed, as the cabinet shows them) and on Subway Surfers Arcade (16:9: full-bleed stretched — the same declared trade as the PS3/Xbox 360 rows) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
 | UNIS Arcade Machines (unis) | The arcade's own picture fills the whole 4:3 tube at 480i, text legible. Verified on Dino Invasion | common + the tube raster on the stock video-mode key (`unis.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
+| Sega Lindbergh (lindbergh) | The arcade's own picture fills the whole 4:3 tube at 480i — measured `After Burner Climax` full-frame one-to-one (no scaling, no filter), score and instruction text legible. The board's picture is 640x480 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive; the loader itself renders at the 640x480 the platform gives), so the tube carries that same untouched raster **interlaced** at 640x480i 15.69kHz | common only (no per-system keys; the stock generator needs no bios) | TESTED 2026-10-17 |
+| Arcade — Windows pinball — Zen Studios (pinballfx, pinballfx2, pinballfx3, pinballm) | The HD table fills the whole 4:3 tube at 480i — measured `Amusement Park` full-frame (99.6%), text legible one-to-one. The games draw on a full-HD canvas and the window wrapper stretches that onto the tube. The four run the same stock `winebat` launcher and runner and the same block, so this one launch certifies all four | common + the tube raster (`pinballfx3.videomode = 640x480i`) + gamescope 864x486@60 full-screen stretch, pixel filter, no sharpening | TESTED 2026-10-17 (pinballfx3) |
 
 **Every verdict includes the exit:** the session ends, everything
 returns to the desktop state, and the system reports clean.
@@ -166,7 +168,7 @@ unproven — listed, never claimed:
 - switch,
   daphne, singe,
   apple2, enterprise,
-  fmtowns, lindbergh, moonlight (needs a streaming host
+  fmtowns, moonlight (needs a streaming host
   PC), dxx-rebirth, win311, win95.
 - `globalvr`, `typex`, `typex2`, `nesicax`, `nesicax2`, `seganu`,
   `konamipc` — the RGS Windows-arcade systems. They now carry the same
@@ -178,6 +180,12 @@ unproven — listed, never claimed:
   `max-*` video-mode keys for them inside its tuning zone, and its
   per-game keys win over ours. `gaelco` is deliberately left out: it is a
   MAME-driven system, not one of these Windows ones.
+- `zaccariapinball` (Magic Pixel) — the fifth Windows-pinball system, the
+  sibling of the Zen four now in the tested table above. It runs the same
+  `winebat` launcher and the same staged tube block, but on the `wine-proton`
+  runner with a mesa extension override instead of the `ge-custom` runner the
+  Zen four share, so it is a variant of its own and takes its own launch. No
+  game has been measured on the glass here yet.
 - `itchio`, `namcoes3` — uncovered since the RGS 43.44–43.54 range,
   same state as the two above: no block, no content. Listed here so
   the gap is written down instead of remembered.

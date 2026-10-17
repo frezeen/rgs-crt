@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-17 — the Pinball FX machines reach the tube
+
+**The four Pinball FX systems — Pinball FX, Pinball FX2, Pinball FX3 and
+Pinball M — now play on the tube.** Each table is drawn on the game's own
+large canvas and shown full frame on the 4:3 glass, with no black bars and
+the score and the table text legible one to one. The four are the same
+machine to the layer, so certifying one certified all four.
+
+**Zaccaria Pinball is not certified yet.** It starts through the same
+launcher but a different Windows runner, so it needs its own test on the
+glass; the compatibility map lists it as not yet tested until then.
+
 ## 2026-10-17 — five more machines reach the tube
 
 **Five more systems are certified for the tube: Apple IIgs, Atari Jaguar
