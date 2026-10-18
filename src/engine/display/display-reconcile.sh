@@ -289,10 +289,12 @@ _es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'L
 	local pct
 	pct=$(_es_content) || return 0
 	[ -n "$pct" ] || return 0
-	# Soglia misurata: il difetto (pagina nera con la barra) sta a ~7%; una
-	# pagina legittima SCURA sta a ~47% (vista sul banco il 2026-10-18); le sane
-	# piene a 75-99%. 25% separa con margine da tutte e due.
-	if [ "$pct" -lt "${CRT_DUAL_ES_CONTENT_MIN:-25}" ]; then
+	# Soglia misurata sul banco (2026-10-18): il difetto (pagina nera con la
+	# barra) sta a 7,2%; una pagina legittima SCURA sta a 25,7% (osservata) e a
+	# ~47% (un'altra); le sane piene a 75-99%. 15% lascia 8 punti dal difetto e
+	# 10 dalla pagina scura piu' chiara vista: piu' in alto si rischia di
+	# "spingere" una pagina sana (falso positivo — l'owner l'ha chiesto esplicito).
+	if [ "$pct" -lt "${CRT_DUAL_ES_CONTENT_MIN:-15}" ]; then
 		log "es-content: ${pct}% non-nero — la pagina non si e' disegnata: spingo con 'Left'"
 		DISPLAY="${DISPLAY:-:0}" xdotool key --clearmodifiers Left 2>/dev/null || true
 		sleep 0.5
