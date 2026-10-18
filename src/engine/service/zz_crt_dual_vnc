@@ -14,14 +14,25 @@
 #      even with -noxdamage), and a boot service must come back on its
 #      own. The loop PID lives in /tmp/crt-dual-vnc.pid; stop kills the
 #      loop first (no respawn) then x11vnc.
+#   3. Bounds that loop, because a respawn is a full x11vnc start (a
+#      display probe of its own) and the loop used to do it every 2 s
+#      forever: with X absent it waits on the X socket instead of burning
+#      a rebirth (the 16-19/10 log: 240 starts, 229 died on XOpenDisplay
+#      at 2 s — the 2026-10-17 dawn burst alone was 249 starts, one probe
+#      each, all before X was up), and a death with X up counts: N quick
+#      ones in a row stop the loop loudly instead of spinning. A death
+#      after a healthy run is a crash and still retries.
 #
 # The `vnc` / `vnc-scaled` commands stay available for manual
-# use (install.sh symlinks them into /usr/bin); a manual instance holds
-# the port, the loop retries until it exits, then takes over.
+# use (install.sh symlinks them into /usr/bin); the launcher frees port
+# 5900 (fuser -k) before starting, so a manual instance is taken over
+# rather than waited for.
 #
 # Runs from /userdata/system/services (Batocera custom service).
 # Package root: /userdata/system/crt-dual (installed by install.sh).
-# Env seam (tests): CRT_DUAL_PKG_ROOT overrides the package root.
+# Env seam (tests): CRT_DUAL_PKG_ROOT overrides the package root;
+# CRT_DUAL_VNC_PIDFILE / _XSOCK / _MAXFAILS / _HEALTHY_S replace the
+# loop's live pidfile, X socket, death ceiling and healthy-run window.
 
 set -uo pipefail
 
@@ -30,7 +41,10 @@ case "$1" in
 		PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 		VNC="$PKG_ROOT/src/vnc/vnc"
 		LOG="$PKG_ROOT/logs/vnc.log"
-		PIDFILE="/tmp/crt-dual-vnc.pid"
+		PIDFILE="${CRT_DUAL_VNC_PIDFILE:-/tmp/crt-dual-vnc.pid}"
+		XSOCK="${CRT_DUAL_VNC_XSOCK:-/tmp/.X11-unix/X0}"
+		MAXFAILS="${CRT_DUAL_VNC_MAXFAILS:-5}"
+		HEALTHY_S="${CRT_DUAL_VNC_HEALTHY_S:-30}"
 		mkdir -p "$(dirname "$LOG")"
 
 		[ -x "$VNC" ] || {
@@ -62,17 +76,39 @@ case "$1" in
 			sleep 2
 		done
 
-		# Respawn loop (self-healing on crash; clean exit 0 = no respawn).
+		# Respawn loop, bounded (see point 3 in the header). $1 pidfile,
+		# $2 launcher, $3 log, $4 X socket, $5 healthy-run seconds,
+		# $6 consecutive quick deaths allowed.
 		nohup bash -c '
 			echo $$ >"$1"
+			_fails=0
 			while :; do
+				# X absent (boot, or an X restart): a stat against the
+				# socket costs nothing and recovers by itself.
+				_waited=0
+				while [ ! -S "$4" ]; do
+					sleep 2; _waited=$((_waited+1))
+					if [ "$_waited" -ge 300 ]; then
+						echo "zz_crt_dual_vnc: X socket $4 still absent after $((_waited*2))s — VNC off" >>"$3"
+						break 2
+					fi
+				done
+				_t0=$SECONDS
 				"$2" >>"$3" 2>&1
-				_rc=$?
-				[ "$_rc" = 0 ] && break
+				[ "$?" != 0 ] || break
+				if [ $((SECONDS-_t0)) -ge "$5" ]; then
+					_fails=0
+				else
+					_fails=$((_fails+1))
+				fi
+				if [ "$_fails" -ge "$6" ]; then
+					echo "zz_crt_dual_vnc: x11vnc died $_fails times in a row within ${5}s of starting (see above) — crash-loop, VNC off" >>"$3"
+					break
+				fi
 				sleep 2
 			done
 			rm -f "$1"
-		' _ "$PIDFILE" "$VNC" "$LOG" >/dev/null 2>&1 &
+		' _ "$PIDFILE" "$VNC" "$LOG" "$XSOCK" "$HEALTHY_S" "$MAXFAILS" >/dev/null 2>&1 &
 		sleep 2
 		if pgrep -x x11vnc >/dev/null 2>&1; then
 			echo "zz_crt_dual_vnc: x11vnc started (port 5900, DISPLAY=$DISPLAY, respawn loop) — log: $LOG"
@@ -83,7 +119,7 @@ case "$1" in
 		;;
 
 	stop)
-		PIDFILE="/tmp/crt-dual-vnc.pid"
+		PIDFILE="${CRT_DUAL_VNC_PIDFILE:-/tmp/crt-dual-vnc.pid}"
 		# Kill the loop FIRST (stops the respawning), then x11vnc.
 		if [ -f "$PIDFILE" ]; then
 			kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null || true

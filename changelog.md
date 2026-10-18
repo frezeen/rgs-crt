@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-19 — remote access stops fighting a screen that is not there yet
+
+- **The remote view service no longer restarts itself in a loop when the
+  display server is not up yet.** At boot, or after a restart of the display
+  server, it waits at no cost instead of starting the viewer every two
+  seconds — that used to mean hundreds of starts in one morning, each one a
+  probe of the display, and tens of thousands of log lines. The remote view
+  comes back as soon as the screen is there.
+- **If the viewer cannot stay up for another reason, it gives up after a few
+  tries and writes why in its log**, instead of spinning forever. A viewer
+  that died after a healthy run still comes back on its own, as before.
+
 ## 2026-10-18 — leaving a game is one clean change; a screen plugged in is handled once
 
 - **Leaving a game restores the desktop with a single change.** The layer now
@@ -149,51 +161,3 @@ read. The layer now opens it with a size that fits 480i.
 
 **The check tool shows what it is doing.** The check entry prints the live
 steps of its check and update, and keeps the steps on the result screen.
-
-## 2026-10-11 — the Windows-arcade systems reach the tube
-
-**Three more arcade systems on the tube.** Adrenaline Arcade, Arcade PC and
-UNIS Arcade Machines now start on the 15 kHz signal instead of staying on the
-LCD: their games fill the 4:3 glass at 480i, with the picture reaching the
-edges. Checked on the glass with Candy Crush Arcade, Arctic Thunder, Friction,
-Subway Surfers Arcade and Dino Invasion. The 4:3 titles fill the tube the way
-the cabinet shows them; the wide-screen ones fill it stretched — the same
-declared trade the PS3 and Xbox 360 rows already make. Every game keeps the
-look it ships with, its own cabinet frame included, exactly as the original
-does.
-
-**The rest of the Windows-arcade family is ready.** The other RGS
-Windows-arcade systems — the Taito Type X family, Global VR, Sega Nu and
-Konami PC — get the same tube treatment, so their games will start on the tube
-the moment their content is on the machine. No game of theirs is on this box
-yet, so none has been measured: the compatibility map lists them as not yet
-tested.
-
-**Windows-arcade games start again.** A change meant to release the screen
-when a game closes could also end a game that had just started, so the
-Windows-arcade titles — the Raw Thrills shooters included — stopped launching.
-Fixed: the release now waits until the game has really gone, so a game that is
-still running is never touched.
-
-## 2026-10-11 — the check entry keeps itself current, and RGS 43.58 is certified
-
-**Opening the check entry is now all it takes.** "RGS-CRT CHECK & UPDATE" no
-longer waits for a keypress: opening it looks for a newer release of the
-layer, installs one on the spot when it is certified for this box,
-re-certifies against the RGS version the box runs, and shows the result.
-Each step is shown on screen, and written to the log, errors included.
-
-**It never reboots on its own.** A layer update installs in place; you
-restart when RGS itself says a reboot is due — the tool asks nothing of the
-machine and never touches a running game.
-
-**The version now follows the RGS it ran on.** Once the layer certifies on a
-new RGS, its version takes that RGS number (for example 43.58.0), so the
-check line and the RGS you are running agree — even before a release for
-that number is published.
-
-**New arcade systems written down.** The Windows-arcade systems RGS ships
-(typex, typex2, nesicax, nesicax2) are now listed in the compatibility map
-as not yet covered: they run stock until a profile is measured, exactly like
-globalvr and arcadepc.
-
