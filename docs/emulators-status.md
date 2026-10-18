@@ -3,7 +3,7 @@
 This layer runs INSIDE stock RGS and reverts cleanly.
 
 This is the honest per-system status of the **RGS 15 kHz CRT** profile.
-Certification box: RGS 43.63 (live 2026-10-16; Batocera 43.1
+Certification box: RGS 43.65 (live 2026-10-18; Batocera 43.1
 base), x86_64, arcade tube in the demonstrated 13.6–16.2 kHz range —
 the recent verdicts were measured on the AMD R9 270X machine, and the
 layer is also certified on an NVIDIA GTX 970; Intel hardware carries a
@@ -83,11 +83,13 @@ starts.
 | Arcade — Sega Model 3 (model3) | The arcade's 3D picture fills the whole 4:3 tube at 480i — measured `Daytona USA 2` full-frame from the board's native raster, no upscale chain, no stretch | common + native render (upscale off, 640x480) | TESTED 2026-10-17 |
 | Arcade — Sega Hikaru (hikaru) | The arcade's 3D picture fills the whole 4:3 tube at 480i — measured `Air Trix` full-frame, no bars, no stretch: the emulator renders its native 640x480 raster and the window wrapper presents it 1:1 | common + gamescope 640x480@60 fullscreen (pixel filter, the wrapper is a 1:1 present here) + native render (`demulRatio=1`) | TESTED 2026-10-17 |
 | Namco System 246/256 (namco2x6) | The arcade's own 4:3 picture fills the whole tube — no black bars, no stretch — drawn at the game's native scale with no upscaling or sharpening. The console emulator's default drawing mode squeezes this progressive 480p title to 3:2 and leaves bars; the profile pins the cabinet's true 4:3 proportions instead | common + the game's aspect pinned to standard 4:3 (the emulator's progressive default is 3:2) + native 1x render | TESTED 2026-10-10 |
-| Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
-| Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Verified on Arctic Thunder and Friction (4:3: full-bleed, as the cabinet shows them) and on Subway Surfers Arcade (16:9: full-bleed stretched — the same declared trade as the PS3/Xbox 360 rows) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
-| UNIS Arcade Machines (unis) | The arcade's own picture fills the whole 4:3 tube at 480i, text legible. Verified on Dino Invasion | common + the tube raster on the stock video-mode key (`unis.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) | TESTED 2026-10-11 |
+| Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) from a 1280x720 render canvas | TESTED 2026-10-11 |
+| Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Verified on Arctic Thunder and Friction (4:3: full-bleed, as the cabinet shows them) and on Subway Surfers Arcade (16:9: full-bleed stretched — the same declared trade as the PS3/Xbox 360 rows) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) from a 1280x720 render canvas | TESTED 2026-10-11 |
+| UNIS Arcade Machines (unis) | The arcade's own picture fills the whole 4:3 tube at 480i, text legible. Verified on Dino Invasion | common + the tube raster on the stock video-mode key (`unis.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) from a 1280x720 render canvas | TESTED 2026-10-11 |
 | Sega Lindbergh (lindbergh) | The arcade's own picture fills the whole 4:3 tube at 480i — measured `After Burner Climax` full-frame one-to-one (no scaling, no filter), score and instruction text legible. The board's picture is 640x480 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive; the loader itself renders at the 640x480 the platform gives), so the tube carries that same untouched raster **interlaced** at 640x480i 15.69kHz | common only (no per-system keys; the stock generator needs no bios) | TESTED 2026-10-17 |
-| Arcade — Windows pinball — Zen Studios (pinballfx, pinballfx2, pinballfx3, pinballm) | The HD table fills the whole 4:3 tube at 480i — measured `Amusement Park` full-frame (99.6%), text legible one-to-one. The games draw on a full-HD canvas and the window wrapper stretches that onto the tube. The four run the same stock `winebat` launcher and runner and the same block, so this one launch certifies all four | common + the tube raster (`pinballfx3.videomode = 640x480i`) + gamescope 864x486@60 full-screen stretch, pixel filter, no sharpening | TESTED 2026-10-17 (pinballfx3) |
+| Arcade — Windows pinball — Zen Studios (pinballfx, pinballfx2, pinballfx3, pinballm) | Full-frame 4:3 picture fills the whole tube at 480i, text legible one-to-one. Measured on the glass across the family: `The Addams Family` (Pinball FX, 99.3%, 4.6% GPU load), `V12` (Pinball FX2, 99.6%, 1.5% GPU load), `Amusement Park` (Pinball FX3, 99.6%, 6.3% GPU load), and `Chucky` (Pinball M, 99.6%, 85.0% GPU load). Pinball FX, Pinball FX2 and Pinball M render native 640x480i without gamescope; Pinball FX3 wraps its 1080p canvas onto the tube via gamescope. | common + native 640x480i raster (`pinballfx.videomode = 640x480i`, `gamescope = 0` for pinballfx/pinballfx2/pinballm; gamescope 1080p canvas for pinballfx3) | TESTED 2026-10-18 (pinballfx, pinballfx2, pinballfx3, pinballm) |
+| Windows pinball — Magic Pixel (zaccariapinball) | Full-frame 4:3 picture fills the whole tube at 480i, text legible one-to-one. Measured on the glass on `Aerobatics` (99.6% FILL, 2.8% GPU load). Renders native 640x480i without gamescope. | common + native 640x480i raster (`zaccariapinball.videomode = 640x480i`, `gamescope = 0`) | TESTED 2026-10-18 (zaccariapinball) |
+| Laserdisc Arcade — Daphne & Singe (daphne, singe) | Full-frame 4:3 picture fills the whole tube at 480i without distortion or letterboxing, text and score legible one-to-one. Measured on Dragon's Lair (`lair.hypseus`, 99.6% FILL, 0.9% GPU load). The emulator renders native 640x480; stock per-game `-x 1920 -y 1080` CLI overrides from `.commands` are dropped on CRT so the video and the arcade digital scoreboard fill the tube edge to edge without zoom or cropping. Singe games run on the same pipeline. | common + post-generate CLI drop of `-x -y` and append of `-x 640 -y 480` ([hypseusSingeGenerator.py]) | TESTED 2026-10-18 (daphne, singe) |
 
 **Every verdict includes the exit:** the session ends, everything
 returns to the desktop state, and the system reports clean.
@@ -166,7 +168,6 @@ No content on the certification box, or one specific behavior still
 unproven — listed, never claimed:
 
 - switch,
-  daphne, singe,
   apple2, enterprise,
   fmtowns, moonlight (needs a streaming host
   PC), dxx-rebirth, win311, win95.
@@ -180,12 +181,6 @@ unproven — listed, never claimed:
   `max-*` video-mode keys for them inside its tuning zone, and its
   per-game keys win over ours. `gaelco` is deliberately left out: it is a
   MAME-driven system, not one of these Windows ones.
-- `zaccariapinball` (Magic Pixel) — the fifth Windows-pinball system, the
-  sibling of the Zen four now in the tested table above. It runs the same
-  `winebat` launcher and the same staged tube block, but on the `wine-proton`
-  runner with a mesa extension override instead of the `ge-custom` runner the
-  Zen four share, so it is a variant of its own and takes its own launch. No
-  game has been measured on the glass here yet.
 - `itchio`, `namcoes3` — uncovered since the RGS 43.44–43.54 range,
   same state as the two above: no block, no content. Listed here so
   the gap is written down instead of remembered.

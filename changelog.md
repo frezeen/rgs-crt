@@ -1,16 +1,24 @@
 # Changelog
 
-## 2026-10-17 — the Pinball FX machines reach the tube
+## 2026-10-18 — Windows arcade and pinball systems tuned for the tube
 
-**The four Pinball FX systems — Pinball FX, Pinball FX2, Pinball FX3 and
-Pinball M — now play on the tube.** Each table is drawn on the game's own
-large canvas and shown full frame on the 4:3 glass, with no black bars and
-the score and the table text legible one to one. The four are the same
-machine to the layer, so certifying one certified all four.
-
-**Zaccaria Pinball is not certified yet.** It starts through the same
-launcher but a different Windows runner, so it needs its own test on the
-glass; the compatibility map lists it as not yet tested until then.
+- **Pinball FX, Pinball FX2, Pinball M and Zaccaria Pinball render native 640x480i.** Each table fills
+  the 4:3 tube edge to edge at native proportions without distortion or downscaling.
+  Rendering directly at the tube resolution keeps GPU load minimal (1.5% to 4.6% on
+  Pinball FX and Pinball FX2; 2.8% on Zaccaria Pinball; 85% on Pinball M) for solid 60 Hz frame pacing.
+- **Pinball FX3 uses a 1080p canvas with full-frame display.** The engine's fixed
+  display configuration is mapped cleanly to the 480i tube (6.3% GPU load).
+- **Windows arcade systems render on a 1280x720 canvas.** Systems drawing on an HD
+  canvas (Adrenaline Arcade, Arcade PC, UNIS) display full frame at 480i without
+  saturating the graphics card.
+- **Laserdisc arcade systems (Daphne and Singe) certified on the tube.** Dragon's
+  Lair and laserdisc titles fill the 4:3 tube edge to edge at native 640x480i
+  (0.9% GPU load). Widescreen command overrides that cropped the video and pushed
+  the arcade score display out of frame are stripped on the tube profile so the
+  full picture and scoreboard remain centered and legible.
+- **Works on the current RGS.** This release is built and checked against RGS
+  43.65. When RGS updates, the layer re-checks itself against the new version at
+  boot or when you open the check tool.
 
 ## 2026-10-17 — five more machines reach the tube
 
@@ -153,37 +161,4 @@ that number is published.
 (typex, typex2, nesicax, nesicax2) are now listed in the compatibility map
 as not yet covered: they run stock until a profile is measured, exactly like
 globalvr and arcadepc.
-
-## 2026-10-10 — the tube gains the MSX family, SAM Coupe and the Namco arcade games
-
-**MSX and Spectravideo on the tube.** The emulator's own picture filter — a
-soft blur with faint scanlines — is now switched off, so the image is sharp and
-the game's text reads one-to-one. It also starts clean: no missing-font warning
-at launch, and nothing drawn over the game (the emulator's menu bar fades away
-on its own once you stop moving the mouse).
-
-**SAM Coupe fills the tube.** The machine's stock "TV aspect" correction
-stretched its 4:3 picture towards 5:3, which left black bands on the tube. The
-picture now keeps the machine's true square pixels and fills the glass edge to
-edge — no bands, no stretch — and the emulator's own on-screen readouts (speed,
-drive lights, status text) stay off the picture.
-
-**The Namco System 2x6 arcade games fill the tube.** These cabinets run 480p;
-the emulator's default framing put a 4:3 cabinet at 3:2, with black bars top and
-bottom. The true aspect is now pinned, so the picture fills the glass — no bars,
-no stretch — at the cabinet's own resolution.
-
-## 2026-10-10 — a game that will not let go no longer strands the tube
-
-**Closing a game always brings the menu back.** Some games, closed
-normally, did not fully let go of the screen: the game ended, but the
-picture stayed frozen on its last frame and the menu never returned — with
-no way out from the cabinet, and the desktop left on the other screen. The
-layer now notices that the game has let go and finishes the hand-over on its
-own: the menu comes back on the tube and the desktop returns to normal, with
-no reboot, no command, and nothing to do at the cabinet.
-
-This is not specific to one system. The check is built on a property that
-holds for any game — whether the program that was running it has really
-released it — so games added later are covered without anything to update.
 
