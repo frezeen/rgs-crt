@@ -26,6 +26,10 @@ PROFILE_FILE="${CRT_DUAL_PROFILE_FILE:-/tmp/crt-dual/profile}"
 # exit (owner-observed ~1 s FullHD flash at 2 s, 2026-09-20). 0.5 s keeps
 # the wake quick; the per-iteration work is cheap status reads.
 POLL="${CRT_DUAL_RECONCILE_POLL:-0.5}"
+# Finestra di attesa su una RIMOZIONE (poll). Misurato 2026-10-18: staccare un
+# cavo e' spesso il primo gesto di uno spostamento; applicare subito costa due
+# apply e ~1 s di pannello nero, aspettare no (il layout resta quello di prima).
+DEBOUNCE_POLLS="${CRT_DUAL_DEBOUNCE_POLLS:-4}"
 LOG="${CRT_DUAL_RECONCILE_LOG:-/userdata/system/logs/display-reconcile.log}"
 ITERS="${CRT_DUAL_RECONCILE_ITERS:-0}" # 0 = forever (tests set a finite count)
 log() { echo "RECONCILE [$(date +%H:%M:%S)]: $*" | tee -a "$LOG" 2>/dev/null || true; }
@@ -51,6 +55,21 @@ _session_active() { [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; }
 #
 # Both probes are seamed so the breaker's LOGIC is testable without a live
 # game (the house style: seams for live paths).
+_es_pid() { # il pid di ES: il PROPRIETARIO della finestra, non un match di cmdline
+	# Misurato 2026-10-18 sera: qualunque processo la cui riga di comando
+	# contenga "dbus-run-session ... emulationstation" soddisfa la vecchia
+	# sonda — tre eventi es-pid falsi in una serata, con ES vivo e immobile
+	# dalle 19:05. Il proprietario della finestra ES e' ES per costruzione;
+	# il fallback e' ANCORATO all'inizio (una shell che nomina la stringa non
+	# lo soddisfa).
+	local p
+	if command -v xdotool >/dev/null 2>&1; then
+		p=$(DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation getwindowpid 2>/dev/null | head -1)
+		[ -n "$p" ] && { printf '%s\n' "$p"; return 0; }
+	fi
+	pgrep -f '^dbus-run-session -- emulationstation' 2>/dev/null | head -1 || true
+}
+
 _emu_alive() { # rc 0 while the session's emulatorlauncher waits
 	if [ -n "${CRT_DUAL_EMU_ALIVE_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_EMU_ALIVE_CMD"
@@ -190,26 +209,193 @@ _write_detect_state() { # compatible state for the selector/apply_profile reader
 	} >"$STATE_DIR/detect-state.tmp" 2>/dev/null && mv "$STATE_DIR/detect-state.tmp" "$STATE_DIR/detect-state" 2>/dev/null || true
 }
 
+# ── la finestra di ES deve stare sullo schermo ────────────────────────────
+# Misurato 2026-10-18 (il pasticcio dell'hotplug): ES si riavvia da solo sui
+# cambi di modo — e' il wrapper di Batocera — e torna con la geometria che
+# trovava ALLORA. Il nostro `windowsize` non lo smuove: ES impone la sua
+# (provato a mano: la finestra e' rimasta 1920x1080, e il log lo dichiarava
+# fatto). Le due forme viste sul campo sono ENTRAMBE di geometria: 640x480 su
+# schermo 1920x1080 (il "quadretto" in un angolo) e 1920x1080 su 640x480 (il
+# menu che non appare, schermo nero). Quindi: post-condizione di geometria, e
+# la riparazione che FUNZIONA — il riavvio di ES — una volta, con una pausa di
+# sicurezza: un loop di riavvii sarebbe peggio del difetto.
+ES_RESTART_COOLDOWN="${CRT_DUAL_ES_RESTART_COOLDOWN:-60}"
+_es_win() { DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation 2>/dev/null | head -1; }
+_es_screen() { _x | sed -n 's/^Screen 0:.*current \([0-9]*\) x \([0-9]*\).*/\1x\2/p' | head -1; }
+_es_ok() { # rc 0 = la finestra di ES e' grande quanto lo schermo (o non c'e' ES)
+	command -v xdotool >/dev/null 2>&1 || return 0
+	local wid sw ww i nwin
+	# "Nessuna finestra" e' normale (ES in riavvio) ma NON e' "va bene": misurato
+	# 2026-10-18 21:23 e 21:34, nell'istante del controllo la finestra non c'era
+	# e il verdetto cadeva in silenzio su "non decido" -> nessuna riparazione,
+	# mentre il nudge, nello stesso secondo, la finestra la vedeva. Quindi si
+	# ASPETTA la finestra (tentativi brevi dentro la passata): quella che torna
+	# e' quella vera, e solo allora si confronta con lo schermo.
+	wid=""; i=0
+	while [ "$i" -lt 4 ]; do
+		wid=$(_es_win)
+		[ -n "$wid" ] && break
+		sleep 0.4
+		i=$((i + 1))
+	done
+	[ -n "$wid" ] || { log "es-check: nessuna finestra ES dopo 4 tentativi — non decido"; return 0; }
+	# Diagnostica: piu' finestre della classe (screensaver/overlay?) renderebbero
+	# ambiguo il lookup — si usa la prima, ma lo si dice.
+	nwin=$(DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation 2>/dev/null | wc -l)
+	[ "${nwin:-0}" -gt 1 ] && log "es-check: $nwin finestre della classe emulationstation — uso la prima"
+	sw=$(_es_screen)
+	# "non decido" NON e' "va bene": se lo schermo non si legge (X occupata da un
+	# riavvio stock) lo si dice, o il difetto resta invisibile per minuti —
+	# misurato 2026-10-18: 9 minuti di finestra 1920x1080 e nessuna traccia.
+	[ -n "$sw" ] || { log "es-check: schermo illeggibile — non decido"; return 0; }
+	ww=$(DISPLAY="${DISPLAY:-:0}" xdotool getwindowgeometry "$wid" 2>/dev/null | sed -n 's/.*Geometry: //p')
+	[ -n "$ww" ] || { log "es-check: geometria di ES illeggibile — non decido"; return 0; }
+	[ "$ww" = "$sw" ] && return 0
+	log "es-check: finestra $ww su schermo $sw — il menu non puo' stare a schermo intero"
+	return 1
+}
+_es_content() { # % intero di pixel NON neri DENTRO la finestra di ES; vuoto se non misurabile
+	# Metodo documentato (2026-10-13): il framebuffer e' la verita' del VETRO, X no.
+	# Sana: ~75-99% (misurato 2026-10-18 su due geometrie). Pagina nera: ~0-25%.
+	[ -n "${CRT_DUAL_ES_CONTENT_CMD:-}" ] && { bash -c "$CRT_DUAL_ES_CONTENT_CMD"; return $?; }
+	command -v ffmpeg >/dev/null 2>&1 || return 1
+	local wid g pos x y w h sz f pct
+	wid=$(_es_win); [ -n "$wid" ] || return 1
+	g=$(DISPLAY="${DISPLAY:-:0}" xdotool getwindowgeometry "$wid" 2>/dev/null)
+	pos=$(printf '%s\n' "$g" | sed -n 's/.*Position: \([0-9-]*\),\([0-9-]*\).*/\1,\2/p')
+	w=$(printf '%s\n' "$g" | sed -n 's/.*Geometry: \([0-9]*\)x\([0-9]*\).*/\1/p')
+	h=$(printf '%s\n' "$g" | sed -n 's/.*Geometry: \([0-9]*\)x\([0-9]*\).*/\2/p')
+	[ -n "$w" ] && [ -n "$h" ] || return 1
+	sz=$(_x | sed -n 's/^Screen 0:.*current \([0-9]* x [0-9]*\).*/\1/p' | tr -d ' ')
+	[ -n "$sz" ] || return 1
+	x=${pos%,*}; y=${pos#*,}
+	# ritaglio entro lo schermo (nella forma del difetto la finestra E' piu' grande)
+	[ "$((x + w))" -gt "${sz%x*}" ] && w=$(( ${sz%x*} - x ))
+	[ "$((y + h))" -gt "${sz#*x}" ] && h=$(( ${sz#*x} - y ))
+	[ "$w" -gt 0 ] && [ "$h" -gt 0 ] || return 1
+	f=$(mktemp /tmp/crt-dual-content.XXXXXX.png) || return 1
+	timeout 5 env DISPLAY="${DISPLAY:-:0}" ffmpeg -y -loglevel error -f x11grab -video_size "$sz" -i :0 -frames:v 1 "$f" 2>/dev/null || { rm -f "$f"; return 1; }
+	pct=$(ffmpeg -v error -i "$f" -vf "crop=$w:$h:${x:-0}:${y:-0},format=gray" -f rawvideo - 2>/dev/null |
+		od -An -tu1 -v | tr -s ' ' '\n' | awk 'NF==1 { n++; if ($1 > 8) m++ } END { if (n) printf "%d", 100*m/n }')
+	rm -f "$f"
+	[ -n "$pct" ] || return 1
+	printf '%s\n' "$pct"
+}
+_es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'Left'
+	# Il MOUSE non sveglia ES (due prove su due, 2026-10-18); la freccia sinistra
+	# si' (l'owner congeda cosi' lo screensaver). Ma "Left" e' un'AZIONE
+	# (indietro/naviga): si manda SOLO quando il contenuto e' nero, mai a ogni
+	# passata — altrimenti la selezione scivolerebbe a ogni uscita.
+	local pct
+	pct=$(_es_content) || return 0
+	[ -n "$pct" ] || return 0
+	# Soglia misurata: il difetto (pagina nera con la barra) sta a ~7%; una
+	# pagina legittima SCURA sta a ~47% (vista sul banco il 2026-10-18); le sane
+	# piene a 75-99%. 25% separa con margine da tutte e due.
+	if [ "$pct" -lt "${CRT_DUAL_ES_CONTENT_MIN:-25}" ]; then
+		log "es-content: ${pct}% non-nero — la pagina non si e' disegnata: spingo con 'Left'"
+		DISPLAY="${DISPLAY:-:0}" xdotool key --clearmodifiers Left 2>/dev/null || true
+		sleep 0.5
+		pct=$(_es_content) || return 0
+		log "es-content: dopo lo stimolo ${pct}% non-nero"
+	else
+		log "es-content: ${pct}% non-nero"
+	fi
+}
+
+_es_repair() { # la riparazione che funziona, UNA volta, con pausa di sicurezza
+	local now last
+	now=$(date +%s)
+	last=$(cat "$STATE_DIR/es-restarted" 2>/dev/null)
+	case "$last" in '' | *[!0-9]*) last=0 ;; esac
+	if [ $((now - last)) -lt "$ES_RESTART_COOLDOWN" ]; then
+		log "es-repair: cooldown ($((now - last))s < ${ES_RESTART_COOLDOWN}s) — non riavvio"
+		return 1
+	fi
+	printf '%s\n' "$now" >"$STATE_DIR/es-restarted" 2>/dev/null || true
+	log "es-repair: riavvio EmulationStation (finestra fuori misura)"
+	if [ -n "${CRT_DUAL_ES_RESTART_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_ES_RESTART_CMD"
+	else
+		batocera-es-swissknife --restart >/dev/null 2>&1 || log "es-repair: il riavvio di ES e' fallito"
+	fi
+}
+
+# ── una topologia per PASSATA ─────────────────────────────────────────────
+# Il primo lettore della passata la dichiara (display-detect.sh --state, UN
+# processo) e la esporta: modello, apply e sonde del prep la ricevono. La
+# topologia non cambia dentro una passata — nemmeno dopo una scrittura di modo
+# — quindi non si invalida come lo stato dei modi. Costo evitato: un detect
+# intero costa ~0.5 s su dce_v6 (misurato 2026-10-18: tre per passata = 1,4 s
+# a ogni uscita e a ogni avvio).
+_detect_state() {
+	local out
+	_detect_done
+	out=$(bash "$HERE/display-detect.sh" --state 2>/dev/null) || out=""
+	if [ -z "$out" ]; then
+		return 1 # best-effort: senza preload ogni consumatore legge da solo
+	fi
+	CRT_DUAL_DETECT_CHECK=$(printf '%s\n' "$out" | sed -n 's/^CHECK	//p' | head -1)
+	CRT_DUAL_DETECT_LIST=$(printf '%s\n' "$out" | sed -n 's/^LIST	//p')
+	export CRT_DUAL_DETECT_CHECK CRT_DUAL_DETECT_LIST
+}
+_detect_done() { unset CRT_DUAL_DETECT_CHECK CRT_DUAL_DETECT_LIST; }
+
+_prep_ok() { # $1 = il piano della FASE SESSION -> rc 0 se la post-condizione regge
+	# Il prep promette quattro cose e prima ne verificava due (modo attivo e
+	# kernel, via _target_active). NON verificava la primary, il residuo di
+	# scale, ne' lo SCREEN: un pannello che non aveva preso la primary
+	# PASSAVA, e il gioco — che renderizza sull'output primary — finiva sulla
+	# CRT. Una lettura di stato per tutto il controllo.
+	local plan="$1" name on _m prim _p _sc x cm cs scr want
+	x=$(_x)
+	while IFS=$'\t' read -r name on _m prim _p _sc; do
+		[ "$name" = "SCREEN" ] && continue
+		cm=$(printf '%s\n' "$x" | sed -n "/^$name connected/,/^[^ ]/p" | awk '$0 ~ /\*/ { print $1; exit }')
+		if [ "$on" = "on" ]; then
+			[ -n "$cm" ] || { log "prep($name): nessun modo attivo"; return 1; }
+			[ "$(printf '%s\n' "$x" | awk -v o="$name" '$1 == o { print ($0 ~ / primary/) ? "y" : "n"; exit }')" = "y" ] \
+				|| { log "prep($name): NON primary — il gioco renderizzerebbe sull'altro output"; return 1; }
+			cs=$(printf '%s\n' "$x" | awk -v o="$name" '$1 == o { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+[0-9]+\+[0-9]+$/) { split($i, p, "+"); print p[1]; exit } }')
+			[ "$cs" = "${cm%i}" ] || { log "prep($name): scalato ($cs != ${cm%i}) — un residuo di scale manda il gioco in un framebuffer piccolo"; return 1; }
+			_target_active "$name" || return 1
+		else
+			[ -z "$cm" ] || { log "prep($name): ancora attivo, doveva essere libero"; return 1; }
+		fi
+	done <<<"$plan"
+	scr=$(printf '%s\n' "$plan" | awk -F'\t' '$1 == "SCREEN" { print $2; exit }')
+	if [ -n "$scr" ] && [ "$scr" != "none" ]; then
+		want=$(printf '%s\n' "$x" | sed -n 's/^Screen 0:.*current \([0-9]* x [0-9]*\).*/\1/p' | tr -d ' ')
+		[ "$want" = "$scr" ] || { log "prep: SCREEN ${want:-?} != $scr"; return 1; }
+	fi
+	return 0
+}
+
 _session_start() { # $1 = crt|lcd — hand the display to the game (stock owns the raster)
-	local target="$1" out crt lcd other tname rc=0 _err
+	local target="$1" prep tname other rc=0 _err
 	case "$target" in crt | lcd) ;; *) echo "display-reconcile: --session-start needs crt|lcd" >&2; return 2 ;; esac
 	_reconcile_lock || { echo "display-reconcile: session-start: lock busy" >&2; return 1; }
-	out=$(_topology) || { echo "display-reconcile: session-start: detect failed" >&2; _reconcile_unlock; return 1; }
-	crt=$(printf '%s' "$out" | sed -n 's/.*crt=\([^ ]*\).*/\1/p')
-	lcd=$(printf '%s' "$out" | sed -n 's/.*lcd=\([^ ]*\).*/\1/p')
+	_detect_state || true # una topologia per passata, come nel giro d'uscita
+	# La fase SESSION la dichiara il MODELLO (display-model.sh --session): il
+	# bersaglio on+primary e NON scalato, l'altro libero, e lo SCREEN che ne
+	# segue. Prima viveva solo nelle richieste qui sotto, quindi non era ne'
+	# dichiarata ne' testabile.
+	prep=$(bash "$HERE/display-model.sh" --session "$target") || {
+		log "session-start: il modello ha rifiutato il piano di sessione (detect giu' o nessun modo offerto)"
+		_reconcile_unlock
+		return 1
+	}
+	tname=$(printf '%s\n' "$prep" | awk -F'\t' '$2 == "on" { print $1; exit }')
+	other=$(printf '%s\n' "$prep" | awk -F'\t' '$2 == "off" { print $1; exit }')
 	_write_detect_state
-	if [ -z "$crt" ] || [ -z "$lcd" ]; then
-		log "session-start: single-display topology (crt=${crt:-none} lcd=${lcd:-none}) — nothing to prep, stock owns the launch"
+	if [ -z "$tname" ] || [ -z "$other" ]; then
+		log "session-start: single-display topology — nothing to prep, stock owns the launch"
 		_reconcile_unlock
 		return 0
 	fi
 	if [ "$target" = "crt" ]; then
-		other="$lcd"
-		tname="$crt"
 		_err=$(xrandr --output "$other" --off 2>&1) || { log "session-start: $other off FAILED: $_err"; rc=1; }
 	else
-		other="$crt"
-		tname="$lcd"
 		# Non-destructive takeover — THREE requests, panel first, CRT last
 		# (owner bug 2026-10-13, measured live on the box).
 		#
@@ -236,41 +422,49 @@ _session_start() { # $1 = crt|lcd — hand the display to the game (stock owns t
 		# Three requests, never merged: `--transform` is never mixed with
 		# another output's `--scale-from` in one request (NVIDIA answers
 		# rc=0 and puts it on the wrong CRTC).
-		_err=$(xrandr --output "$lcd" --transform none 2>&1) || { log "session-start: $lcd transform-clear FAILED: $_err"; rc=1; }
+		_err=$(xrandr --output "$tname" --transform none 2>&1) || { log "session-start: $tname transform-clear FAILED: $_err"; rc=1; }
 		if [ "$rc" = "0" ]; then
-			_err=$(xrandr --output "$lcd" --primary --auto 2>&1) || { log "session-start: $lcd takeover FAILED: $_err"; rc=1; }
+			_err=$(xrandr --output "$tname" --primary --auto 2>&1) || { log "session-start: $tname takeover FAILED: $_err"; rc=1; }
 		fi
 		if [ "$rc" = "0" ]; then
-			_err=$(xrandr --output "$crt" --off 2>&1) || { log "session-start: $crt off FAILED: $_err"; rc=1; }
+			_err=$(xrandr --output "$other" --off 2>&1) || { log "session-start: $other off FAILED: $_err"; rc=1; }
 		fi
 	fi
-	if [ "$rc" = "0" ] && _target_active "$tname"; then
-		log "session-start: $target session prepped ($other off, target active)"
+	if [ "$rc" = "0" ] && _prep_ok "$prep"; then
+		log "session-start: $target session prepped ($other off; target on+primary+unscaled)"
 		_reconcile_unlock
 		return 0
 	fi
 	if [ "$rc" = "0" ]; then
-		log "session-start: target $target not active after prep — one repair"
+		log "session-start: target $target not at the session plan after prep — one repair"
 		xrandr --output "$tname" --off 2>/dev/null || true
 		xrandr --output "$tname" --primary --auto 2>/dev/null || true # the off frees the CRTC, the takeover re-programs (measured two-step)
-		if _target_active "$tname"; then
+		if _prep_ok "$prep"; then
 			log "session-start: $target session prepped (after one repair)"
 			_reconcile_unlock
 			return 0
 		fi
 	fi
-	log "session-start: LOUD FAILURE — $target not active after prep+repair"
+	log "session-start: LOUD FAILURE — $target not at the session plan after prep+repair"
 	_reconcile_unlock
 	return 1
 }
 
 _sysfp() { # DRM status fingerprint (no display contact)
 	local f out=""
-	for f in /sys/class/drm/card*-*/status; do
+	for f in "$SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
 		out="$out $(basename "$(dirname "$f")"):$(cat "$f" 2>/dev/null)"
 	done
 	printf '%s' "$out" | tr ' ' '\n' | sort | tr '\n' ' '
+}
+_nconn() { # quanti connettori sono "connected" (stessa fonte di _sysfp)
+	local f n=0
+	for f in "$SYSFS"/card*-*/status; do
+		[ -f "$f" ] || continue
+		[ "$(cat "$f" 2>/dev/null)" = "connected" ] && n=$((n + 1))
+	done
+	printf '%s' "$n"
 }
 
 # The live display pass. CRT_DUAL_APPLY_CMD is a seam knob, same pattern as
@@ -293,34 +487,30 @@ _reconcile() {
 		_reconcile_unlock
 		return 0
 	fi
+	_detect_state || true # una topologia per passata (vedi _detect_state)
 	_write_detect_state
 	local out rc
 	out=$(_apply_pass --apply 2>&1)
 	rc=$?
+	_detect_done # dopo la scrittura si rilegge tutto fresco (il settle)
+	# La finestra di ES e' una post-condizione come lo SCREEN: vale anche
+	# quando non abbiamo scritto niente (l'uscita in topologia singola non
+	# scrive, ed e' il caso in cui il menu puo' restare nero).
 	if [ "$rc" = "0" ]; then
-		# Follow the screen, then repaint. Two owner-observed effects on
-		# the same apply: (1) ES keeps its old window geometry after a mode
-		# change — a 1920x1080 window on a 640x480 screen makes the menu
-		# never appear and the engine's solo-prep contract time out (rig
-		# DUAL-LCD cells, 2026-09-20); (2) it also keeps a stale GL frame
-		# until some input arrives. Resize to the screen and jiggle the
-		# mouse 2px: both are the harmless equivalents of the owner's
-		# manual fix.
-		if command -v xdotool >/dev/null 2>&1; then
-			_wid=$(DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation 2>/dev/null | head -1)
-			if [ -n "$_wid" ]; then
-				_sw=$(DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null \
-					| sed -n 's/.*current \([0-9][0-9]*\) x \([0-9][0-9]*\).*/\1x\2/p' | head -1)
-				_ww=$(DISPLAY="${DISPLAY:-:0}" xdotool getwindowgeometry "$_wid" 2>/dev/null \
-					| sed -n 's/.*Geometry: //p')
-				if [ -n "$_sw" ] && [ -n "$_ww" ] && [ "$_ww" != "$_sw" ]; then
-					DISPLAY="${DISPLAY:-:0}" xdotool windowsize "$_wid" $_sw 2>/dev/null || true
-					log "apply: ES window $_ww -> $_sw (followed the screen)"
-				fi
-			fi
-			DISPLAY="${DISPLAY:-:0}" xdotool mousemove_relative -- 2 0 2>/dev/null || true
-			DISPLAY="${DISPLAY:-:0}" xdotool mousemove_relative -- -2 0 2>/dev/null || true
-		fi
+		# A delta VUOTO la spinta la fa il riconciliatore: e' l'input che
+		# sblocca il frame stantio di ES, ed e' il caso in cui il menu resta
+		# nero (topologia singola: nessuna scrittura, misurato 2,3 s il
+		# 2026-10-18). Quando l'apply ha scritto, la spinta l'ha gia' fatta.
+		case "$out" in
+		*"zero writes"*) bash "$HERE/display-apply.sh" --es-follow ;;
+		esac
+		_es_ok || _es_repair
+	fi
+	if [ "$rc" = "0" ]; then
+		# La finestra di ES (geometria + frame stantio) la sistema ORA il
+		# writer, dentro display-apply, subito dopo il batch e PRIMA della
+		# verifica: li' costa zero e la fessura del fotogramma tagliato non
+		# esiste. Qui non si tocca piu' niente (misurato 2026-10-18).
 		_reconcile_unlock
 		return 0
 	fi
@@ -374,6 +564,7 @@ case "${1:---check}" in
 	_win_on=0
 	_win_gone=0
 	_emu_polls=0
+	_sess_pids=""
 	_prev_sess=0
 	_sd_logged=0
 	# Minimum launcher age (polls) before the breaker may fire: it rides out
@@ -387,8 +578,11 @@ case "${1:---check}" in
 	STABLE_POLLS="${CRT_DUAL_BREAKER_STABLE_POLLS:-10}"
 	_first=1
 	settle=0
+	debounce=0
+	_prev_n=$(_nconn)
 	i=0
 	while true; do
+		_detect_done # nessun preload sopravvive al poll: vale per UNA passata
 		i=$((i + 1))
 		if [ "$ITERS" -gt 0 ] && [ "$i" -gt "$ITERS" ]; then break; fi
 
@@ -417,6 +611,7 @@ case "${1:---check}" in
 			_win_on=0
 			_win_gone=0
 			_emu_polls=0
+			_sess_pids=""
 			_sd_logged=0
 		fi
 		_prev_sess=$_sess_now
@@ -436,6 +631,16 @@ case "${1:---check}" in
 				_game_seen=1
 				_win_on=$((_win_on + 1))
 				_win_gone=0
+				# I processi vivi MENTRE il gioco e' a schermo. Solo cio' che
+				# esiste qui puo' reggere la pipe del gioco morto: quel che nasce
+				# DOPO la sparizione della finestra e' lavoro NUOVO del launcher
+				# (misurato 2026-10-18, daytona/model2: il breaker uccise il
+				# `batocera-resolution setMode` che emulatorlauncher stava
+				# eseguendo; videoMode.py lesse il non-zero come "set failed",
+				# ritento' con max_tries=2 e il tubo prese un secondo mode-set
+				# identico — causato da noi, non dallo stock).
+				_sess_pids=""
+				for _d in /proc/[0-9]*; do _sess_pids="$_sess_pids ${_d#/proc/}"; done
 			elif [ "${_game_seen:-0}" = 1 ]; then
 				_win_gone=$((_win_gone + 1))
 				# adaptive grace: an ESTABLISHED session (the window was on
@@ -445,14 +650,25 @@ case "${1:---check}" in
 				if [ "$_win_on" -ge "$STABLE_POLLS" ]; then _grace=1; else _grace=3; fi
 				if [ "$_win_gone" -ge "$_grace" ] && [ "$_emu_polls" -ge "$EMU_MIN_POLLS" ]; then
 					_emu_pids="$(pgrep -f emulatorlauncher 2>/dev/null | tr '\n' ' ')"
-					_writers="$(_pipe_writers $_emu_pids | tr '\n' ' ')"
+					# shellcheck disable=SC2086 # a pid list is the point
+					_raw="$(_pipe_writers $_emu_pids | tr '\n' ' ')"
+					_writers=""
+					for _w in $_raw; do
+						case "${_sess_pids} " in
+						*" $_w "*) _writers="${_writers:+$_writers }$_w" ;;
+						esac
+					done
 					if [ -n "${_writers// /}" ]; then
-						log "deadlock breaker: game closed (window gone) while emulatorlauncher waits — closing its pipe writers (${_writers% })"
+						log "deadlock breaker: game closed (window gone) while emulatorlauncher waits — closing its pipe writers (${_writers})"
 						# shellcheck disable=SC2086 # a pid list is the point
 						kill $_writers 2>/dev/null || true
 						sleep 0.3
 						# shellcheck disable=SC2086 # wine helpers ignore SIGTERM
 						kill -9 $_writers 2>/dev/null || true
+					elif [ -n "${_raw// /}" ]; then
+						# nessun holder preesistente: la pipe e' tenuta solo dal
+						# teardown del launcher. Non si spara, e si dice perche'.
+						log "deadlock breaker: holders all younger than the game's window (launcher teardown) — not reaping (${_raw% })"
 					fi
 					_win_gone=0
 				fi
@@ -483,26 +699,85 @@ case "${1:---check}" in
 		if [ -f "$STATE_DIR/hotplug-trigger" ]; then
 			rm -f "$STATE_DIR/hotplug-trigger" 2>/dev/null || true
 			fired="$fired manual"
-			udevadm trigger --action=change --subsystem-match=drm 2>/dev/null || true
+			# Una ri-scansione DRM vera: e' il canale per l'analogico, dove il
+			# kernel non emette eventi (misurato 2026-10-18: stato a
+			# `disconnected` 0,5 s dopo la combo, prima di ogni scrittura).
+			# CRT_DUAL_UDEVADM_CMD e' la vernice dei test: senza, la seam
+			# scatenerebbe una ri-scansione vera del box.
+			if [ -n "${CRT_DUAL_UDEVADM_CMD:-}" ]; then
+				bash -c "$CRT_DUAL_UDEVADM_CMD"
+			else
+				udevadm trigger --action=change --subsystem-match=drm 2>/dev/null || true
+			fi
 		fi
 		fp=$(_sysfp)
 		if [ "$fp" != "$prev_fp" ]; then
 			[ -n "$prev_fp" ] && fired="$fired sysfs"
 			prev_fp="$fp"
 		fi
-		es=$(pgrep -f 'dbus-run-session.*emulationstation' 2>/dev/null | head -1 || true)
+		es=$(_es_pid)
 		if [ "$es" != "$prev_es" ]; then
 			[ -n "$prev_es" ] && fired="$fired es-pid"
 			prev_es="$es"
 		fi
 		if [ -n "$fired" ]; then
-			log "event:$fired → reconcile"
-			_reconcile && settle=3 || true
+			_n=$(_nconn)
+			case " $fired " in
+			*" game-ended "* | *" boot-first-pass "*)
+				# L'uscita dal gioco e il primo giro convergono SUBITO: qui
+				# l'owner sta guardando e non c'e' nessun cavo in movimento.
+				_prev_n="$_n"; debounce=0
+				log "event:$fired → reconcile"
+				_reconcile && settle=3 || true
+				case " $fired " in *" game-ended "*) _es_content_gate ;; esac
+				;;
+			*)
+				if [ "$_n" -lt "$_prev_n" ]; then
+					# UNA USCITA IN MENO: e' il gesto che precede uno
+					# spostamento di cavo. Si aspetta la finestra: se l'uscita
+					# rientra, non si e' scritto niente (misurato: un rimbalzo
+					# costava due apply e ~1 s di pannello nero).
+					debounce="$DEBOUNCE_POLLS"
+					log "event:$fired → uscita in meno ($_n < $_prev_n): aspetto $debounce poll"
+				elif [ "$_n" -gt "$_prev_n" ]; then
+					# AGGIUNTA: cancella l'attesa e applica subito (e' quello che
+					# si vuole vedere).
+					debounce=0
+					log "event:$fired → aggiunta: reconcile"
+					_reconcile && settle=3 || true
+				elif [ "$debounce" -gt 0 ]; then
+					# Un evento che NON aggiunge un'uscita mentre la finestra e'
+					# aperta non la chiude: il gesto e' lo stesso (misurato
+					# 2026-10-18: due poke per un solo stacco, e il secondo
+					# applicava subito). Si continua ad aspettare.
+					log "event:$fired → nessuna aggiunta: la finestra resta aperta ($debounce poll)"
+				else
+					# Un'AGGIUNTA si applica subito: e' quello che si vuole vedere.
+					debounce=0
+					log "event:$fired → reconcile"
+					_reconcile && settle=3 || true
+				fi
+				_prev_n="$_n"
+				;;
+			esac
+		elif [ "$debounce" -gt 0 ]; then
+			debounce=$((debounce - 1))
+			if [ "$debounce" -eq 0 ]; then
+				log "debounce: nessuna aggiunta entro la finestra → reconcile"
+				_reconcile && settle=3 || true
+			fi
 		elif [ "$settle" -gt 0 ]; then
 			settle=$((settle - 1))
 			if ! _apply_pass >/dev/null 2>&1; then
 				log "settle-recheck: broken after a converged apply → reconcile"
 				_reconcile && settle=3 || true
+			else
+				# Anche il settle controlla la finestra di ES: esiste per lo
+				# stock che atterra DOPO il nostro apply, ed e' il caso in cui il
+				# menu resta fuori misura (misurato 2026-10-18: 20 righe
+				# "ES window ... NOT applied" in ~9 minuti e nessuna riparazione).
+				# Una lettura di stato per passata di settle.
+				_es_ok || _es_repair
 			fi
 		fi
 		sleep "$POLL"

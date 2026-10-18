@@ -18,11 +18,27 @@
 MODE_FILE="${CRT_DUAL_MODE_FILE:-/tmp/crt-dual-mode}"
 PROFILE_FILE="${CRT_DUAL_PROFILE_FILE:-/tmp/crt-dual/profile}"
 NOHOTPLUG_FILE="${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}"
+# MODALITA' HOLD (hotplug reale, 2026-10-18): il checker stock CONSUMA lo skip
+# (rm) a ogni suo giro, e i giri possono essere piu' d'uno per lo stesso gesto
+# (il checker del gesto precedente e l'init di ES). Una finestra di HOLD secondi
+# in cui il file viene ricreato rende la soppressione deterministica; alla
+# scadenza si rimuove, cosi' non resta nessun file stantio.
+HOLD="${CRT_DUAL_NOHOTPLUG_HOLD:-}"
 touched=0
-while [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; do
-	[ -f "$NOHOTPLUG_FILE" ] || : >"$NOHOTPLUG_FILE" 2>/dev/null
-	[ -f "$NOHOTPLUG_FILE" ] && touched=1
-	sleep 0.5
-done
+if [ -n "$HOLD" ] && [ "$HOLD" -gt 0 ] 2>/dev/null; then
+	i=0
+	while [ "$i" -lt "$((HOLD * 2))" ]; do
+		[ -f "$NOHOTPLUG_FILE" ] || : >"$NOHOTPLUG_FILE" 2>/dev/null
+		[ -f "$NOHOTPLUG_FILE" ] && touched=1
+		sleep 0.5
+		i=$((i + 1))
+	done
+else
+	while [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; do
+		[ -f "$NOHOTPLUG_FILE" ] || : >"$NOHOTPLUG_FILE" 2>/dev/null
+		[ -f "$NOHOTPLUG_FILE" ] && touched=1
+		sleep 0.5
+	done
+fi
 [ "$touched" = "1" ] && rm -f "$NOHOTPLUG_FILE" 2>/dev/null || true
 exit 0

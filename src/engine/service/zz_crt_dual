@@ -222,7 +222,12 @@ diag_capture_not_converged() {
 		# Gate is -f (exists), NOT -x: the service runs it via `bash`, so an
 		# executable bit is not required to launch it (2026-08-20 lesson).
 		if [ -f "$PKG_ROOT/src/display/display-reconcile.sh" ]; then
-			if ! pgrep -f "display-reconcile.sh" >/dev/null 2>&1; then
+			# Sonda ANCORATA alla riga di comando esatta del demone: la forma
+			# larga ("display-reconcile.sh") e' soddisfatta da qualunque comando
+			# che NOMINA il demone — compresa la shell che lancia il restart, che
+			# cosi' si fa dire "gia' attivo" e non lo avvia (misurato 2026-10-18:
+			# tre volte in una serata, da me).
+			if ! pgrep -f "^bash $PKG_ROOT/src/display/display-reconcile.sh --daemon" >/dev/null 2>&1; then
 				setsid nohup bash "$PKG_ROOT/src/display/display-reconcile.sh" --daemon >/dev/null 2>&1 &
 				echo "  display-reconcile started (live hotplug, one writer)"
 			else

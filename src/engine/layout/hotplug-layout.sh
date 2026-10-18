@@ -21,29 +21,43 @@
 STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
-# SESSION SUPPRESSION (2026-09-19 evening, handoff clobber): the STOCK checker
-# (udev 80-switch-screen, ENV{HOTPLUG}=="1") restarts ES ~2 s after the same
-# event; its display loop clobbers a just-handed-over solo-prep (gameStart
-# right after a hotplug: target blanked — logs/rig-chain-boot-crt-20260919-040*.txt)
-# and the ES restart tears down a running game. The checker honours
-# /tmp/no-hotplug as a ONE-SHOT skip (its own lines 91-96): set it only for a
-# real hotplug (HOTPLUG=1 — the exact condition the stock rule matches;
-# synthetic triggers never wake the checker, so they must not leave a stale
-# file) and only while our session guard is up. session-nohotplug.sh keeps
-# the file fresh for the whole session (a checker run whose delay lands
-# mid-launch is caught even when the event arrived before the guard); the
-# poke below still goes out so the watch converges after the game.
-MODE_FILE="${CRT_DUAL_MODE_FILE:-/tmp/crt-dual-mode}"
-PROFILE_FILE="${CRT_DUAL_PROFILE_FILE:-/tmp/crt-dual/profile}"
+# STOCK CHECKER SUPPRESSION (2026-09-19 the session clobber; 2026-10-18 the
+# measured cost): the STOCK checker (udev 80-switch-screen, ENV{HOTPLUG}=="1")
+# restarts ES ~2 s after the same event. Inside a session that clobbers a
+# just-handed-over solo-prep and tears down the running game; IDLE it costs a
+# WASTED APPLY: the checker's display loop rewrites the boot primary, so our
+# batch is undone and a second apply is needed (measured 2026-10-18: an LCD
+# plug cost 2 applies — the first cancelled at +2 s — plus an ES restart). The
+# checker honours /tmp/no-hotplug as a ONE-SHOT skip (its own lines 91-96): set
+# it for EVERY real hotplug (HOTPLUG=1 — the exact condition the stock rule
+# matches; a synthetic trigger never carries it and must not leave a stale
+# file). session-nohotplug.sh still keeps the skip fresh while a session owns
+# the display (a checker run whose delay lands mid-launch); the poke below goes
+# out either way, so the watch converges.
 NOHOTPLUG_FILE="${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}"
-if [ "${HOTPLUG:-0}" = "1" ] && { [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; }; then
+if [ "${HOTPLUG:-0}" = "1" ]; then
 	: >"$NOHOTPLUG_FILE" 2>/dev/null || true
+	# Il checker lo CONSUMA a ogni suo giro (rm), e i giri possono essere piu'
+	# d'uno per lo stesso gesto: l'helper lo tiene fresco per la finestra, cosi'
+	# la soppressione non dipende da una corsa (misurato 2026-10-18: il conteggio
+	# dei checker saliva lo stesso).
+	# Lo skip NON basta: il checker lo CONSUMA (rm) e due giri dello stesso gesto
+	# possono cadere nello stesso istante, cosi' il secondo lo trova gia' rimosso
+	# e prosegue (misurato 2026-10-18: il conteggio dei checker saliva lo stesso).
+	# Il lock di debounce dello stock invece si CHIEDE (non si consuma) ed e' la
+	# riga che precede il quit: e' lui a rendere deterministica la soppressione.
+	# Finestra nostra, rimossa da noi: mai stantia.
+	_lock="${CRT_DUAL_SWITCH_LOCK:-/var/run/batocera-switch-screen.debounce.lock}"
+	if [ -n "$_lock" ]; then
+		: >"$_lock" 2>/dev/null || true
+		( sleep "${CRT_DUAL_SWITCH_LOCK_SECS:-8}"; rm -f "$_lock" ) >/dev/null 2>&1 &
+	fi
+	_hold="${CRT_DUAL_NOHOTPLUG_HOLD_SECS:-6}"
+	_here="$(cd "$(dirname "$0")" && pwd)"
+	if [ "${_hold:-0}" -gt 0 ] 2>/dev/null && [ -f "$_here/session-nohotplug.sh" ]; then
+		CRT_DUAL_NOHOTPLUG_HOLD="$_hold" setsid nohup bash "$_here/session-nohotplug.sh" >/dev/null 2>&1 &
+	fi
 fi
-# Distinct marker from the MANUAL hotplug-trigger: the watcher treats this
-# as a pure wake-up bell (converge only, NEVER a forced udevadm trigger).
-# Reusing hotplug-trigger would self-perpetuate: the watcher's manual
-# handler runs udevadm trigger -> new uevent -> this poke -> new trigger
-# (storm verified live 2026-08-23 12:49, ~4s cadence).
 : >"$STATE_DIR/udev-poke" 2>/dev/null || true
 
 exit 0

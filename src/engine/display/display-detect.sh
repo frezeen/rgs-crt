@@ -34,6 +34,8 @@
 #   display-detect.sh --check   topology line (requires X): crt=<X> lcd=<X> state=<dual|crt|lcd|none>
 #   display-detect.sh --list    one line per CONNECTED connector:
 #                               <drm-name>\t<analog|panel>\t<x-name-or-empty>
+#   display-detect.sh --state   both views in ONE process (CHECK/LIST prefixed),
+#                               the producer for CRT_DUAL_DETECT_CHECK/_LIST
 # Policy: one analog and one panel are kept (first in sysfs order);
 # extra panels are reported by --list and ignored by --check.
 set -uo pipefail
@@ -54,10 +56,14 @@ _x_outputs() { # cached xrandr --current (zero writes, R class)
 	printf '%s\n' "$_XOUT"
 }
 
-_x_name_of() { # $1 = DRM connector -> X output name (no per-machine table)
-	local drm="$1" cand
+_x_name_of_text() { # $1 = the xrandr --current text, $2 = DRM connector -> X name
+	# La lettura si fa UNA volta per processo e si passa come TESTO: prima il
+	# match stava dentro una $(), quindi la cache di _x_outputs non
+	# sopravviveva e una topologia costava 6 letture invece di 1 (misurato
+	# 2026-10-18: 6 letture = ~0.9 s per OGNI passata, all'uscita e all'avvio).
+	local text="$1" drm="$2" cand
 	for cand in "$drm" "$(_pure_x_name "$drm")"; do
-		if _x_outputs | awk -v o="$cand" '$1 == o { found = 1 } END { exit !found }'; then
+		if printf '%s\n' "$text" | awk -v o="$cand" '$1 == o { found = 1 } END { exit !found }'; then
 			printf '%s\n' "$cand"
 			return 0
 		fi
@@ -346,6 +352,8 @@ _pure_x_name() { # DRM name -> X name by the naming rule (pre-X safe)
 
 detect_connectors() { # connected connectors only, deterministic order
 	local f st drm cls x
+	local text
+	text=$(_x_outputs) # UNA lettura per scansione (vedi _x_name_of_text)
 	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
@@ -354,13 +362,15 @@ detect_connectors() { # connected connectors only, deterministic order
 		drm=$(basename "$(dirname "$f")")
 		drm=${drm#card*-}
 		cls=$(_classify "$drm" "${f%/status}/edid" "$st")
-		x=$(_x_name_of "$drm") || x=""
+		x=$(_x_name_of_text "$text" "$drm") || x=""
 		printf '%s\t%s\t%s\n' "$drm" "$cls" "$x"
 	done | sort
 }
 
 detect_all_connectors() { # every connector: drm, class, status, edid-bytes, X name (pure rule pre-X)
 	local f st drm cls edid x
+	local text
+	text=$(_x_outputs) # UNA lettura per scansione
 	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
@@ -369,15 +379,15 @@ detect_all_connectors() { # every connector: drm, class, status, edid-bytes, X n
 		drm=${drm#card*-}
 		edid=$(_edid_bytes "${f%/status}/edid")
 		cls=$(_classify "$drm" "${f%/status}/edid" "$st")
-		x=$(_x_name_of "$drm") || x=$(_pure_x_name "$drm")
+		x=$(_x_name_of_text "$text" "$drm") || x=$(_pure_x_name "$drm")
 		printf '%s\t%s\t%s\t%s\t%s\n' "$drm" "$cls" "$st" "$edid" "$x"
 	done | sort
 }
 
-detect_state() { # canonical topology line; fails loud when X cannot confirm a name
+_state_line() { # stdin: the connector rows -> the canonical line (rc 1 on an unnamed connector)
 	local crt="" lcd="" d c x bad=0
 	local rows
-	rows=$(detect_connectors)
+	rows=$(cat)
 	if [ -z "$rows" ]; then
 		printf 'crt= lcd= state=none\n'
 		return 0
@@ -403,9 +413,31 @@ detect_state() { # canonical topology line; fails loud when X cannot confirm a n
 	printf 'crt=%s lcd=%s state=%s\n' "$crt" "$lcd" "$state"
 }
 
+detect_state() { # connected topology line; fails loud when X cannot confirm a name
+	detect_connectors | _state_line
+}
+
+# ── una topologia, un processo per passata ────────────────────────────────
+# Su dce_v6 un detect intero costa ~0.5 s (misurato 2026-10-18: tre detect per
+# passata = 1,4 s, a ogni uscita e a ogni avvio). La topologia NON cambia
+# dentro una passata — nemmeno dopo una scrittura di modo — quindi chi la
+# legge per primo la dichiara con CRT_DUAL_DETECT_CHECK / _LIST e gli altri
+# consumatori (modello, apply, sonde del prep) la ricevono da qui.
+#   --state   emette entrambe le viste, prefissate, in UN solo processo.
 case "${1:---check}" in
---check) detect_state ;;
---list) detect_connectors ;;
+--check)
+	[ -n "${CRT_DUAL_DETECT_CHECK:-}" ] && { printf '%s\n' "$CRT_DUAL_DETECT_CHECK"; exit 0; }
+	detect_state
+	;;
+--list)
+	[ -n "${CRT_DUAL_DETECT_LIST:-}" ] && { printf '%s\n' "$CRT_DUAL_DETECT_LIST"; exit 0; }
+	detect_connectors
+	;;
 --all) detect_all_connectors ;;
-*) echo "usage: display-detect.sh [--check|--list|--all]" >&2; exit 2 ;;
+--state) # il produttore della passata: ignora i preload, UNA scansione
+	rows=$(detect_connectors) || exit 1
+	printf '%s\n' "$rows" | _state_line | sed 's/^/CHECK\t/'
+	printf '%s\n' "$rows" | sed '/^$/d; s/^/LIST\t/'
+	;;
+*) echo "usage: display-detect.sh [--check|--list|--all|--state]" >&2; exit 2 ;;
 esac

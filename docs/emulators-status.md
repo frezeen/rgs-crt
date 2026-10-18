@@ -64,6 +64,7 @@ starts.
 | SC-3000 | Boots to native 280x216@59.92 with the console's hardware border — but only after you pick the right core in the game's settings; see stock issue §1 | common + RA family (the core choice stays yours — stock mis-resolves it) | TESTED 2026-09-06 |
 | SAM Coupe (samcoupe) | The machine's 4:3 picture fills the tube exactly — native square-pixel aspect, no black bands and no stretch; menu text legible one-to-one. Runs full-screen with sharp (nearest) rendering and no on-screen emulator overlays | common + native 4:3 pixel aspect (the emulator's TV-aspect correction off), full-screen, smoothing off, drive-lights/status/speed overlays off | TESTED 2026-10-10 |
 | Taito Type X / Type X+ (typex) | Native 640x480i arcade signal. Native 4:3 titles (KOF '98 UM, GigaWing Generations, Spica Adventure) run direct with minimal GPU overhead (0.9%–2.4%); widescreen 16:9 and HD titles (New Super Mario Bros Wii Coin World, Battle Gear 4 Tuned / Pro at 1360x768, Battle Gear 4 at 800x600) scaled via Gamescope stretch to fill the 4:3 tube edge to edge with zero letterboxing | common + 640x480i video mode + per-game Gamescope stretch for >640x480 backbuffers | TESTED 2026-10-18 |
+| NESiCAxLive (nesicax) | The arcade's picture fills the 4:3 tube at 640x480i, no letterboxing. The 48 titles whose own backbuffer is above 640x480 draw on the class canvas (1280x720 held by Gamescope, stretched to the tube): measured 99.6% of the glass at aspect 1.334 on Chaos Code 2.11, Vampire Savior and Crimzon Clover, 0.6%–0.8% GPU load. Exception is a native 640x480 game and gets its own 640x480 canvas instead — a near pass-through (98.8% of the tube against 85% on the HD canvas, and the correct 4:3 proportions). Elevator Action is a windowed 4:3 dump the loader already presents at screen size, so it runs direct with no canvas (0.8% GPU load) | common + 640x480i video mode + gamescope 1280x720→864x486@60 stretch pixel for >640x480 backbuffers, per-game canvas resolution / direct exceptions | TESTED 2026-10-18 |
 | Apple IIgs (apple2gs) | The machine's picture fills the tube at 640x480i — gameplay full-frame with the machine's own blue border, score and text legible one-to-one. The native attempt ran the same day (320x240p desktop, GSplus fills it by itself): 480i won — strokes 3.89px vs 1.93px with cleaner edges, owner finds it more legible, flicker not bothersome. No profile block: the emulator's system-ROM path points at a file that is not on the box and it plays anyway | common only (no per-system keys) | TESTED 2026-10-17 |
 | MSX / Spectravideo (spectravideo, msx1, msx2, msx2+, msxturbor, colecovision) | The machine's picture fills the 4:3 tube at 640x480i, and the emulator's own CRT filter — a soft blur with faint scanlines — is switched off, so the image is sharp and the game's text reads one-to-one. It starts clean, too: no on-screen menu or status overlays over the game (the menu bar fades out on its own) and no missing-font warnings (the emulator's user folder is completed with the current font). The internal picture is enlarged uniformly to fill the tube; no re-scaling tricks | common + the emulator's own effect settings off (blur/scanline/glow, in its settings file each launch) + its stale user folder repaired with the current font | TESTED-with-note 2026-10-10 |
 | BBC Micro (and the MAME-driven vintage computers) | Native 640x480@50i, crisp | common only; the shared arcade ini files, the binary swap and the audio-override drop belong to the arcade (MAME) system, not to this row | TESTED 2026-09-06 |
@@ -173,7 +174,7 @@ unproven — listed, never claimed:
   apple2, enterprise,
   fmtowns, moonlight (needs a streaming host
   PC), dxx-rebirth, win311, win95.
-- `globalvr`, `typex2`, `nesicax`, `nesicax2`, `seganu`,
+- `globalvr`, `typex2`, `nesicax2`, `seganu`,
   `konamipc` — the RGS Windows-arcade systems. They now carry the same
   tube treatment as the certified Adrenaline / Arcade PC / UNIS siblings
   (the tube raster plus the full-screen fill), so when content lands they
@@ -181,7 +182,9 @@ unproven — listed, never claimed:
   certification box, so no launch has been measured here: they stay in
   this list until a game is launched on the glass. RGS ships its own
   `max-*` video-mode keys for them inside its tuning zone, and its
-  per-game keys win over ours. `gaelco` is deliberately left out: it is a
+  per-game keys win over ours. `typex` and `nesicax` left this list on
+  2026-10-18, each with content and its own measured row above. `gaelco`
+  is deliberately left out: it is a
   MAME-driven system, not one of these Windows ones.
 - `itchio`, `namcoes3` — uncovered since the RGS 43.44–43.54 range,
   same state as the two above: no block, no content. Listed here so

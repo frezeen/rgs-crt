@@ -17,6 +17,27 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 XCONF="${CRT_DUAL_XCONF:-/etc/X11/xorg.conf.d/99-crt.conf}"
 
+# La FASE e' un ingresso del modello come la topologia: desktop (il riposo)
+# o session:<target> (il display consegnato al gioco). Prima la fase SESSION
+# viveva solo nelle richieste scritte a mano dal riconciliatore, quindi non
+# era ne' dichiarata ne' testabile.
+phase="desktop"
+case "${1:-}" in
+--session)
+	phase="session"
+	session_target="${2:-}"
+	case "$session_target" in
+	crt | lcd) ;;
+	*) echo "display-model: --session needs crt|lcd" >&2; exit 2 ;;
+	esac
+	;;
+"") ;;
+*)
+	echo "display-model: unknown argument '$1' (only --session <crt|lcd>)" >&2
+	exit 2
+	;;
+esac
+
 _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 _modes() { _x | sed -n "/^$1 connected/,/^[^ ]/p" | awk 'NF >= 2 && $1 ~ /^[0-9]/ { print }'; }
 _pref() { _modes "$1" | awk '$0 ~ /\+/ { print $1; exit }'; }
@@ -67,9 +88,29 @@ dual)
 		echo "display-model: no mode offered for the CRT or the panel" >&2
 		exit 1
 	}
-	printf 'SCREEN\t640x480\n'
-	printf '%s\ton\t%s\tprimary\t0x0\t-\n' "$crt" "$crt_mode"
-	printf '%s\ton\t%s\t-\t0x0\t640x480\n' "$lcd" "$lcd_mode"
+	if [ "$phase" = "desktop" ]; then
+		printf 'SCREEN\t640x480\n'
+		printf '%s\ton\t%s\tprimary\t0x0\t-\n' "$crt" "$crt_mode"
+		printf '%s\ton\t%s\t-\t0x0\t640x480\n' "$lcd" "$lcd_mode"
+	else
+		# Il display lo prende il gioco: il bersaglio on+primary e NON
+		# scalato (un residuo di scale manda il gioco in un framebuffer
+		# piccolo), l'altro libero. Il modo del bersaglio qui e' solo la
+		# partenza: il raster del gioco lo mette lo stock (misurato).
+		if [ "$session_target" = "crt" ]; then
+			sz=$(_size_of "$crt_mode")
+			[ -n "$sz" ] || sz=none
+			printf 'SCREEN\t%s\n' "$sz"
+			printf '%s\ton\t%s\tprimary\t0x0\t-\n' "$crt" "$crt_mode"
+			printf '%s\toff\t-\t-\t-\t-\n' "$lcd"
+		else
+			sz=$(_size_of "$lcd_mode")
+			[ -n "$sz" ] || sz=none
+			printf 'SCREEN\t%s\n' "$sz"
+			printf '%s\ton\t%s\tprimary\t0x0\t-\n' "$lcd" "$lcd_mode"
+			printf '%s\toff\t-\t-\t-\t-\n' "$crt"
+		fi
+	fi
 	;;
 crt)
 	crt_mode=$(_desktop)

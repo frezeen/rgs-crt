@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-10-18 — leaving a game is one clean change; a screen plugged in is handled once
+
+- **Leaving a game restores the desktop with a single change.** The layer now
+  touches only the displays that actually disagree with the wanted layout, so the
+  tube no longer receives a mode change it was already on, and the menu comes
+  back sooner (measured: from about five display changes down to two, and the
+  screen no longer drops to a tiny frame in between).
+- **A screen plugged in or unplugged is handled once.** The layout is restored in
+  one pass, without the extra interface restart that used to undo the first
+  attempt: no black window on the display that has just been attached, and no
+  wasted work behind it.
+- **Unplugging and replugging a cable within a couple of seconds costs nothing.**
+  A display that leaves the cabinet waits for the layout to settle instead of
+  reacting to a cable that is coming straight back.
+- **When a game takes the screen, the hand-over is checked.** The checked
+  condition is now the whole hand-over (the game's screen is on, primary and
+  unscaled) instead of half of it, so a mis-set primary can no longer send the
+  picture to the other display.
+- **After a game, the menu is checked against the screen** and repaired when its
+  window does not fill it, instead of being left partly off-screen until
+  something else moved it.
+- **A menu page that occasionally came up blank is now detected** and given one
+  nudge, and the amount of blank area it reports is written down, so the next
+  occurrence can be measured rather than described.
+- **The display service comes back reliably after a restart.**
+
 ## 2026-10-18 — Windows arcade and pinball systems tuned for the tube
 
 - **Pinball FX, Pinball FX2, Pinball M, Zaccaria Pinball and Future Pinball render native 640x480i.** Each table fills
@@ -17,6 +43,14 @@
   the arcade score display out of frame are stripped on the tube profile so the
   full picture and scoreboard remain centered and legible.
 - **Taito Type X and Type X+ certified on the tube.** Native 4:3 titles (The King of Fighters '98 Ultimate Match, GigaWing Generations, Spica Adventure) render directly at 640x480i with minimal GPU load (0.9% to 2.4%). Widescreen 16:9 and HD titles (New Super Mario Bros. Wii Coin World, Battle Gear 4 Tuned / Professional at 1360x768, Battle Gear 4 at 800x600) use targeted Gamescope stretch to fill the 4:3 tube edge to edge without black bars.
+- **NESiCAxLive certified on the tube (50 titles).** Every title fills the 4:3 tube
+  edge to edge at 640x480i without black bars. Titles that draw on an HD canvas
+  (Chaos Code, Vampire Savior, Crimzon Clover) display full frame, covering 99.6%
+  of the glass with minimal GPU load (0.6% to 0.8%). Exception is a native 640x480
+  game and keeps its own 640x480 canvas: a near pass-through that fills 98.8% of
+  the tube against 85% on the HD canvas, and in the correct 4:3 proportions.
+  Elevator Action, which the launcher already presents at screen size in 4:3,
+  renders directly with no canvas at all (0.8% GPU load).
 - **Works on the current RGS.** This release is built and checked against RGS
   43.65. When RGS updates, the layer re-checks itself against the new version at
   boot or when you open the check tool.
