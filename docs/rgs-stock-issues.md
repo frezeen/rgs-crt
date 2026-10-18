@@ -101,3 +101,11 @@ accusation against the platform this project is a gift to.
 - Observed in the same delivery (2026-10-11): the system's `gamelist.xml` lists
   a second title whose file is not present in the roms folder — a list entry
   that can only fail.
+
+## 4. Taito Type X: Tate (vertical) shmups render sideways on stock RGS
+
+- What you see: launching `Raiden IV (1.00J) (Portrait)` or `Raiden III (2.01J) (Portrait)` displays the game rotated 90 degrees sideways, requiring physical monitor rotation or head-tilting.
+- Measured (2026-10-18, stock RGS 43.65 on LCD): reproduces on untouched stock RGS on LCD (`rgs-stock`). Unlike `GigaWing Generations` (which carries an authored ReShade rotation pipeline in its loader template `gigawing-generations.yaml`), `raiden-4-typex.yaml` and `raiden-3-typex.yaml` omit ReShade rotation directives entirely, leaving the raw Tate raster unrotated on horizontal displays.
+- Not ours (the page's inclusion test): reproduces bit-for-bit on stock LCD with no layer files or hooks active; confirmed identical behavior on LCD by the owner.
+- Suggested fix: add ReShade 90-degree CCW/CW rotation configuration to `raiden-3-typex.yaml` and `raiden-4-typex.yaml` in the stock RGS loader profiles matching the mechanism already used in `gigawing-generations.yaml`.
+

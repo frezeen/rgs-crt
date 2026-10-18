@@ -2,10 +2,10 @@
 
 ## 2026-10-18 — Windows arcade and pinball systems tuned for the tube
 
-- **Pinball FX, Pinball FX2, Pinball M and Zaccaria Pinball render native 640x480i.** Each table fills
+- **Pinball FX, Pinball FX2, Pinball M, Zaccaria Pinball and Future Pinball render native 640x480i.** Each table fills
   the 4:3 tube edge to edge at native proportions without distortion or downscaling.
   Rendering directly at the tube resolution keeps GPU load minimal (1.5% to 4.6% on
-  Pinball FX and Pinball FX2; 2.8% on Zaccaria Pinball; 85% on Pinball M) for solid 60 Hz frame pacing.
+  Pinball FX and Pinball FX2; 2.8% on Zaccaria Pinball; 6.3% on Future Pinball; 85% on Pinball M) for solid 60 Hz frame pacing.
 - **Pinball FX3 uses a 1080p canvas with full-frame display.** The engine's fixed
   display configuration is mapped cleanly to the 480i tube (6.3% GPU load).
 - **Windows arcade systems render on a 1280x720 canvas.** Systems drawing on an HD
@@ -16,6 +16,7 @@
   (0.9% GPU load). Widescreen command overrides that cropped the video and pushed
   the arcade score display out of frame are stripped on the tube profile so the
   full picture and scoreboard remain centered and legible.
+- **Taito Type X and Type X+ certified on the tube.** Native 4:3 titles (The King of Fighters '98 Ultimate Match, GigaWing Generations, Spica Adventure) render directly at 640x480i with minimal GPU load (0.9% to 2.4%). Widescreen 16:9 and HD titles (New Super Mario Bros. Wii Coin World, Battle Gear 4 Tuned / Professional at 1360x768, Battle Gear 4 at 800x600) use targeted Gamescope stretch to fill the 4:3 tube edge to edge without black bars.
 - **Works on the current RGS.** This release is built and checked against RGS
   43.65. When RGS updates, the layer re-checks itself against the new version at
   boot or when you open the check tool.
