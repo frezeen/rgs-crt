@@ -21,6 +21,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
 MODE_FILE="${CRT_DUAL_MODE_FILE:-/tmp/crt-dual-mode}"
 PROFILE_FILE="${CRT_DUAL_PROFILE_FILE:-/tmp/crt-dual/profile}"
+# Session owner record (2026-10-19): "pid starttime", written by
+# apply_profile at gameStart. The supervisor reads it to end a session by
+# ending the process ES waits for; the kernel start time makes a recycled pid
+# impossible to mistake for the session.
+LAUNCHER_FILE="${CRT_DUAL_LAUNCHER_FILE:-$STATE_DIR/launcher}"
 # Poll interval: the gameStop bell (udev-poke) is only seen at a loop wake,
 # so this bounds the visible "desktop comes back late" gap after a game
 # exit (owner-observed ~1 s FullHD flash at 2 s, 2026-09-20). 0.5 s keeps
@@ -37,24 +42,29 @@ _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 
 _session_active() { [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; }
 
-# ── Deadlock breaker probes (root cause, measured 2026-10-10/11) ─────────
-# emulatorlauncher (ES's child, one per session) returns only when it sees
-# EOF on the game's stdout/stderr pipes. When the game's renderer dies, the
-# processes UNDER it — gamescopereaper, the winedevice workers, the game
-# itself — are reparented to init and SURVIVE, still holding the write ends.
-# Proven from the fd table: emulatorlauncher held pipe:[180915] read; a
-# wrapper held that same pipe write. EOF never arrives, emulatorlauncher
-# never returns, ES never runs gameStop, and the guard stays up for good.
+# ── Session supervisor: one owner, three facts, one remedy ──────────────
+# The session IS ES's wait() on emulatorlauncher (ADR-002). Measured
+# 2026-10-19 (nesicax / Psychic Force 2012, rgs-15khz): the old deadlock
+# breaker read the game's window correctly but tried to release the launcher
+# by killing the WRITE holders of the pipes it reads. At 21:34:58 it fired
+# and the chain did not dissolve — the holders were visible only in the
+# per-THREAD fd tables (defunct leaders) — so no EOF ever arrived, ES never
+# ran gameStop, the guard stayed up, ES died at 21:35:30 and the stock
+# wrapper re-applied the boot (HDMI 1080p). With the guard up the reconciler
+# exited every pass: the desktop stayed 1080p until a manual restore. A
+# manual `batocera-es-swissknife --emukill` (kill the tree) returned ES
+# twice out of two.
 #
-# The trigger is a CLOSED GAME, and the only honest signal for that is the
-# WINDOW (_game_alive): process signals cannot separate a running game from
-# a closed one (a wine session keeps a live launch stub AND reparents its
-# daemons for the WHOLE game — measured 2026-10-11). The close, once
-# decided, is the pipe-writer set (_pipe_writers), read from the fd table,
-# never from a process name.
-#
-# Both probes are seamed so the breaker's LOGIC is testable without a live
-# game (the house style: seams for live paths).
+# So the end of a session is neither inferred nor negotiated: it is the end
+# of the process ES waits for. Three structural facts decide it —
+#   1. the launcher recorded at gameStart is gone (the normal end);
+#   2. it no longer has ES above it — ES died or restarted, so that gameStop
+#      will never come and the guard would outlive it;
+#   3. the game's window was on screen and is now gone, or no window ever
+#      came within the launch budget (a payload that died on startup).
+# The remedy is one path: end the launcher's tree (TERM, then KILL: the
+# loader ignores TERM), then run the ONE restore (the gameStop path).
+# The probes are seamed so the LOGIC is testable without a live game.
 _es_pid() { # il pid di ES: il PROPRIETARIO della finestra, non un match di cmdline
 	# Misurato 2026-10-18 sera: qualunque processo la cui riga di comando
 	# contenga "dbus-run-session ... emulationstation" soddisfa la vecchia
@@ -70,52 +80,160 @@ _es_pid() { # il pid di ES: il PROPRIETARIO della finestra, non un match di cmdl
 	pgrep -f '^dbus-run-session -- emulationstation' 2>/dev/null | head -1 || true
 }
 
-_emu_alive() { # rc 0 while the session's emulatorlauncher waits
-	if [ -n "${CRT_DUAL_EMU_ALIVE_CMD:-}" ]; then
-		bash -c "$CRT_DUAL_EMU_ALIVE_CMD"
+# The session's launcher: written by apply_profile at gameStart (the hook
+# runs inside emulatorlauncher, so it records the pid of the process ES
+# waits for) together with the kernel start time, which makes a recycled
+# pid impossible to mistake for the session.
+_launcher_pid() {
+	if [ -n "${CRT_DUAL_LAUNCHER_PID_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_LAUNCHER_PID_CMD"
 		return $?
 	fi
-	# -f (full cmdline), NOT -x (process name): "emulatorlauncher" is 16
-	# characters and comm is truncated to 15, so `pgrep -x emulatorlauncher`
-	# NEVER matches — measured on the box the first time this ran, where the
-	# breaker sat silent with the orphan right there. This is the same test
-	# the box's own batocera-es-swissknife uses (check_emurun).
-	pgrep -f -n emulatorlauncher >/dev/null 2>&1
-}
-_pipe_writers() { # $@ = launcher pids -> who holds a WRITE end of a pipe the launcher READS
-	if [ -n "${CRT_DUAL_PIPEWRITERS_CMD:-}" ]; then
-		bash -c "$CRT_DUAL_PIPEWRITERS_CMD"
-		return 0
+	local pid start cur
+	read -r pid start <"$LAUNCHER_FILE" 2>/dev/null || true
+	if [ -n "${pid:-}" ] && [ -r "/proc/$pid/stat" ]; then
+		cur="$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
+		if [ -n "${start:-}" ] && [ "$cur" = "$start" ]; then
+			printf '%s\n' "$pid"
+			return 0
+		fi
 	fi
-	# Who keeps emulatorlauncher from seeing EOF is decided by the fd table,
-	# not by a process name or an orphan list: every process holding a WRITE
-	# end of a pipe the launcher has open for READING is a blocker (measured
-	# 2026-10-11, Candy Crush wedge: 13 holders — wine daemons, the launch
-	# stub and the game — of which the retired PPID-1 wine-name probe named
-	# only 3, so killing it never closed the pipes).
-	#
-	# ONE `ls` over every fd table, parsed by awk (measured 2026-10-12: the
-	# per-fd fork loop cost 2.6 s — it forked once per fd of every process —
-	# and the breaker paid it on the RECOVERY path, which is the latency the
-	# owner sees; the single pass is 0.013 s, the same answer).
-	local _emu _inodes="" _skip="" _emu_r
-	for _emu in "$@"; do
-		_emu_r="$(ls -l "/proc/$_emu/fd" 2>/dev/null \
-			| sed -n 's/.*pipe:\[\([0-9]\{1,\}\)\].*/\1/p' | tr '\n' ' ')"
-		_inodes="$_inodes $_emu_r"
-		_skip="$_skip $_emu "
-	done
-	_inodes="$(printf '%s' "$_inodes" | tr -s ' ')"
-	[ -n "${_inodes// /}" ] || return 0
-	ls -l /proc/[0-9]*/fd 2>/dev/null | awk -v want=" $_inodes " -v skip="$_skip" '
-		/^\/proc\/[0-9]+\/fd:$/ { n = split($0, a, "/"); pid = a[3]; next }
-		/^l-w/ && / -> pipe:\[/ {
-			if (index(skip, " " pid " ") > 0) next
-			if (!match($0, /pipe:\[[0-9]+\]/)) next
-			ino = substr($0, RSTART + 6, RLENGTH - 7)
-			if (index(want, " " ino " ") > 0 && !seen[pid]++) print pid
-		}' | sort -un
+	# A guard written by an older build carries no record: fall back to the
+	# box's launcher (the test batocera-es-swissknife uses; `pgrep -x` never
+	# matches because comm is truncated to 15 characters).
+	pgrep -f -n emulatorlauncher 2>/dev/null | head -1
 }
+
+_under_es() { # $1 = pid -> rc 0 when walking up the parents reaches ES
+	if [ -n "${CRT_DUAL_UNDER_ES_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_UNDER_ES_CMD"
+		return $?
+	fi
+	local pp="${1:-}" i=0
+	[ -n "$pp" ] || return 1
+	while [ "$pp" -gt 1 ] && [ "$i" -lt 8 ]; do
+		# The ancestor must BE EmulationStation, not merely mention it: the
+		# kernel truncates comm to 15 chars ('emulationstatio'), which covers
+		# both the wrapper script and the binary, while a full-cmdline match
+		# counted any shell whose argv names it (measured 2026-10-20 in the
+		# live demo: the test shell itself read as "ES above").
+		case "$(cat "/proc/$pp/comm" 2>/dev/null)" in *emulationstatio*) return 0 ;; esac
+		# comm may contain spaces: cut to the LAST ')' so the fields shift
+		# correctly (an awk on field 4 would lie).
+		pp="$(sed 's/.*) //' "/proc/$pp/stat" 2>/dev/null | awk '{print $2}')"
+		case "$pp" in '' | *[!0-9]*) return 1 ;; esac
+		i=$((i + 1))
+	done
+	return 1
+}
+
+_is_rgs_menu() { # $1 = launcher pid -> rc 0 when its argv runs a +rgs utility script
+	case "$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)" in
+	*/userdata/roms/rgs/*.sh*) return 0 ;;
+	esac
+	return 1
+}
+
+_tree_pids() { # $1 = root -> the root and its live (non-zombie) descendants
+	ps -eo pid=,ppid=,stat= | awk -v root="$1" '
+		{ n++; p[n] = $1; pp[n] = $2; st[n] = $3 }
+		END {
+			inc[root] = 1
+			# iterate to a fixed point: no depth limit to outgrow (audit
+			# 2026-10-20: a fixed 8 would silently miss deeper descendants)
+			do {
+				changed = 0
+				for (i = 1; i <= n; i++)
+					# `in` does NOT create the key: a bare inc[pp[i]] reference
+					# creates it empty, and then `p[i] in inc` is true for every
+					# PARENT on the box (measured 2026-10-19: the kill took the
+					# whole box down, X and ES included).
+					if ((pp[i] in inc) && inc[pp[i]] && st[i] !~ /^Z/ && (p[i] in inc) == 0) {
+						inc[p[i]] = 1
+						changed = 1
+					}
+			} while (changed)
+			for (i = 1; i <= n; i++) if (p[i] in inc) print p[i]
+		}'
+}
+
+_end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
+	local lp="$1" pids pg es_pg my_pg left n=0 count
+	if [ -n "${CRT_DUAL_END_TREE_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_END_TREE_CMD" _ "$lp"
+		return $?
+	fi
+	case "$lp" in
+	'' | *[!0-9]* | 1 | 2)
+		log "end-tree: refusing pid '${lp}' (never init, never kthreadd)"
+		return 1
+		;;
+	esac
+	pids="$(_tree_pids "$lp" | tr '\n' ' ')"
+	[ -n "${pids// /}" ] || return 0
+	# A session tree never contains init or kthreadd: a set that does means
+	# the walk went wrong, and the box comes before the session (measured
+	# 2026-10-19: a bug in the walk killed every parent, X and ES included).
+	case " $pids " in
+	*" 1 "* | *" 2 "*)
+		log "end-tree: refusing a walk that reached init (${pids% })"
+		return 1
+		;;
+	esac
+	count=$(printf '%s\n' $pids | wc -l)
+	if [ "$count" -gt 128 ]; then
+		log "end-tree: refusing a walk of $count pids"
+		return 1
+	fi
+	log "end-tree: ending ${pids% }"
+	# A distinct process group also catches what wine reparented to init
+	# (measured 2026-10-11). ES's group and our own are never touched.
+	pg="$(ps -o pgid= -p "$lp" 2>/dev/null | tr -d ' ')"
+	es_pg="$(ps -o pgid= -p "$(_es_pid)" 2>/dev/null | tr -d ' ')"
+	my_pg="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')"
+	if [ -n "$pg" ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
+		kill -TERM -- "-$pg" 2>/dev/null || true
+	fi
+	# shellcheck disable=SC2086 # a pid list is the point
+	kill -TERM $pids 2>/dev/null || true
+	while [ "$n" -lt 6 ] && kill -0 "$lp" 2>/dev/null; do
+		sleep 0.5
+		n=$((n + 1))
+	done
+	left="$(_tree_pids "$lp" | tr '\n' ' ')"
+	if [ -n "${left// /}" ]; then
+		# shellcheck disable=SC2086 # wine and the loader ignore TERM
+		kill -KILL $left 2>/dev/null || true
+	fi
+	# The group needs its own KILL: a wine daemon reparented to init is NOT a
+	# descendant of $lp, so it never lands in $left, and TERM is ignored by
+	# design (audit 2026-10-20). Same guards as the TERM above.
+	if [ -n "$pg" ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
+		kill -KILL -- "-$pg" 2>/dev/null || true
+	fi
+	return 0
+}
+
+
+_stale_session_clean() { # il gameStop che non c'e' stato (latchato dal chiamante)
+	if [ -n "${CRT_DUAL_STALE_CLEAN_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_STALE_CLEAN_CMD"
+		return $?
+	fi
+	local name
+	name="$(cat "$PROFILE_FILE" 2>/dev/null)"
+	if [ -n "$name" ]; then
+		# lo STESSO percorso del gameStop, senza system: merge.py remove con
+		# system vuoto e' il contratto di ripristino (l'ARCHIVIO e' la
+		# verita' — una chiave mai applicata non ha archivio e viene saltata).
+		bash "$HERE/../selector/remove_profile.sh" "$name"
+	else
+		# nessun profilo registrato: la riparazione di BOOT (crash-clean),
+		# scritta per lo stesso caso (kill senza gameStop).
+		bash "$HERE/../service/crash-clean.sh"
+	fi
+}
+
 _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES window)
 	if [ -n "${CRT_DUAL_GAME_ALIVE_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_GAME_ALIVE_CMD"
@@ -132,11 +250,16 @@ _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES 
 	# unmaps it and only ES remains. Size matters: wine spawns a cloud of
 	# tiny helper windows (IME 1x1, 160x20, Input 111x1) that come and go
 	# during boot and would arm the latch on their own (measured 2026-10-11:
-	# a relaunch was false-fired 3 s in by exactly that). Fail safe: with no
-	# way to query X we assume the game is on screen, so a blind probe never
-	# fires.
+	# a relaunch was false-fired 3 s in by exactly that). The floor is
+	# RELATIVE to the screen, not absolute (audit 2026-10-20): a native low
+	# raster puts the screen itself at 256x224 (pyxel.videomode = 256x256 is
+	# in our own spec) and a TATE title on a rotated raster is 240x320 -- an
+	# absolute 320x240 floor read both as "no game" and the launch budget then
+	# killed a LIVE game at 120 s. Half the screen's area separates a game
+	# from a helper window on any raster. Fail safe: with no way to query X we
+	# assume the game is on screen, so a blind probe never fires.
 	command -v xdotool >/dev/null 2>&1 || return 0
-	local _all _eswins _win _geo _w _h
+	local _all _eswins _win _geo _w _h _sz _sw _sh
 	# Fail safe: if the X query itself fails we assume the game is on screen.
 	_all="$(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible --class '.' 2>/dev/null)" || return 0
 	# EmulationStation is identified by its WINDOW CLASS, not a pid: the window
@@ -144,6 +267,12 @@ _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES 
 	# its `dbus-run-session` parent (measured: window pid 6859 vs launcher
 	# 6844), so a pid comparison would mistake ES's own window for the game.
 	_eswins=" $(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible --class emulationstation 2>/dev/null | tr '\n' ' ') "
+	# Read the screen bounding box ONCE outside the window loop (measured:
+	# _x costs ~150 ms on dce_v6, so inside the loop it multiplied by the window count).
+	_sz="$(_x | sed -n 's/^Screen 0:.*current \([0-9]* x [0-9]*\).*/\1/p')"
+	_sw="${_sz%% x *}"; _sh="${_sz##* x }"
+	case "$_sw" in '' | *[!0-9]*) _sw=0 ;; esac
+	case "$_sh" in '' | *[!0-9]*) _sh=0 ;; esac
 	for _win in $_all; do
 		case "$_eswins" in *" $_win "*) continue ;; esac
 		_geo="$(DISPLAY="${DISPLAY:-:0}" xdotool getwindowgeometry "$_win" 2>/dev/null \
@@ -151,28 +280,19 @@ _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES 
 		_w="${_geo% *}"; _h="${_geo#* }"
 		case "$_w" in '' | *[!0-9]*) continue ;; esac
 		case "$_h" in '' | *[!0-9]*) continue ;; esac
-		if [ "$_w" -ge 320 ] && [ "$_h" -ge 240 ]; then
+		if [ "$_sw" -gt 0 ] && [ "$_sh" -gt 0 ]; then
+			# Real game window: either occupies >= half of the screen raster (native low-res
+			# like 256x224, 320x240, TATE 240x320) OR has standard game dimensions (>=640x480,
+			# 720p, 1080p, super-res) while strictly rejecting tiny wine helper windows (1x1, 160x20).
+			if [ $(( _w * _h * 2 )) -ge $(( _sw * _sh )) ] || { [ "$_w" -ge 640 ] && [ "$_h" -ge 480 ]; }; then
+				return 0
+			fi
+		elif [ "$_w" -ge 320 ] && [ "$_h" -ge 240 ]; then
+			# no readable screen: the old absolute floor, fail-safe
 			return 0
 		fi
 	done
 	return 1
-}
-_breaker_standsdown() { # rc 0 = la sessione NON e' un gioco: il breaker non spara
-	if [ -n "${CRT_DUAL_BREAKER_STANDDOWN_CMD:-}" ]; then
-		bash -c "$CRT_DUAL_BREAKER_STANDDOWN_CMD"
-		return $?
-	fi
-	# Il menu `+rgs` (il system "Batocera config" di RGS) e' un insieme di
-	# script di UTILITA' lanciati esattamente come un gioco (`/bin/bash <rom>`,
-	# configgen shGenerator) e l'update di sistema stock guida una SEQUENZA di
-	# xterm massimizzati di breve durata. La premessa del breaker — una sola
-	# finestra di gioco per tutta la sessione — li' NON vale: il buco fra due
-	# xterm e' indistinguibile da un'uscita del gioco, e il breaker ha ABORTITO
-	# l'rgs update dell'owner a meta' (misurato 2026-10-12: xterm del tema
-	# chiuso, il successivo non ancora mappato -> "game closed (window gone)"
-	# -> pipe writer uccisi). Per questa classe si sta giu'. Il pattern non
-	# tocca /userdata/roms/rgs_crt/ (serve la "/" dopo "rgs").
-	pgrep -f '/userdata/roms/rgs/[^ ]*\.sh' >/dev/null 2>&1
 }
 
 SYSFS="${CRT_DUAL_SYSFS:-/sys/class/drm}"
@@ -562,22 +682,22 @@ case "${1:---check}" in
 	prev_fp=""
 	prev_es=""
 	prev_game="idle"
-	_game_seen=0
-	_win_on=0
-	_win_gone=0
-	_emu_polls=0
-	_sess_pids=""
 	_prev_sess=0
-	_sd_logged=0
-	# Minimum launcher age (polls) before the breaker may fire: it rides out
-	# the whole wine boot (several seconds of a window that is still coming
-	# up) so a slow launch is never aborted. Seam knob for fast tests.
-	EMU_MIN_POLLS="${CRT_DUAL_BREAKER_MIN_POLLS:-16}"
-	# A window that has been on screen continuously for this many polls means
-	# the session is ESTABLISHED: its disappearance is the exit, so the grace
-	# drops to ONE poll (the owner feels the latency). While the window has
-	# only just appeared the full grace applies — that is the boot transient.
-	STABLE_POLLS="${CRT_DUAL_BREAKER_STABLE_POLLS:-10}"
+	# Session supervisor state (2026-10-19): _seen counts the polls the game's
+	# window has been on screen, _gone the polls it has been absent. The
+	# window must be ESTABLISHED (SEEN_POLLS) before its disappearance counts
+	# as the exit, so a boot transient is never read as one; then GONE_POLLS of
+	# absence end the session. The launch budget (seconds, seam-knob
+	# CRT_DUAL_SESSION_BUDGET) applies only while no window was ever
+	# established: a payload that died on startup shows nothing at all.
+	SEEN_POLLS=10
+	GONE_POLLS=4
+	_seen=0
+	_gone=0
+	_sess_start=0
+	_budget="${CRT_DUAL_SESSION_BUDGET:-120}"
+	_lost_budget="${CRT_DUAL_SESSION_LOST_BUDGET:-12}"
+	_seen_at=0
 	_first=1
 	settle=0
 	debounce=0
@@ -588,104 +708,85 @@ case "${1:---check}" in
 		i=$((i + 1))
 		if [ "$ITERS" -gt 0 ] && [ "$i" -gt "$ITERS" ]; then break; fi
 
-		# ── Deadlock breaker (root cause, measured 2026-10-10/11) ───────
-		# emulatorlauncher returns only on EOF of the game's pipes; a closed
-		# game whose pipe-holders survive keeps it blocked for ever and the
-		# guard with it. The game is "closed" when its WINDOW is gone — the
-		# one signal that separates a running game from a wedged one
-		# (_game_alive, measured 2026-10-11). Three guards keep a STARTING
-		# game out of reach, so a slow boot is never aborted:
-		#   - the latch (_game_seen) needs the window ON SCREEN first;
-		#   - the latch resets on the session's rising edge (guard down->up),
-		#     so a lingering launcher cannot leak it into the next launch;
-		#   - a minimum launcher age (EMU_MIN_POLLS) rides out the wine boot.
-		# Firing closes the pipes by killing their WRITE holders
-		# (_pipe_writers); emulatorlauncher is left alone so gameStop still
-		# runs — that is the point.
-		#
-		# Evaluated BEFORE the session short-circuit below: while a session
-		# is stuck the guard is UP, so a check placed after it would never
-		# run — the exact mistake this replaces.
+		# ── Session lifecycle: one owner, three facts, one remedy ───────
+		# The session is ES's wait() on the launcher (probes above). Read
+		# BEFORE the guard short-circuit: while a session is stuck the guard
+		# is up, so a check placed after it would never run.
 		_sess_now=0
 		_session_active && _sess_now=1
 		if [ "$_sess_now" = 1 ] && [ "${_prev_sess:-0}" = 0 ]; then
-			_game_seen=0
-			_win_on=0
-			_win_gone=0
-			_emu_polls=0
-			_sess_pids=""
-			_sd_logged=0
+			_seen=0
+			_gone=0
+			# _seen_at is PER SESSION: carried over, a new launch inherits the
+			# previous game's picture time and the lost-deadline fires on its
+			# FIRST pass (measured 2026-10-20 in the live demo: 60 ms, wrong
+			# reason, a false kill for every launch after a 12 s gap).
+			_seen_at=0
+			# the launch budget starts with the launch, not with the daemon
+			_sess_start="$(stat -c %Y "$LAUNCHER_FILE" 2>/dev/null || date +%s)"
 		fi
 		_prev_sess=$_sess_now
 
-		if _emu_alive; then
-			_emu_polls=$((_emu_polls + 1))
-			if _breaker_standsdown; then
-				# sessione non-gioco (+rgs): non si spezza mai (vedi la probe)
-				if [ "${_sd_logged:-0}" = 0 ]; then
-					log "deadlock breaker stood down: non-game session (rgs system scripts)"
-					_sd_logged=1
-				fi
-				_game_seen=0
-				_win_on=0
-				_win_gone=0
+		if [ "$_sess_now" = 1 ]; then
+			_lp="$(_launcher_pid)"
+			_end_why=""
+			if [ -z "$_lp" ]; then
+				_end_why="launcher gone"
+			elif ! _under_es "$_lp"; then
+				_end_why="launcher orphaned (ES gone)"
+			elif _is_rgs_menu "$_lp"; then
+				# the RGS utility menu is a SEQUENCE of script windows: the gap
+				# between two xterms is not an exit (measured 2026-10-12: the
+				# breaker aborted the owner's update between two windows)
+				:
 			elif _game_alive; then
-				_game_seen=1
-				_win_on=$((_win_on + 1))
-				_win_gone=0
-				# I processi vivi MENTRE il gioco e' a schermo. Solo cio' che
-				# esiste qui puo' reggere la pipe del gioco morto: quel che nasce
-				# DOPO la sparizione della finestra e' lavoro NUOVO del launcher
-				# (misurato 2026-10-18, daytona/model2: il breaker uccise il
-				# `batocera-resolution setMode` che emulatorlauncher stava
-				# eseguendo; videoMode.py lesse il non-zero come "set failed",
-				# ritento' con max_tries=2 e il tubo prese un secondo mode-set
-				# identico — causato da noi, non dallo stock).
-				_sess_pids=""
-				for _d in /proc/[0-9]*; do _sess_pids="$_sess_pids ${_d#/proc/}"; done
-			elif [ "${_game_seen:-0}" = 1 ]; then
-				_win_gone=$((_win_gone + 1))
-				# adaptive grace: an ESTABLISHED session (the window was on
-				# screen continuously) is the exit -> fire on the first gone
-				# poll; a just-appeared window keeps the full 3-poll grace so a
-				# boot transient is never read as an exit.
-				if [ "$_win_on" -ge "$STABLE_POLLS" ]; then _grace=1; else _grace=3; fi
-				if [ "$_win_gone" -ge "$_grace" ] && [ "$_emu_polls" -ge "$EMU_MIN_POLLS" ]; then
-					_emu_pids="$(pgrep -f emulatorlauncher 2>/dev/null | tr '\n' ' ')"
-					# shellcheck disable=SC2086 # a pid list is the point
-					_raw="$(_pipe_writers $_emu_pids | tr '\n' ' ')"
-					_writers=""
-					for _w in $_raw; do
-						case "${_sess_pids} " in
-						*" $_w "*) _writers="${_writers:+$_writers }$_w" ;;
-						esac
-					done
-					if [ -n "${_writers// /}" ]; then
-						log "deadlock breaker: game closed (window gone) while emulatorlauncher waits — closing its pipe writers (${_writers})"
-						# shellcheck disable=SC2086 # a pid list is the point
-						kill $_writers 2>/dev/null || true
-						sleep 0.3
-						# shellcheck disable=SC2086 # wine helpers ignore SIGTERM
-						kill -9 $_writers 2>/dev/null || true
-					elif [ -n "${_raw// /}" ]; then
-						# nessun holder preesistente: la pipe e' tenuta solo dal
-						# teardown del launcher. Non si spara, e si dice perche'.
-						log "deadlock breaker: holders all younger than the game's window (launcher teardown) — not reaping (${_raw% })"
-					fi
-					_win_gone=0
+				_seen=$((_seen + 1))
+				_seen_at="$(date +%s)"
+				_gone=0
+			elif [ "$_seen" -ge "$SEEN_POLLS" ]; then
+				_gone=$((_gone + 1))
+				[ "$_gone" -ge "$GONE_POLLS" ] && _end_why="game window gone"
+			else
+				# A window that came and went before it was established is not
+				# an exit on its own (a boot transient), but a session that HAD
+				# a picture and lost it must not wait the whole launch budget:
+				# measured risk (audit 2026-10-20): a game that crashes 3 s in
+				# kept the screen frozen for the full 120 s. Two deadlines.
+				_now="$(date +%s)"
+				if [ "${_seen_at:-0}" -gt 0 ] && [ "$(( _now - _seen_at ))" -ge "$_lost_budget" ]; then
+					_end_why="picture lost for ${_lost_budget}s"
+				elif [ "$(( _now - _sess_start ))" -ge "$_budget" ]; then
+					_end_why="no picture within ${_budget}s"
 				fi
 			fi
+			if [ -n "$_end_why" ]; then
+				log "session end: $_end_why — ending the launcher tree, then one restore"
+				if [ -n "$_lp" ] && ! _end_tree "$_lp"; then
+					# the walk refused (init reached / >128 pids): the processes
+					# stay, and they are NOT supervised by anything else. The
+					# desktop still comes first, but never silently (audit P3).
+					log "session end: _end_tree REFUSED for pid $_lp — tree left running, desktop restored anyway"
+				fi
+				if _stale_session_clean; then
+					log "session end: restore done (this pass is its game-ended)"
+				else
+					log "session end: restore FAILED — guard cleared anyway (the desktop comes first)"
+				fi
+				rm -f "$MODE_FILE" "$PROFILE_FILE" "$LAUNCHER_FILE" 2>/dev/null || true
+				_sess_now=0
+				_seen=0
+				_seen_at=0
+				_gone=0
+			fi
+			if [ "$_sess_now" = 1 ]; then
+				prev_game="active"
+				sleep "$POLL"
+				continue
+			fi
 		else
-			_game_seen=0
-			_win_on=0
-			_win_gone=0
-			_emu_polls=0
-		fi
-
-		if [ "$_sess_now" = 1 ]; then
-			prev_game="active"
-			sleep "$POLL"
-			continue
+			_seen=0
+			_seen_at=0
+			_gone=0
 		fi
 		fired=""
 		[ "$_first" = "1" ] && {

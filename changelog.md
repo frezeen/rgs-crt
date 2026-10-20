@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-10-20 — Sega Model 2 certified on the tube; game launches protected from false timeouts
+
+- **Sega Model 2 arcade games certified on the tube (Daytona USA).** Titles
+  fill the 4:3 tube edge to edge at the native arcade refresh rate (57.52 Hz) on
+  an interlaced signal, locked with zero tearing and smooth frame pacing.
+  Internal 3D rendering runs at native 1:1 resolution instead of the heavy 4x
+  supersampling shipped by stock, keeping graphics faithful to the original arcade
+  board while keeping GPU load minimal (19%).
+- **Authentic arcade rendering on the tube.** Sega Model 2 games use the arcade
+  monitor's own continuous beam scaling, original draw distance, and authentic
+  stipple transparency. Software CRT cosmetic filters designed for flat screens
+  are disabled on the real tube.
+- **Game launches are protected from false timeouts.** The system supervisor
+  now evaluates game windows relative to the active screen mode, ensuring that
+  low-resolution, vertical arcade, and interlaced titles are recognized immediately
+  and never killed during startup.
+- **Games returning to the menu release the screen cleanly.** If an arcade game
+  or Windows title exits or hangs, the background manager terminates all child
+  processes and safely brings back the main menu without freezing the display.
+
+## 2026-10-19 — the layer follows RGS 43.68
+
+- **The box updated to RGS 43.68 and the layer re-certified by itself** (version
+  43.68.0, `verify.sh` clean). The 43.67 defect that hid the system list is not
+  in this path: going straight to 43.68 never writes the broken file.
+- **Chihiro follows the new stock emulator.** 43.66 replaced it with the
+  `xemuchihiro` generator, whose render scale is the namespaced
+  `xemu_chihiro_render`; the old `xemu_render` stays for Xbox only, so the
+  chihiro block now names the key the stock generator actually reads.
+- **Amiga Ransom gets the same tube treatment as Amiga 500/1200** — auto-crop
+  on, aspect correction off — instead of the pillar-boxed stock default.
+- **Sega Model 2 needs a tube re-test**: 43.66 replaced the emulator (0.9.51)
+  and the 43.68 generator now sizes its window from the declared raster.
+
 ## 2026-10-19 — remote access stops fighting a screen that is not there yet
 
 - **The remote view service no longer restarts itself in a loop when the
@@ -58,9 +92,10 @@
 - **NESiCAxLive certified on the tube (50 titles).** Every title fills the 4:3 tube
   edge to edge at 640x480i without black bars. Titles that draw on an HD canvas
   (Chaos Code, Vampire Savior, Crimzon Clover) display full frame, covering 99.6%
-  of the glass with minimal GPU load (0.6% to 0.8%). Exception is a native 640x480
-  game and keeps its own 640x480 canvas: a near pass-through that fills 98.8% of
-  the tube against 85% on the HD canvas, and in the correct 4:3 proportions.
+  of the glass with minimal GPU load (0.6% to 0.8%). Exception runs on the same
+  class canvas: it asks SDL for a 1280x720 surface at startup, and an earlier
+  per-game 640x480 canvas made its payload throw and die instead (85% of the
+  tube once back on the class canvas).
   Elevator Action, which the launcher already presents at screen size in 4:3,
   renders directly with no canvas at all (0.8% GPU load).
 - **Works on the current RGS.** This release is built and checked against RGS

@@ -93,7 +93,29 @@ fi
 # resolution-patch duty's hunks) announces + generates them natively and
 # stock setMode applies the mode inside its own resolution block — no
 # want file, no configgen patch, no stomp (the key IS the stock value).
-# Here: nothing to do — the marker is the contract.
+# Session owner (2026-10-19): record the emulatorlauncher this hook runs
+# under and its kernel start time. The reconciler
+# ends a session by ending THIS process — the one ES waits for — instead of
+# inferring from windows and pipe writers (measured 2026-10-19: a manual
+# `batocera-es-swissknife --emukill`, i.e. kill the tree, returned ES twice
+# out of two, while closing the launcher's pipe writers never dissolved the
+# chain). The start time makes a recycled pid impossible to mistake for the
+# session.
+_lp="${PPID:-}"
+_lp_i=0
+while [ -n "$_lp" ] && [ "$_lp" -gt 1 ] && [ "$_lp_i" -lt 10 ]; do
+	case "$(tr '\0' ' ' <"/proc/$_lp/cmdline" 2>/dev/null)" in
+	*emulatorlauncher*) break ;;
+	esac
+	_lp="$(sed 's/.*) //' "/proc/$_lp/stat" 2>/dev/null | awk '{print $2}')"
+	case "$_lp" in '' | *[!0-9]*) _lp="" ;; esac
+	_lp_i=$((_lp_i + 1))
+done
+if [ -n "$_lp" ] && [ "$_lp" -gt 1 ]; then
+	_lst="$(sed 's/.*) //' "/proc/$_lp/stat" 2>/dev/null | awk '{print $20}')"
+	mkdir -p "/tmp/crt-dual" 2>/dev/null || true
+	printf '%s %s\n' "$_lp" "$_lst" >/tmp/crt-dual/launcher 2>/dev/null || true
+fi
 touch /tmp/crt-dual-mode
 log "game-active guard written (/tmp/crt-dual-mode)"
 # Session suppression (2026-09-19 evening): hold the stock checker's

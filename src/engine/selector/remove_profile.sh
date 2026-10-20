@@ -72,7 +72,7 @@ fi
 # (remove_profile is exercised that way by seam test_remove_single_call).
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
-rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile "${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}" 2>/dev/null || true
+rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/launcher" "${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}" 2>/dev/null || true
 # Wake the single applier (2026-09-19): a session shorter than the 2 s
 # watcher poll leaves `game-ended` unseen, and the solo-prep's `enabled`
 # change is invisible to the status-only sysfs fingerprint — the restore

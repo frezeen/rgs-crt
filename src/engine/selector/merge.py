@@ -437,22 +437,45 @@ def _batocera_set_inplace(key: str, value: str) -> None:
     # zone on every apply/restore (observed: global.bezel moved out of the
     # stock zone). In-place replace keeps the stock position; the stock
     # tool is used only when the key is absent (no position to keep).
-    if os.path.exists(BATOCERA_CONF) and subprocess.run(
-            ["grep", "-qsE", rf"^{re.escape(key)}=", BATOCERA_CONF]).returncode == 0:
-        repl = value.replace("\\", "\\\\").replace("&", "\\&").replace("|", "\\|")
-        subprocess.run(["sed", "-i", rf"s|^{re.escape(key)}=.*|{key}={repl}|", BATOCERA_CONF],
-                       check=False, capture_output=True)
-    else:
-        subprocess.run([BATOCERA_SET, key, value], check=False, capture_output=True)
+    # Only the LAST occurrence carries our value: every reader takes the
+    # last line (batocera-settings, _conf_key, UnixSettings), so the last
+    # one is the EFFECTIVE one — and the earlier occurrences are stock
+    # (RGS ships duplicated keys: model2.emulator at 1018 and 1462).
+    # Rewriting all of them edited RGS's own line and the restore (which
+    # archives the effective value only) could not put it back.
+    prefix = key + "="
+    if os.path.exists(BATOCERA_CONF):
+        try:
+            content = Path(BATOCERA_CONF).read_text(encoding="utf-8", errors="replace")
+            lines = content.splitlines(keepends=True)
+            last = -1
+            for i, line in enumerate(lines):
+                if line.startswith(prefix):
+                    last = i
+            if last >= 0:
+                lines[last] = f"{key}={value}\n"
+                tmp = Path(BATOCERA_CONF).with_suffix(".tmp")
+                tmp.write_text("".join(lines), encoding="utf-8")
+                tmp.replace(BATOCERA_CONF)
+                return
+        except OSError:
+            pass
+    subprocess.run([BATOCERA_SET, key, value], check=False, capture_output=True)
 
 
 def _batocera_delete_key(key: str) -> bool:
-    """Remove the key's line from batocera.conf (sed is the canonical
-    removal for a plain file). False = sed unavailable; the caller keeps
-    the previous suppress semantics (print skipped in that case)."""
+    """Remove the key's line from batocera.conf (plain file: in-place rewrite)."""
+    if not os.path.exists(BATOCERA_CONF):
+        return True
+    prefix = key + "="
     try:
-        subprocess.run(["sed", "-i", rf"/^{re.escape(key)}=/d", BATOCERA_CONF],
-                       check=False, capture_output=True)
+        content = Path(BATOCERA_CONF).read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines(keepends=True)
+        new_lines = [l for l in lines if not l.startswith(prefix)]
+        if len(new_lines) != len(lines):
+            tmp = Path(BATOCERA_CONF).with_suffix(".tmp")
+            tmp.write_text("".join(new_lines), encoding="utf-8")
+            tmp.replace(BATOCERA_CONF)
         return True
     except OSError:
         return False
@@ -1165,6 +1188,49 @@ def restore_runtime_env() -> None:
 
 
 # ──────────────────────────────────────────────────────────────
+# Emulator/core PIN marker (RGS-15KHZ-EXT, "the profile decides")
+# ──────────────────────────────────────────────────────────────
+# Why this exists: RGS's own es_systems command for some systems (model2)
+# passes -emulator %EMULATOR% / -core %CORE% to configgen, and configgen
+# gives that ARGUMENT priority over batocera.conf
+# (configgen/Emulator.py:198-202). For those systems a conf pin cannot
+# switch the emulator — RGS's own sm2 pin is dead for exactly that reason
+# (their line 1027 is overridden by their line 1462, and ES passes
+# libretro/mame: measured 2026-10-20, their 43.68 pack).
+# Systems whose command does NOT pass the emulator (mame) are decided by
+# the conf, so their profile pin already works.
+# The profile is the layer that decides: merge.py writes the declared
+# pin here and sitecustomize rewrites the launcher's args from it (the
+# hoisted gameStart runs before configgen resolves the generator).
+# Session-scoped like the runtime-env marker: written at gameStart,
+# removed at gameStop; a crash leaves it, the next apply rewrites it.
+PIN_STATE = "/tmp/crt-dual/pin"
+
+
+def apply_pin(system: str, batocera: dict, name: str) -> None:
+    """Write the emulator/core pin marker for the launched system, from
+    the PROFILE's own declarations only (<system>.emulator /
+    <system>.core). No declaration = no marker = stock behaviour (ES's
+    choice decides)."""
+    p = Path(PIN_STATE)
+    if not system:
+        p.unlink(missing_ok=True)
+        return
+    emu = str(batocera.get(f"{system}.emulator", "") or "")
+    core = str(batocera.get(f"{system}.core", "") or "")
+    if not emu and not core:
+        p.unlink(missing_ok=True)
+        return
+    atomic_write(p, f"profile={name}\npin {system} {emu or '-'} {core or '-'}\n")
+    print(f"  pin: {system} emulator={emu or '-'} core={core or '-'} -> {p}")
+
+
+def restore_pin() -> None:
+    """Remove the pin marker at gameStop (next launch = stock choice)."""
+    Path(PIN_STATE).unlink(missing_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
 # Apply / remove / validate
 # ──────────────────────────────────────────────────────────────
 PATCH_STATE = "/tmp/crt-dual/patches"
@@ -1422,6 +1488,10 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     provide_configs(profile_dir, configs, target_root, backup_root, name)
     swap_binaries(profile_dir, binaries, target_root, backup_root, name)
     apply_batocera(batocera, backup_root, name)
+    # RGS-15KHZ-EXT (pin marker): the profile's OWN emulator/core
+    # declaration, handed to the launcher (configgen gives ES's -emulator
+    # argument priority over the conf — see PIN_STATE above).
+    apply_pin(system, batocera, name)
     apply_patches(patches)
     # RGS-15KHZ-EXT (runtime section): command ops in declaration order,
     # then the in-process env marker (its own state: no archive, the
@@ -1473,6 +1543,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, _em, _co, block_type)
     undo_runtime(runtime_f.get("cmds", {}), backup_root, name)
     restore_runtime_env()
+    restore_pin()
     restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co),
                      target_root, backup_root, name)
     # RGS-15KHZ-EXT (genconfig-archive): the SAME patches filter as

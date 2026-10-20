@@ -101,6 +101,62 @@ def _apply_runtime_env() -> None:
 # ──────────────────────────────────────────────
 # PATCH: emulatorlauncher — gameStart BEFORE the emulator is resolved
 # ──────────────────────────────────────────────
+# ── Emulator/core PIN marker (RGS-15KHZ-EXT, "the profile decides") ──
+# merge.py writes /tmp/crt-dual/pin inside the hoisted gameStart when the
+# PROFILE declares <system>.emulator / <system>.core. The rewrite below
+# exists because configgen gives the ARGUMENT (-emulator/-core, filled by
+# ES from RGS's es_systems command) priority over batocera.conf
+# (configgen/Emulator.py:198-202): on those systems a conf pin alone
+# cannot switch the emulator (RGS's own sm2 pin is dead for that reason —
+# measured 2026-10-20 against their 43.68 pack). No marker = stock: ES
+# decides, exactly as before.
+PIN_STATE = Path('/tmp/crt-dual/pin')
+
+
+def _pin_declared(system_name: str) -> tuple[str, str]:
+    """(emulator, core) the ACTIVE profile declares for this system;
+    ('', '') = not declared (stock). Never raises."""
+    emu = core = ''
+    try:
+        active = _active_profile()
+        if not active or not PIN_STATE.is_file():
+            return ('', '')
+        lines = PIN_STATE.read_text(errors='replace').splitlines()
+        if not lines or not lines[0].startswith('profile='):
+            return ('', '')
+        if lines[0][len('profile='):].strip() != active:
+            _log.warning("crt-dual: pin marker profile mismatch (%s) — skipped", lines[0])
+            return ('', '')
+        for line in lines[1:]:
+            if not line.startswith('pin '):
+                continue
+            parts = line.split()
+            if len(parts) < 4 or parts[1] != system_name:
+                continue
+            emu = '' if parts[2] == '-' else parts[2]
+            core = '' if parts[3] == '-' else parts[3]
+            break
+    except Exception as e:  # patch-discipline: never break a launch
+        _log.warning("crt-dual: pin marker read failed (%s): %s", PIN_STATE, e)
+    return (emu, core)
+
+
+def _apply_pin(args, system_name: str) -> None:
+    """Make the launcher's emulator/core the PROFILE's declaration."""
+    emu, core = _pin_declared(system_name)
+    if not emu and not core:
+        return
+    try:
+        if emu:
+            args.emulator = emu
+        if core:
+            args.core = core
+        _log.info("crt-dual: pin %s -> emulator=%s core=%s (profile decision)",
+                  system_name, args.emulator, args.core)
+    except Exception as e:  # patch-discipline: never break a launch
+        _log.warning("crt-dual: pin apply failed: %s", e)
+
+
 def _patch_emulatorlauncher(module):
     """start_rom: run the gameStart hook BEFORE Emulator() reads
     batocera.conf, so the profile chosen by the selector is applied before
@@ -144,6 +200,12 @@ def _patch_emulatorlauncher(module):
         _orig_ces(_sys_scripts, "gameStart", [system_name, "", "", original_rom])
         _orig_ces(_user_scripts, "gameStart", [system_name, "", "", original_rom])
         _gs_ran[0] = True
+        # RGS-15KHZ-EXT (pin): the PROFILE's emulator/core declaration
+        # becomes the launch's. ES's -emulator argument (RGS's own
+        # es_systems command) would otherwise win over the conf
+        # (configgen/Emulator.py:198-202) and the profile's pin would be
+        # a silent no-op on those systems.
+        _apply_pin(args, system_name)
         module.callExternalScripts = _patched_ces
         # RGS-15KHZ-EXT (runtime env marker): AFTER the gameStart hooks
         # (they ran merge.py apply, which wrote /tmp/crt-dual/runtime-env)
