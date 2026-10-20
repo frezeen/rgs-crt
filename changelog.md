@@ -1,13 +1,20 @@
 # Changelog
 
-## 2026-10-21 — Sega Chihiro arcade games certified on the tube (Crazy Taxi High Roller)
+## 2026-10-21 — Sega Chihiro arcade games certified on the tube; RGS upgrade scripts protected
 
-- **Sega Chihiro arcade games certified on the tube (Crazy Taxi High Roller).** Titles
-  fill the 4:3 tube edge to edge at native 640x480 resolution on an interlaced 60 Hz signal,
+- **Sega Chihiro arcade games certified on the tube.** Chihiro titles fill the 4:3
+  tube edge to edge at native 640x480 resolution on an interlaced 60 Hz signal,
   with authentic arcade proportions and zero extra sharpening or cosmetic shaders.
 - **Reliable graphics rendering via Vulkan API.** Chihiro now utilizes the native Vulkan
   graphics backend on AMD GPUs, resolving graphics ring timeouts and crashes that occurred
-  under OpenGL and ensuring smooth, stable gameplay with low GPU overhead (34%).
+  under OpenGL and ensuring smooth, stable gameplay with low GPU overhead (34%). Verified
+  across multiple titles (Crazy Taxi High Roller, OutRun 2 Special Tours, The House of the Dead III).
+- **RGS utility update scripts run without interruption.** The display supervisor now
+  prioritizes RGS utility menu scripts over orphan checks, ensuring that system upgrade scripts
+  that restart the menu are never prematurely aborted.
+- **Robust process clean-up on game exit.** The process tree killer safely guards against
+  terminating inherited session process groups when the frontend closes, keeping background
+  display services and remote access active.
 
 ## 2026-10-20 — Sega Model 2 certified on the tube; game launches protected from false timeouts
 
