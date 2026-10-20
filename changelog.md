@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-21 — Sega Chihiro arcade games certified on the tube (Crazy Taxi High Roller)
+
+- **Sega Chihiro arcade games certified on the tube (Crazy Taxi High Roller).** Titles
+  fill the 4:3 tube edge to edge at native 640x480 resolution on an interlaced 60 Hz signal,
+  with authentic arcade proportions and zero extra sharpening or cosmetic shaders.
+- **Reliable graphics rendering via Vulkan API.** Chihiro now utilizes the native Vulkan
+  graphics backend on AMD GPUs, resolving graphics ring timeouts and crashes that occurred
+  under OpenGL and ensuring smooth, stable gameplay with low GPU overhead (34%).
+
 ## 2026-10-20 — Sega Model 2 certified on the tube; game launches protected from false timeouts
 
 - **Sega Model 2 arcade games certified on the tube (Daytona USA).** Titles

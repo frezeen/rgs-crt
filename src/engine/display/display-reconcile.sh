@@ -128,6 +128,10 @@ _under_es() { # $1 = pid -> rc 0 when walking up the parents reaches ES
 }
 
 _is_rgs_menu() { # $1 = launcher pid -> rc 0 when its argv runs a +rgs utility script
+	if [ -n "${CRT_DUAL_IS_RGS_MENU_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_IS_RGS_MENU_CMD" _ "$1"
+		return $?
+	fi
 	case "$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)" in
 	*/userdata/roms/rgs/*.sh*) return 0 ;;
 	esac
@@ -188,10 +192,16 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	log "end-tree: ending ${pids% }"
 	# A distinct process group also catches what wine reparented to init
 	# (measured 2026-10-11). ES's group and our own are never touched.
+	# The group-kill strikes ONLY if the group leader belongs to the launcher's
+	# tree (e.g. the launcher itself or a descendant wine that called setsid/setpgid).
+	# If $pg is NOT in $pids, the group was inherited from an ancestor (such as
+	# openbox/xinit/the X session) and must NEVER be signaled as a group.
 	pg="$(ps -o pgid= -p "$lp" 2>/dev/null | tr -d ' ')"
 	es_pg="$(ps -o pgid= -p "$(_es_pid)" 2>/dev/null | tr -d ' ')"
 	my_pg="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')"
-	if [ -n "$pg" ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
+	_pg_in_tree=0
+	case " $pids " in *" $pg "*) _pg_in_tree=1 ;; esac
+	if [ "$_pg_in_tree" -eq 1 ] && [ -n "$pg" ] && [ "$pg" -gt 1 ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
 		kill -TERM -- "-$pg" 2>/dev/null || true
 	fi
 	# shellcheck disable=SC2086 # a pid list is the point
@@ -208,7 +218,7 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	# The group needs its own KILL: a wine daemon reparented to init is NOT a
 	# descendant of $lp, so it never lands in $left, and TERM is ignored by
 	# design (audit 2026-10-20). Same guards as the TERM above.
-	if [ -n "$pg" ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
+	if [ "$_pg_in_tree" -eq 1 ] && [ -n "$pg" ] && [ "$pg" -gt 1 ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
 		kill -KILL -- "-$pg" 2>/dev/null || true
 	fi
 	return 0
@@ -732,13 +742,15 @@ case "${1:---check}" in
 			_end_why=""
 			if [ -z "$_lp" ]; then
 				_end_why="launcher gone"
-			elif ! _under_es "$_lp"; then
-				_end_why="launcher orphaned (ES gone)"
 			elif _is_rgs_menu "$_lp"; then
 				# the RGS utility menu is a SEQUENCE of script windows: the gap
 				# between two xterms is not an exit (measured 2026-10-12: the
-				# breaker aborted the owner's update between two windows)
+				# breaker aborted the owner's update between two windows); even
+				# if an update script reloads ES (killall -9 emulationstation),
+				# the utility run is not an orphaned game session.
 				:
+			elif ! _under_es "$_lp"; then
+				_end_why="launcher orphaned (ES gone)"
 			elif _game_alive; then
 				_seen=$((_seen + 1))
 				_seen_at="$(date +%s)"
