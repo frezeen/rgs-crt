@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-21 — Interlaced HDMI and TV panel compatibility fix
+
+- **Interlaced HDMI display compatibility.** The display server configuration generator
+  now strips interlaced and frequency suffixes when determining screen boundaries.
+  TVs and monitors that report interlaced display modes (such as 1080i) over HDMI now boot
+  cleanly in dual CRT + LCD setups without triggering configuration syntax errors.
+
 ## 2026-10-21 — NESiCAxLive arcade library certified on the tube; multi-system profile scoping
 
 - **NESiCAxLive arcade library certified on the tube (50 titles).** The entire 50-game

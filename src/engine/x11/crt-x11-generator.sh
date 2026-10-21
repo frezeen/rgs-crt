@@ -93,9 +93,11 @@ for _d in /sys/class/drm/card*-*/; do
 	[ -n "$_mode" ] || continue
 	_splash_x="${_xn:-$_drm}"
 	_splash_mode=$_mode
-	_splash_virtual="    SubSection \"Display\"
-        Virtual ${_mode%x*} ${_mode#*x}
+	if [[ "$_mode" =~ ^([0-9]+)x([0-9]+) ]]; then
+		_splash_virtual="    SubSection \"Display\"
+        Virtual ${BASH_REMATCH[1]} ${BASH_REMATCH[2]}
     EndSubSection"
+	fi
 	break
 done
 # Effective CRT = confirmed + presumed; a box with NO analog connector at
@@ -592,6 +594,11 @@ if [ -f "$X11_CONF" ]; then
 	fi
 	if [ "$(grep -c '^Section ' "$X11_CONF")" != "$(grep -c '^EndSection' "$X11_CONF")" ]; then
 		echo "❌ VALIDATION FAILED: unbalanced sections (Section=$(grep -c '^Section ' "$X11_CONF") EndSection=$(grep -c '^EndSection' "$X11_CONF")) in $X11_CONF" >&2
+		rm -f "$X11_CONF"
+		exit 1
+	fi
+	if grep -qE '^[[:space:]]*Virtual[[:space:]]+.*[^0-9[:space:]]' "$X11_CONF"; then
+		echo "❌ VALIDATION FAILED: non-numeric Virtual dimensions in $X11_CONF" >&2
 		rm -f "$X11_CONF"
 		exit 1
 	fi
