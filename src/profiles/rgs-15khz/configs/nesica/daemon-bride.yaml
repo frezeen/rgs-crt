@@ -1,0 +1,5 @@
+system: nesica
+name: 'Daemon Bride: Additional Gain'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

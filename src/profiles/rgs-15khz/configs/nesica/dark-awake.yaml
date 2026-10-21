@@ -1,0 +1,6 @@
+system: nesica
+name: 'Dark Awake: The King Has No Name'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"
+  WAL_D3D9_FULLSCREEN_SIZE: ""

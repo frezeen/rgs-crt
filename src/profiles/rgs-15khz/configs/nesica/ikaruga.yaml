@@ -1,0 +1,5 @@
+system: nesica
+name: Ikaruga
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

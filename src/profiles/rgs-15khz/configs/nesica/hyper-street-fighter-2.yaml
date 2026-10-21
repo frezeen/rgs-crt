@@ -1,0 +1,5 @@
+system: nesica
+name: 'Hyper Street Fighter II: The Anniversary Edition'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

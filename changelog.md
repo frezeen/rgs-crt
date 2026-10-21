@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-21 — NESiCAxLive arcade library certified on the tube; multi-system profile scoping
+
+- **NESiCAxLive arcade library certified on the tube (50 titles).** The entire 50-game
+  library is tuned for the 4:3 CRT monitor:
+  - **Native 4:3 arcade classics render full frame without scaling artifacts.** Titles
+    designed with a standard 4:3 low-resolution raster (Arcana Heart 2, Suggoi,
+    Homura, Ikaruga, Space Invaders, Puzzle Bobble, Psychic Force 2012, The Rumble
+    Fish 2, etc.) render directly on the tube at native 640x480i resolution with zero
+    side bezels and minimal GPU load.
+  - **Vertical shoot-'em-ups preserve authentic arcade proportions.** Vertical
+    titles (Raiden III, Raiden IV) display in their authentic 3:4 orientation with
+    official arcade side bezels intact, preserving slender sprites and round bullet
+    geometry without horizontal distortion.
+  - **Widescreen HD arcade titles stretch cleanly to fill the tube.** Modern
+    16:9 widescreen releases (BlazBlue, Persona 4 Arena, Under Night In-Birth,
+    Ultra Street Fighter IV, Crimzon Clover, Yatagarasu, etc.) utilize targeted
+    Gamescope canvas scaling to fill the entire 4:3 tube edge to edge without black bars.
+- **Multi-system configuration scoping.** Profiles now support declaring custom
+  configuration files independently across different systems, ensuring that game-specific
+  overrides for one emulator (such as MAME or Windows arcade games) are only applied
+  when launching games on that specific system.
+- **Safe game termination on system updates.** When applying configuration updates,
+  active Windows arcade games and background emulator processes are cleanly closed,
+  preventing launch collisions and leaving EmulationStation responsive.
+
 ## 2026-10-21 — Sega Chihiro arcade games certified on the tube; RGS upgrade scripts protected
 
 - **Sega Chihiro arcade games certified on the tube.** Chihiro titles fill the 4:3

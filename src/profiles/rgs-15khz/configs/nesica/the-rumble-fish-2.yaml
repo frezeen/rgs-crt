@@ -1,0 +1,5 @@
+system: nesica
+name: The Rumble Fish 2
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

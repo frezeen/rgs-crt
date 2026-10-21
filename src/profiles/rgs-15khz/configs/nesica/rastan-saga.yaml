@@ -1,0 +1,6 @@
+system: nesica
+name: Rastan Saga
+
+env:
+  WAL_NESICA_REG: "Resolution=0"
+  WAL_D3D9_FULLSCREEN_SIZE: ""

@@ -284,6 +284,9 @@ def parse_spec(profile_dir: Path):
         if in_configs:
             if key:
                 configs[key] = value
+                if block:
+                    block_of[f"config.files:{key}"] = block
+                    block_of[f"configs:{key}"] = block
             continue
         if in_binaries:
             if key:
@@ -1438,6 +1441,13 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
             for k, v in mapping.items():
                 if not any(k.startswith(b + ".") for b in all_blocks):
                     out[k] = v
+        return out
+    if section in ("config.files", "configs"):
+        out = {}
+        for k, v in mapping.items():
+            blk = block_of.get(f"{section}:{k}", block_of.get(section, ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out[k] = v
         return out
     block = block_of.get(section, "")
     if _block_matches(block, block_type, system, emulator, core):

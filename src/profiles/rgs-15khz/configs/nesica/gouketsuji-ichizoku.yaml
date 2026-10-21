@@ -1,0 +1,5 @@
+system: nesica
+name: 'Gouketsuji Ichizoku: Matsuri Senzo Kuyou'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

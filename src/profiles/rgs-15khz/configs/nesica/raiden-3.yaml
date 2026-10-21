@@ -1,0 +1,5 @@
+system: nesica
+name: Raiden III
+
+env:
+  WAL_NESICA_REG: "Resolution=0"
