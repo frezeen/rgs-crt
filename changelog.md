@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-21 — LCD panel progressive mode preference for dual scaling
+
+- **Progressive mode preference for LCD panels.** When an LCD monitor or HDTV exposes both
+  interlaced (1080i) and progressive (1080p) resolutions, the display engine now explicitly
+  selects the progressive mode. This allows the graphics driver to enable hardware scaling
+  (`scale-from`), stretching the cloned 4:3 arcade desktop edge-to-edge across the widescreen
+  panel without black borders or window cropping.
+
 ## 2026-10-21 — Interlaced HDMI and TV panel compatibility fix
 
 - **Interlaced HDMI display compatibility.** The display server configuration generator

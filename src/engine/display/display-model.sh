@@ -42,6 +42,17 @@ _x() { timeout 5 env DISPLAY="${DISPLAY:-:0}" xrandr --current 2>/dev/null; }
 _modes() { _x | sed -n "/^$1 connected/,/^[^ ]/p" | awk 'NF >= 2 && $1 ~ /^[0-9]/ { print }'; }
 _pref() { _modes "$1" | awk '$0 ~ /\+/ { print $1; exit }'; }
 _cur() { _modes "$1" | awk '$0 ~ /\*/ { print $1; exit }'; }
+_prefer_progressive() { # $1 output, $2 mode -> progressive mode if available, else original mode
+	local out="$1" m="$2"
+	if [[ "$m" =~ ^(.*)i$ ]]; then
+		local prog="${BASH_REMATCH[1]}"
+		if _modes "$out" | awk -v m="$prog" '$1 == m { exit 0 } END { exit 1 }'; then
+			printf '%s\n' "$prog"
+			return 0
+		fi
+	fi
+	printf '%s\n' "$m"
+}
 _desktop() { # the analog desktop mode: engine state, else the conf's 15 kHz Modeline
 	local n
 	n=$(awk 'NR == 1 { print $1 }' "$STATE_DIR/crt-desktop-mode" 2>/dev/null)
@@ -84,6 +95,7 @@ dual)
 	[ -n "$crt_mode" ] || crt_mode=$(_cur "$crt")
 	lcd_mode=$(_pref "$lcd")
 	[ -n "$lcd_mode" ] || lcd_mode=$(_cur "$lcd")
+	lcd_mode=$(_prefer_progressive "$lcd" "$lcd_mode")
 	[ -n "$crt_mode" ] && [ -n "$lcd_mode" ] || {
 		echo "display-model: no mode offered for the CRT or the panel" >&2
 		exit 1
@@ -128,6 +140,7 @@ crt)
 lcd)
 	lcd_mode=$(_pref "$lcd")
 	[ -n "$lcd_mode" ] || lcd_mode=$(_cur "$lcd")
+	lcd_mode=$(_prefer_progressive "$lcd" "$lcd_mode")
 	[ -n "$lcd_mode" ] || {
 		echo "display-model: no mode offered for the panel" >&2
 		exit 1

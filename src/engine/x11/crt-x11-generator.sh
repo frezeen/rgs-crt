@@ -91,6 +91,9 @@ for _d in /sys/class/drm/card*-*/; do
 	fi
 	_mode=$(head -1 "${_d}modes" 2>/dev/null)
 	[ -n "$_mode" ] || continue
+	if [[ "$_mode" =~ ^(.*)i$ ]] && grep -qxF "${BASH_REMATCH[1]}" "${_d}modes" 2>/dev/null; then
+		_mode="${BASH_REMATCH[1]}"
+	fi
 	_splash_x="${_xn:-$_drm}"
 	_splash_mode=$_mode
 	if [[ "$_mode" =~ ^([0-9]+)x([0-9]+) ]]; then
