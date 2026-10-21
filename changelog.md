@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-21 — Fix progressive mode promotion logic in display engine for dual LCD scaling
+
+- **Progressive mode selection in display model.** Corrected the pattern evaluation when
+  promoting interlaced modes (1080i) to progressive modes (1080p) in the display engine
+  runtime. Ensures RandR hardware transform scaling (`--scale-from 640x480`) is successfully
+  applied on digital panels during dual display boot.
+
 ## 2026-10-21 — LCD panel progressive mode preference for dual scaling
 
 - **Progressive mode preference for LCD panels.** When an LCD monitor or HDTV exposes both

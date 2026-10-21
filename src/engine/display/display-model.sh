@@ -46,7 +46,7 @@ _prefer_progressive() { # $1 output, $2 mode -> progressive mode if available, e
 	local out="$1" m="$2"
 	if [[ "$m" =~ ^(.*)i$ ]]; then
 		local prog="${BASH_REMATCH[1]}"
-		if _modes "$out" | awk -v m="$prog" '$1 == m { exit 0 } END { exit 1 }'; then
+		if _modes "$out" | awk -v m="$prog" '$1 == m { found=1; exit } END { exit !found }'; then
 			printf '%s\n' "$prog"
 			return 0
 		fi
