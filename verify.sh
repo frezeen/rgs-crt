@@ -740,8 +740,10 @@ if [ "$PRESENT" -gt 0 ]; then
 		fi
 	elif [ "$_vo2" = "none" ]; then
 		ok "box key global.videooutput2=none (stock second-screen opt-out on $_v_gpu)"
+	elif [ -z "$_vo2" ]; then
+		ok "box key global.videooutput2 absent (pre-reboot post-install state: S15 generator writes none at boot on $_v_gpu)"
 	else
-		bad "box key global.videooutput2: expected none on $_v_gpu, got '${_vo2:-absent}' (stock would pick a backglass output onto the CRT; the BOOT generator writes it — reboot once after a fresh install)"
+		bad "box key global.videooutput2: expected none or absent on $_v_gpu, got '$_vo2' (stock would pick a backglass output onto the CRT)"
 	fi
 	for _key in es.resolution global.videomode global.videooutput splash.screen.resize global.videooutput2; do
 		if [ -f "$PKG/backups/box-keys/$_key" ]; then

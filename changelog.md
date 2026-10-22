@@ -1,40 +1,20 @@
 # Changelog
 
-## 2026-10-21 — Fix progressive mode promotion logic in display engine for dual LCD scaling
+## 2026-10-22
 
-- **Progressive mode selection in display model.** Corrected the pattern evaluation when
-  promoting interlaced modes (1080i) to progressive modes (1080p) in the display engine
-  runtime. Ensures RandR hardware transform scaling (`--scale-from 640x480`) is successfully
-  applied on digital panels during dual display boot.
+- **Dreamcast keeps its 4:3 shape.** Dreamcast games now declare the picture
+  as 4:3 in the emulator's aspect setting instead of following the emulator's
+  internal widescreen-shaped picture, so the arcade proportions stay fixed.
+- **NESiCAxLive games lose the smoothing blur.** Namco NESiCAxLive titles now
+  render raw native pixels on the tube instead of the software smoothing
+  filter the emulator layered over the picture.
 
-## 2026-10-21 — LCD panel progressive mode preference for dual scaling
+## 2026-10-21
 
-- **Progressive mode preference for LCD panels.** When an LCD monitor or HDTV exposes both
-  interlaced (1080i) and progressive (1080p) resolutions, the display engine now explicitly
-  selects the progressive mode. This allows the graphics driver to enable hardware scaling
-  (`scale-from`), stretching the cloned 4:3 arcade desktop edge-to-edge across the widescreen
-  panel without black borders or window cropping.
-
-## 2026-10-21 — Interlaced HDMI and TV panel compatibility fix
-
-- **Interlaced HDMI display compatibility.** The display server configuration generator
-  now strips interlaced and frequency suffixes when determining screen boundaries.
-  TVs and monitors that report interlaced display modes (such as 1080i) over HDMI now boot
-  cleanly in dual CRT + LCD setups without triggering configuration syntax errors.
-
-## 2026-10-21 — NESiCAxLive arcade library certified on the tube; multi-system profile scoping
-
-- **NESiCAxLive arcade library certified on the tube (50 titles).** The entire 50-game
-  library is tuned for the 4:3 CRT monitor:
-  - **Native 4:3 arcade classics render full frame without scaling artifacts.** Titles
-    designed with a standard 4:3 low-resolution raster (Arcana Heart 2, Suggoi,
-    Homura, Ikaruga, Space Invaders, Puzzle Bobble, Psychic Force 2012, The Rumble
-    Fish 2, etc.) render directly on the tube at native 640x480i resolution with zero
-    side bezels and minimal GPU load.
-  - **Vertical shoot-'em-ups preserve authentic arcade proportions.** Vertical
-    titles (Raiden III, Raiden IV) display in their authentic 3:4 orientation with
-    official arcade side bezels intact, preserving slender sprites and round bullet
-    geometry without horizontal distortion.
+- **Interlaced HDMI and TV panel compatibility.** Fixed boot crashes on TVs and monitors advertising 1080i modes over HDMI by properly sanitizing display boundary definitions.
+- **Dual display widescreen LCD scaling.** The display engine now strictly selects progressive modes over interlaced modes on digital panels, enabling hardware scaling to stretch the cloned 4:3 arcade desktop edge-to-edge on 16:9 LCDs without black borders.
+- **Seamless updater verification.** Verification now accounts for pre-reboot state during installs and updates on AMD/Intel systems, eliminating false failure banners in the EmulationStation update tool.
+- **NESiCAxLive arcade library certified on CRT.** Full 50-game library tuned for the 4:3 tube, with native raster on horizontal classics and authentic 3:4 orientation with arcade bezels on vertical shooters.
   - **Widescreen HD arcade titles stretch cleanly to fill the tube.** Modern
     16:9 widescreen releases (BlazBlue, Persona 4 Arena, Under Night In-Birth,
     Ultra Street Fighter IV, Crimzon Clover, Yatagarasu, etc.) utilize targeted
