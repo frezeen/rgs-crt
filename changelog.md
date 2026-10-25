@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-25
+
+- **Ballistics arcade 3D starts in native full-screen.** Removed the widescreen translation canvas and redundant game keys for Ballistics, letting it boot directly into its native full-screen 4:3 640x480 resolution without getting stuck before video mode negotiation.
+- **Bounty Hunter authentic 3:4 vertical arcade display.** Corrected ReShade preset and aspect ratio mapping for Bounty Hunter: disabled artificial flat-panel bezels, virtual CRT curvature and bloom shaders, restoring clean pillarbox black borders and authentic 3:4 TATE arcade geometry on 4:3 CRT monitors.
+- **Arcade PC widescreen gamescope classification.** Cleaned up native 4:3 titles from the 16:9 Gamescope forced list, reserving hardware canvas scaling strictly for actual widescreen titles.
+- **Robust session termination and updater reliability.** Polling guards and update feed probes now handle active wine sessions cleanly, preventing false game timeouts and loop detections.
+
 ## 2026-10-22
 
 - **Dreamcast keeps its 4:3 shape.** Dreamcast games now declare the picture
@@ -207,35 +214,3 @@ produced.
 unmanaged.** If the layout names a screen that is not connected, or the
 program that manages the screen is not running exactly once, the check now
 fails loudly instead of reporting a clean state.
-
-## 2026-10-16 — the layer follows RGS 43.62, and the check tool stops offering the same update twice
-
-**Works on the current RGS.** This release is built and checked against RGS
-43.62. When RGS updates, the layer re-checks itself against the new version
-at boot or when you open the check tool, and the version it shows follows the
-RGS it was checked against.
-
-**The check tool no longer offers the same update again and again.** After it
-installed an update, it kept showing that same one as still available, so
-opening it again would download and install it a second time. Fixed: once an
-update is installed, the tool sees it as current.
-
-**Leaving a game no longer leaves the menu black on the LCD profile.** When
-you played a game while the LCD was the active screen and then went back to
-the menu, the menu could come back black. Fixed: preparing a game session no
-longer switches off the screen the menu lives on.
-
-**The RGS update from the menu is no longer interrupted.** That update opens
-several windows in a row; the layer could read the pause between two of them
-as "the game has closed" and release the screen mid-update, which aborted it.
-Fixed: while an RGS utility is running, the release waits.
-
-**The screen comes back faster when a game closes.** Going back to the menu
-after a game now takes a few seconds instead of about eleven, on both screens.
-
-**The update tool's text is readable on the tube.** The RGS updater's window
-is sized for a large modern screen, so on the tube its text was too big to
-read. The layer now opens it with a size that fits 480i.
-
-**The check tool shows what it is doing.** The check entry prints the live
-steps of its check and update, and keeps the steps on the result screen.

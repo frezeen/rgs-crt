@@ -91,17 +91,19 @@ _launcher_pid() {
 	fi
 	local pid start cur
 	read -r pid start <"$LAUNCHER_FILE" 2>/dev/null || true
-	if [ -n "${pid:-}" ] && [ -r "/proc/$pid/stat" ]; then
-		cur="$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
-		if [ -n "${start:-}" ] && [ "$cur" = "$start" ]; then
-			printf '%s\n' "$pid"
-			return 0
+	if [ -n "${pid:-}" ]; then
+		if [ -r "/proc/$pid/stat" ]; then
+			cur="$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
+			if [ -n "${start:-}" ] && [ "$cur" = "$start" ]; then
+				printf '%s\n' "$pid"
+			fi
 		fi
+		return 0
 	fi
 	# A guard written by an older build carries no record: fall back to the
 	# box's launcher (the test batocera-es-swissknife uses; `pgrep -x` never
 	# matches because comm is truncated to 15 characters).
-	pgrep -f -n emulatorlauncher 2>/dev/null | head -1
+	pgrep -f -n '(^|/)emulatorlauncher(\.py)?([[:space:]]|$)' 2>/dev/null | head -1
 }
 
 _under_es() { # $1 = pid -> rc 0 when walking up the parents reaches ES
@@ -701,7 +703,7 @@ case "${1:---check}" in
 	# CRT_DUAL_SESSION_BUDGET) applies only while no window was ever
 	# established: a payload that died on startup shows nothing at all.
 	SEEN_POLLS=10
-	GONE_POLLS=4
+	GONE_POLLS="${CRT_DUAL_GONE_POLLS:-16}"
 	_seen=0
 	_gone=0
 	_sess_start=0

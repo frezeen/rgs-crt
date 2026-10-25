@@ -789,10 +789,13 @@ feed_probe() {
 					_line="CURRENT $_installed"
 				else
 					_target="$(printf '%s' "$_feed" | cut -d. -f1,2)"
-					if feed_is_base "$_live_rgs" && feed_base_ge "$_live_rgs" "$_target"; then
+					_live_base="$(printf '%s' "$_live_rgs" | cut -d. -f1,2)"
+					if [ -n "$_live_base" ] && [ "$_target" = "$_live_base" ]; then
 						_line="UPDATE $_feed"
-					else
+					elif feed_is_base "$_live_rgs" && feed_base_ge "$_target" "$_live_base"; then
 						_line="BLOCKED $_feed $_target"
+					else
+						_line="CURRENT $_installed"
 					fi
 				fi
 			fi
@@ -1171,7 +1174,9 @@ tool-update)
 		_src="${RGS15_SRC:-$(cat "$PKG/install-source" 2>/dev/null || true)}"
 		_get="${RGS15_UPDATE_GET:-$_src/get.sh}"
 		if [ -n "$_src" ] && [ -f "$_get" ]; then
-			if bash "$_get" >>"$LOG" 2>&1; then
+			if [ -e "$_src/.git" ]; then
+				log "update: dev worktree detected ($_src/.git exists) — skipping get.sh release install"
+			elif bash "$_get" >>"$LOG" 2>&1; then
 				log "update: installed $_feed_ver"
 				_installed=1
 			else
@@ -1221,14 +1226,20 @@ tool-update)
 		_ver="$_feed_ver (installed: the marker keeps the release version)"
 	elif feed_is_base "$_live"; then
 		_base="$(printf '%s' "$_live" | cut -d. -f1,2)"
-		# atomic (tmp + mv, same shape as deploy.sh's marker rewrite)
-		if printf '%s.0\n' "$_base" >"${PKG}.version.update.$$" 2>/dev/null \
-			&& mv -f "${PKG}.version.update.$$" "${PKG}.version" 2>/dev/null; then
-			_ver="${_base}.0"
+		_curr_marker="$(tr -d ' \t\r\n' <"${PKG}.version" 2>/dev/null || true)"
+		_curr_base="$(printf '%s' "$_curr_marker" | cut -d. -f1,2)"
+		if [ "$_curr_base" = "$_base" ] && [ -n "$_curr_marker" ]; then
+			_ver="$_curr_marker"
 		else
-			_wrc=$?
-			rm -f "${PKG}.version.update.$$" 2>/dev/null || true # benign: never leave a half-written marker behind
-			log "update: WARN could not write ${PKG}.version (rc=$_wrc) — the marker keeps the release version"
+			# atomic (tmp + mv, same shape as deploy.sh's marker rewrite)
+			if printf '%s.0\n' "$_base" >"${PKG}.version.update.$$" 2>/dev/null \
+				&& mv -f "${PKG}.version.update.$$" "${PKG}.version" 2>/dev/null; then
+				_ver="${_base}.0"
+			else
+				_wrc=$?
+				rm -f "${PKG}.version.update.$$" 2>/dev/null || true # benign: never leave a half-written marker behind
+				log "update: WARN could not write ${PKG}.version (rc=$_wrc) — the marker keeps the release version"
+			fi
 		fi
 	else
 		log "update: WARN live rgs.version '${_live:-?}' is not MAJOR.MINOR — no certified base to re-label"
