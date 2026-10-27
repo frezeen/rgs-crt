@@ -47,7 +47,7 @@ def is_game_active(game_name):
             continue
     return None
 
-def run_overlay(image_path, game_token):
+def run_overlay(image_path, game_token, strip_w=None):
     # Wait up to 15 seconds for game process to appear
     game_pid = None
     for _ in range(30):
@@ -81,8 +81,8 @@ def run_overlay(image_path, game_token):
     depth = x11.XDefaultDepth(d, screen)
 
     W, H = im.size
-    left_w = 114
-    right_w = 114
+    left_w = strip_w if (strip_w and strip_w > 0) else 114
+    right_w = left_w
     right_x = W - right_w
 
     def create_strip(x, y, w, h, img_crop):
@@ -146,7 +146,7 @@ def stop():
         except OSError:
             pass
 
-def start(image_path, game_token):
+def start(image_path, game_token, strip_w=None):
     stop()
     pid = os.fork()
     if pid > 0:
@@ -174,7 +174,7 @@ def start(image_path, game_token):
     except OSError:
         pass
 
-    run_overlay(image_path, game_token)
+    run_overlay(image_path, game_token, strip_w)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -185,4 +185,5 @@ if __name__ == "__main__":
     elif action == "start":
         img = sys.argv[2] if len(sys.argv) > 2 else ""
         token = sys.argv[3] if len(sys.argv) > 3 else "Space Invaders"
-        start(img, token)
+        strip_w = int(sys.argv[4]) if len(sys.argv) > 4 else None
+        start(img, token, strip_w)
