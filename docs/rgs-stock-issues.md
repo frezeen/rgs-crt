@@ -109,3 +109,10 @@ accusation against the platform this project is a gift to.
 - Not ours (the page's inclusion test): reproduces bit-for-bit on stock LCD with no layer files or hooks active; confirmed identical behavior on LCD by the owner.
 - Suggested fix: add ReShade 90-degree CCW/CW rotation configuration to `raiden-3-typex.yaml` and `raiden-4-typex.yaml` in the stock RGS loader profiles matching the mechanism already used in `gigawing-generations.yaml`.
 
+## 5. NESiCAxLive: Tottemo E Mahjong crashes at launch on stock RGS (1280x800 template patch)
+
+- What you see: launching `Tottemo E Mahjong` on clean stock RGS fails immediately (~2 seconds, exit code 18) before any game window or display output appears.
+- Measured (2026-10-27, stock RGS 43.75 on LCD): reproduces on untouched stock RGS on LCD (`rgs-stock`). Stock template `/userdata/system/rgs/emulators/windows-arcade-loader/systemprofiles/nesica/tottemo-e-mahjong.yaml` attempts to patch the binary's HD height from 768 to 800 (`WAL_PATCHES: "0x9231:2003"`). Because 1280x800 (16:10) is absent from the display adapter's mode list on standard 16:9 displays, `game2.exe`'s display mode enumeration loop fails to find the requested resolution and skips Direct3D9 `CreateDevice`. The uninitialized null device pointer triggers an immediate access violation at `game2.exe+0x2c84` (`wal-nesica.log`), exiting with code 18.
+- Not ours (the page's inclusion test): reproduces bit-for-bit on stock LCD with stock loader template; zero layer files or hooks involved.
+- Suggested fix: patch the height to native 1280x720 (`0x2d0`, hex bytes `d002` -> `WAL_PATCHES: "0x9231:d002"`) so the mode matches standard 720p/1080p displays, or set `WAL_NESICA_REG: "Resolution=0"` to default to native 4:3 SD (640x480).
+

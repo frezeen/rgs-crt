@@ -40,7 +40,7 @@ case "$1" in
 	start)
 		PKG_ROOT="${CRT_DUAL_PKG_ROOT:-/userdata/system/crt-dual}"
 		VNC="$PKG_ROOT/src/vnc/vnc"
-		LOG="$PKG_ROOT/logs/vnc.log"
+		LOG="${CRT_DUAL_VNC_LOG:-/userdata/system/logs/vnc.log}"
 		PIDFILE="${CRT_DUAL_VNC_PIDFILE:-/tmp/crt-dual-vnc.pid}"
 		XSOCK="${CRT_DUAL_VNC_XSOCK:-/tmp/.X11-unix/X0}"
 		MAXFAILS="${CRT_DUAL_VNC_MAXFAILS:-5}"

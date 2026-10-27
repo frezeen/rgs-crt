@@ -1,0 +1,5 @@
+system: nesica
+name: Tottemo E Mahjong
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

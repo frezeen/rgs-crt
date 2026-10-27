@@ -1,0 +1,9 @@
+system: typex
+name: 3D Cosplay Mahjong
+
+env:
+  WAL_WINDOW_SIZE: screen
+  WAL_WINDOW_POPUP: "1"
+  WAL_D3D9_WINDOWED_SIZE: 1280x768
+  WAL_D3D9_SOURCE: "352,0,576,768"
+  WAL_D3D9_ASPECT: "3:4"
