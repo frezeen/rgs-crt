@@ -805,6 +805,54 @@ feed_probe() {
 	printf '%s\n' "$_line"
 }
 
+# ── update notification (ES messagebox on boot) ──────────────────────────
+# Checks the feed asynchronously after boot once ES and network are ready.
+# If an update is available, displays a modal dialog on ES (:1234/messagebox).
+# Non-blocking, fails safe, exits silently if offline or already current.
+notify_update_worker() {
+	local _max="${RGS15_NOTIFY_WAIT_MAX:-45}" _poll="${RGS15_NOTIFY_WAIT_POLL:-2}"
+	local _es_url="${RGS15_ES_URL:-http://127.0.0.1:1234}"
+	local _fetch="${RGS15_FETCH_BIN:-curl}"
+	local _i=0 _up=0 _line _status _feed_ver _msg
+
+	while [ "$_i" -lt "$_max" ]; do
+		if "$_fetch" -s -m 1 "$_es_url/" >/dev/null 2>&1; then
+			_up=1
+			break
+		fi
+		sleep "$_poll"
+		_i=$((_i + _poll))
+	done
+	[ "$_up" = "1" ] || return 0
+
+	export RGS15_FEED_ALLOW_NET=1
+	_line="$(feed_probe)"
+	_status="${_line%% *}"
+	_feed_ver="$(printf '%s' "$_line" | cut -d' ' -f2 -s)"
+
+	case "$_status" in
+	UPDATE)
+		_msg="RGS-CRT update available (v${_feed_ver})!
+
+Open 'CRT Tools' in the Batocera menu to apply the update."
+		"$_fetch" -s -X POST "$_es_url/messagebox" -d "$_msg" >/dev/null 2>&1 || true
+		log "notify: update message sent to ES (v${_feed_ver})"
+		;;
+	BLOCKED)
+		_msg="New RGS and RGS-CRT (v${_feed_ver}) updates available!
+
+Please update your RGS system first,
+then open 'CRT Tools' to update the CRT layer."
+		"$_fetch" -s -X POST "$_es_url/messagebox" -d "$_msg" >/dev/null 2>&1 || true
+		log "notify: new RGS update message sent to ES (v${_feed_ver})"
+		;;
+	*)
+		# CURRENT, OFFLINE or unexpected: stay silent
+		;;
+	esac
+	return 0
+}
+
 # ── the ES tool's gamelist row (gamelist-ensure) ─────────────────────────
 # Our entry in the +rgs gamelist, so the check tool exists in the Batocera
 # config menu. Idempotent, OURS only: one-time backup
@@ -1055,6 +1103,11 @@ do_start() {
 		log "start: VNC symlinks re-created"
 	fi
 
+	# 6. Background update notification (non-blocking, fails safe).
+	if [ "${RGS15_NOTIFY_DISABLE:-0}" != "1" ]; then
+		( notify_update_worker & ) 2>/dev/null || true
+	fi
+
 	log "start: done"
 	return 0
 }
@@ -1065,6 +1118,10 @@ start)
 	exit 0
 	;;
 stop)
+	exit 0
+	;;
+update-notify)
+	notify_update_worker
 	exit 0
 	;;
 tool-uninstall)
@@ -1248,7 +1305,7 @@ tool-update)
 	echo "GREEN"
 	exit 0
 	;;*)
-	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
+	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|update-notify|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
 	exit 1
 	;;
 esac

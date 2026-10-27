@@ -9,6 +9,7 @@
 - **Taito Type X: 3D Cosplay Mahjong CRT profile mapping.** Added userprofile configuration for 15kHz CRT tube display to ensure correct 640x480i raster mapping and launch stability.
 - **RGS 43.75 and 43.72 system compatibility.** Layer certified and fully aligned against live RGS 43.72 and 43.75 updates, ensuring display services, launch hooks, and update feed checks operate reliably across upgrades.
 - **Display service and diagnostic logging consolidation.** Standardized VNC remote access and diagnostic tools to record logs in `/userdata/system/logs/vnc.log`, keeping system logging uniform.
+- **EmulationStation on-screen update notifications.** The boot service now asynchronously checks for remote updates once EmulationStation and networking are active, displaying a modal message box directly inside EmulationStation when an RGS-CRT layer update is available, or advising the user when a newer base RGS system update must be installed first.
 
 
 ## 2026-10-25
