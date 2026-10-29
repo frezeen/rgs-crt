@@ -223,6 +223,10 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	if [ "$_pg_in_tree" -eq 1 ] && [ -n "$pg" ] && [ "$pg" -gt 1 ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
 		kill -KILL -- "-$pg" 2>/dev/null || true
 	fi
+	# Gamescope / Wine daemons and input mappers reparented to init outside the launcher's PGID
+	# (gamescopereaper, wineserver, winedevice, evmapy): holding open files in /run/wine
+	# blocks squashfs loop-device autoclear, and holding stdout hangs the ES launch pipeline.
+	killall -9 gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
 	return 0
 }
 
@@ -244,6 +248,10 @@ _stale_session_clean() { # il gameStop che non c'e' stato (latchato dal chiamant
 		# scritta per lo stesso caso (kill senza gameStop).
 		bash "$HERE/../service/crash-clean.sh"
 	fi
+	# Unmount lingering squashfs and overlay mounts left in /run/wine
+	for _m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/(var/)?run/wine/' | tac); do
+		umount -f -l "$_m" 2>/dev/null || true
+	done
 }
 
 _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES window)

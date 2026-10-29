@@ -95,6 +95,14 @@ gameStop)
 		command -v restore_after_game >/dev/null 2>&1 && restore_after_game >/dev/null 2>&1 || true # best-effort; see apply
 	fi
 	rm -f "$STATE_FILE"
+	case "$2" in
+	arcadepc|windows|wine)
+		killall -9 gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
+		for _m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/(var/)?run/wine/' | tac); do
+			umount -f -l "$_m" 2>/dev/null || true
+		done
+		;;
+	esac
 	log "gameStop done"
 	;;
 
