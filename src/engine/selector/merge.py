@@ -302,14 +302,20 @@ def parse_spec(profile_dir: Path):
             # game, configgen/emulatorlauncher.py:417).
             if key == "env":
                 runtime["env"].append(value)
+                if block:
+                    block_of[f"runtime:env:{value}"] = block
             elif key == "path.prepend":
                 runtime["prepend"].append(value)
+                if block:
+                    block_of[f"runtime:prepend:{value}"] = block
             elif key.endswith((".apply", ".undo")):
                 op = key.rsplit(".", 1)[1]
                 rid = key[: -len(op) - 1]
                 if not rid:
                     raise SpecError(f"[runtime] command id missing: '{key} = {value}'")
                 runtime["cmds"].setdefault(rid, {})[op] = value
+                if block:
+                    block_of[f"runtime:cmds:{rid}"] = block
             else:
                 raise SpecError(
                     f"[runtime] unknown key '{key}' (want <id>.apply/<id>.undo "
@@ -1449,6 +1455,25 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
             if _block_matches(blk, block_type, system, emulator, core):
                 out[k] = v
         return out
+    if section == "runtime":
+        out = {"cmds": {}, "env": [], "prepend": []}
+        matched_any = False
+        for rid, ops in mapping.get("cmds", {}).items():
+            blk = block_of.get(f"runtime:cmds:{rid}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["cmds"][rid] = ops
+                matched_any = True
+        for env_item in mapping.get("env", []):
+            blk = block_of.get(f"runtime:env:{env_item}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["env"].append(env_item)
+                matched_any = True
+        for prep_item in mapping.get("prepend", []):
+            blk = block_of.get(f"runtime:prepend:{prep_item}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["prepend"].append(prep_item)
+                matched_any = True
+        return out if matched_any else {}
     block = block_of.get(section, "")
     if _block_matches(block, block_type, system, emulator, core):
         return mapping  # always/legacy or a matching block

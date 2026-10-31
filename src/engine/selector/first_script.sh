@@ -46,6 +46,15 @@ gameStart)
 	exec 1>&2 # RGS-15KHZ-EXT — same rule as gameStop (see block there)
 	log "gameStart ($2, core=${3:-unknown})"
 
+	case "$2" in
+	arcadepc|windows|wine)
+		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
+		while IFS= read -r _m; do
+			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
+		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
+		;;
+	esac
+
 	# dotclock floor: measured at BOOT by the S30z hook (pre-X,
 	# KMS-native: mode set + WAIT_VBLANK = the behavioural oracle), which
 	# writes BOTH switchres inis fresh every boot (volatile /etc write,
@@ -97,10 +106,10 @@ gameStop)
 	rm -f "$STATE_FILE"
 	case "$2" in
 	arcadepc|windows|wine)
-		killall -9 gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
-		for _m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/(var/)?run/wine/' | tac); do
-			umount -f -l "$_m" 2>/dev/null || true
-		done
+		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
+		while IFS= read -r _m; do
+			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
+		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
 		;;
 	esac
 	log "gameStop done"

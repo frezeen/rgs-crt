@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-31
+
+- **ArcadePC: Sega Rally 2 25th Anniversary [4-3] runs on the solo 15 kHz CRT.** Its D3D layer dereferences NULL when its device is created with the LCD disabled (page fault in MGameD3D.dll); hosting the title under a 4:3 gamescope canvas (1280x960 → 640x480) with authored dgVoodoo (FullScreenMode=true, ScalingMode=stretched) gives it its own output so the disabled CRT never reaches the game — full-frame 4:3 picture, no letterbox.
+- **ArcadePC: Senninha GP runs on the solo 15 kHz CRT.** The stock wine-tkg runner ships a 4 KB ddraw.dll stub with no exports, so DirectDrawCreateEx is unimplemented and the title dies at startup; running it under the wine-9.17 runner (full 32-bit ddraw) with the same 4:3 gamescope canvas restores the picture with the LCD off.
+- **Cleaner teardown on game launch.** Orphaned Windows processes and stale wine mount points are now cleared at gameStart, preventing locked loop devices and hangs when re-launching a title.
+
 ## 2026-10-29
 
 - **ArcadePC: Family Guy Bowling Arcade canvas adaptation.** Configured high-definition 16:9 widescreen canvas adaptation scaled cleanly to 640x480 on 15kHz CRT monitors.

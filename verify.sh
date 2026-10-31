@@ -60,12 +60,18 @@ echo "Package location: $PKG"
 
 FAIL=0
 PRESENT=0
+OK_COUNT=0
+QUIET_OK=0
+if [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}" ] && [ "${1:-}" != "-v" ] && [ "${1:-}" != "--verbose" ] && [ -z "${RGS15_PKG:-}${RGS15_GPU_VENDOR:-}${RGS15_PROBE_ONLY:-}${RGS15_DETECT_STATE:-}${RGS15_I915_PRESENT:-}${RGS15_UNAME_R:-}${RGS15_HOOK:-}${RGS15_SVCDIR:-}" ]; then
+	QUIET_OK=1
+fi
 bad() {
 	echo "FAIL: $*" >&2
 	FAIL=1
 }
 ok() {
-	echo "  OK: $*"
+	OK_COUNT=$((OK_COUNT + 1))
+	[ "$QUIET_OK" = "1" ] || echo "  OK: $*"
 }
 # Non-fatal by design: stale residue that the boot re-derives (see
 # XRANDR-WRAPPER.md). Never sets FAIL.
@@ -87,7 +93,7 @@ have() {
 # only, and the seam asserts exactly that.
 _finish() {
 	if [ "$FAIL" = "0" ]; then
-		echo "verify.sh: CLEAN (exit 0)"
+		echo "verify.sh: CLEAN (${OK_COUNT} checks OK, exit 0)"
 		exit 0
 	fi
 	echo "verify.sh: DIRTY (exit 1)" >&2
