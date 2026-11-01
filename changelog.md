@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-01
+
+- **KonamiPC: GTI Club Supermini Festa launches.** The XACT 2.10 engine class was left pointing at a dump path that disappears on unmount, producing a dead COM path and a crash at startup. The engine class is now restored to the loader's stable built-in per launch.
+- **KonamiPC: researched per-game canvas block for the 15 kHz CRT.** All 29 titles now carry explicit canvases (native 640x480 4:3 direct where correct, exact per-title canvases like GTI Club 1360x768 and Cooper's 9 1280x512, HD 16:9 on the shared 720p canvas) filling the tube without distortion.
+- **Lindbergh: host network no longer frozen by the title's AM OS.** After Burner Climax reconfigures the NIC onto an arcade subnet; the host interface is now shielded so NFS-mounted roms remain reachable and the box no longer locks up.
+
 ## 2026-10-31
 
 - **ArcadePC: Sega Rally 2 25th Anniversary [4-3] runs on the solo 15 kHz CRT.** Its D3D layer dereferences NULL when its device is created with the LCD disabled (page fault in MGameD3D.dll); hosting the title under a 4:3 gamescope canvas (1280x960 → 640x480) with authored dgVoodoo (FullScreenMode=true, ScalingMode=stretched) gives it its own output so the disabled CRT never reaches the game — full-frame 4:3 picture, no letterbox.

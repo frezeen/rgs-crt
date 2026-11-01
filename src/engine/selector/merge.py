@@ -404,6 +404,7 @@ def provide_configs(profile_dir: Path, configs: dict, target_root: Path,
         else:
             (bak / "absent").touch()
         atomic_write(dstp, src.read_bytes())
+        os.chmod(dstp, src.stat().st_mode & 0o7777)
         print(f"  provided {rel} -> {dstp}")
 
 
@@ -414,6 +415,7 @@ def restore_configs(profile_dir: Path, configs: dict, target_root: Path,
         bak = backup_root / name / "configs" / rel
         if (bak / "stock").is_file():
             atomic_write(dstp, (bak / "stock").read_bytes())
+            os.chmod(dstp, (bak / "stock").stat().st_mode & 0o7777)
             print(f"  restored stock {rel} -> {dstp}")
         elif (bak / "absent").exists():
             dstp.unlink(missing_ok=True)
