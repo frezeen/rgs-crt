@@ -123,3 +123,10 @@ accusation against the platform this project is a gift to.
 - Not ours (the page's inclusion test): reproduces bit-for-bit on clean stock RGS on LCD (`rgs-stock`); the ROM package itself is improperly authored upstream.
 - Suggested fix: repackage `/userdata/roms/konamipc/Nobiteke! Byon Byon Daisakusen.squashfs` with the actual game executable tree and its `nobiteke.windowsloader` configuration at the root of the squashfs archive.
 
+## 7. Sega RingWide: Melty Blood Actress Again stock batocera.conf entry misses hyphen, falling back to wine
+
+- What you see: launching `Melty Blood Actress Again - Current Code` opens a Win32 Open File dialog instead of booting the game.
+- Measured (2026-11-02, stock RGS 43.75 on LCD): `/userdata/system/batocera.conf` lines 853-854 declared `segarw["Melty Blood Actress Again Current Code.squashfs"].emulator=windows-arcade-loader` (missing ` - `), whereas the file in `/userdata/roms/segarw/` is named `Melty Blood Actress Again - Current Code.squashfs`. EmulationStation fails to match the key, falls back to `segarw.emulator=wine`, and launches Wine.
+- Not ours (the page's inclusion test): reproduces on clean stock RGS; zero layer files involved.
+- Suggested fix: add the missing hyphen ` - ` in `batocera.conf` or declare `segarw.emulator = windows-arcade-loader` in `es_systems_segarw.cfg`.
+
