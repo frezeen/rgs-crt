@@ -2,6 +2,7 @@
 
 ## 2026-11-02
 
+- **Sega RingWide: Dream Raiders and Medaru no Gunman support on 15 kHz CRT.** Integrated the Sega RingWide / RingEdge arcade platform into the 15 kHz CRT profile. Direct D3D9 backbuffer scaling eliminates 16:9 letterbox bars for **Sega RingWide: Dream Raiders** to fill the 4:3 screen with zero GPU overhead and 1:1 lightgun precision, while XGA downscaling cleanly adapts **Sega RingWide: Medaru no Gunman** to 640x480i without window clipping.
 - **KonamiPC: certified 100% on 15 kHz CRT.** The full Konami PC arcade roster is now certified on the tube, scaling high-definition and standard arcade titles to 640x480i via gamescope downscaling with dedicated per-game canvases (1920x1080 for **KonamiPC: Road Fighters 3D**, 1360x768 for **KonamiPC: GTI Club**, 1024x768 for **KonamiPC: HyperSports**, and direct 640x480 for **KonamiPC: Silent Hill**).
 - **Universal configuration cleanup on crash.** Session configuration overrides are now tracked with dirty crash protection across all emulators, ensuring temporary files are cleanly removed at exit and never falsely retained as stock files.
 
