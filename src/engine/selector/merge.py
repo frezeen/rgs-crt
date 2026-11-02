@@ -399,10 +399,14 @@ def provide_configs(profile_dir: Path, configs: dict, target_root: Path,
         bak.mkdir(parents=True, exist_ok=True)
         if (bak / "stock").exists() or (bak / "absent").exists():
             pass  # pre-clean already archived the stock state
-        elif dstp.is_file():
-            shutil.copy2(dstp, bak / "stock")
-        else:
+        elif not dstp.is_file() or (dstp.stat().st_size == src.stat().st_size and dstp.read_bytes() == src.read_bytes()):
+            # RGS-15KHZ-EXT (config stock-record defense): a target already
+            # byte-identical to our profile file is orphan residue from an
+            # ungraceful shutdown or crash, never stock. Recording it as
+            # stock archives our own file and restores it forever at gameStop.
             (bak / "absent").touch()
+        else:
+            shutil.copy2(dstp, bak / "stock")
         atomic_write(dstp, src.read_bytes())
         os.chmod(dstp, src.stat().st_mode & 0o7777)
         print(f"  provided {rel} -> {dstp}")
@@ -420,6 +424,14 @@ def restore_configs(profile_dir: Path, configs: dict, target_root: Path,
         elif (bak / "absent").exists():
             dstp.unlink(missing_ok=True)
             print(f"  removed provided {rel} (stock had none)")
+        elif dstp.is_file():
+            # RGS-15KHZ-EXT (config stock-record defense): if backup archive was
+            # missing or wiped, but target is byte-identical to profile file,
+            # it is orphan residue from a crashed session — clean it up.
+            src = profile_dir / "configs" / rel
+            if src.is_file() and dstp.stat().st_size == src.stat().st_size and dstp.read_bytes() == src.read_bytes():
+                dstp.unlink(missing_ok=True)
+                print(f"  removed orphan provided {rel} (byte-identical to profile, no stock archive)")
         shutil.rmtree(bak, ignore_errors=True)
 
 

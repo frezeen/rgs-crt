@@ -88,6 +88,7 @@ starts.
 | Namco System 246/256 (namco2x6) | The arcade's own 4:3 picture fills the whole tube — no black bars, no stretch — drawn at the game's native scale with no upscaling or sharpening. The console emulator's default drawing mode squeezes this progressive 480p title to 3:2 and leaves bars; the profile pins the cabinet's true 4:3 proportions instead | common + the game's aspect pinned to standard 4:3 (the emulator's progressive default is 3:2) + native 1x render | TESTED 2026-10-10 |
 | Adrenaline Arcade (adrenaline) | The arcade's own picture fills the whole 4:3 tube at 480i, its cabinet frame included exactly as the game ships it (the tube is the frame, so nothing is added). Verified on Candy Crush Arcade: full-bleed, no letterbox, text legible | common + the tube raster on the stock video-mode key (`adrenaline.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) from a 1280x720 render canvas | TESTED 2026-10-11 |
 | Arcade PC (arcadepc) | The arcade's own picture fills the whole 4:3 tube at 480i. Native 4:3 titles (Akuma Mortis Immortal, Arctic Thunder, Friction, Hydro Thunder, Offroad Thunder, Savage Quest, Police Trainer 2, HOTD3, etc.) run direct at 640x480i with zero compositor overhead; widescreen 16:9 titles (Subway Surfers, Ballistics, Bug Busters, HOTD Remake, etc.) scale via Gamescope stretch to fill the 4:3 tube edge to edge without letterboxing. Two 4:3 exceptions: Sega Rally 2 [4-3] (its D3D layer needs its own output, so it runs under a 1280x960→640x480 gamescope canvas) and Senninha GP (32-bit ddraw needs the wine-9.17 runner plus the same gamescope canvas) | common + the tube raster on the stock video-mode key (`arcadepc.videomode = 640x480i`) + per-game gamescope 1280x720→864x486@60 stretch pixel for 16:9-native titles; 4:3 titles direct (gamescope 0); Sega Rally 2 [4-3] and Senninha GP under a 1280x960→640x480 canvas | TESTED 100% 2026-10-31 (every ArcadePC title launched on the tube, owner verde) |
+| Konami PC (konamipc) | The arcade's picture fills the whole 4:3 tube at 480i. High-definition 16:9 and 4:3 PC arcade titles scale onto the CRT glass edge-to-edge via gamescope downscaling, with exact per-title render canvases (1920x1080 for Road Fighters 3D, 1360x768 for GTI Club, 1024x768 for HyperSports, 1280x512 for Cooper's 9; Silent Hill runs direct at native 640x480 4:3). Audio COM stability preserved across launches via dedicated XACT 2.10 engine class isolation | common + 640x480i video mode + gamescope fullscreen stretch from 720p class canvas (per-title canvas overrides where required; gamescope 0 on native 640x480) + runtime XACT 2.10 engine class guard | TESTED 100% 2026-11-02 (all launchable roster titles verified on the tube, owner verde; Nobiteke stock-dump corrupt, Metal Gear requires dongle) |
 | UNIS Arcade Machines (unis) | The arcade's own picture fills the whole 4:3 tube at 480i, text legible. Verified on Dino Invasion | common + the tube raster on the stock video-mode key (`unis.videomode = 640x480i`) + gamescope 864x486@60 fullscreen stretch (pixel filter) from a 1280x720 render canvas | TESTED 2026-10-11 |
 | Sega Lindbergh (lindbergh) | The arcade's own picture fills the whole 4:3 tube at 480i — measured `After Burner Climax` full-frame one-to-one (no scaling, no filter), score and instruction text legible. The board's picture is 640x480 **progressive** (a 31kHz VGA-class signal no 15kHz tube can show as progressive; the loader itself renders at the 640x480 the platform gives), so the tube carries that same untouched raster **interlaced** at 640x480i 15.69kHz. **Coverage is per-title**: `After Burner Climax` (`abc`) carries Sega's AM OS network stack and, ~6-9 s in, rewrites eth0 into its arcade subnet (`ifconfig eth0 addr 192.168.38.x`, `route del -net default`, default via `0.0.0.1`) — with `/userdata/roms` on an NFS hard mount that strands the NAS, the title blocks in an NFS RPC (state D) and freezes the machine; Ghost Squad Evolution (`vsg`) and Let's Go Jungle (`lgjsp_app`) carry no `ifconfig` string and never touch the NIC. The profile shields `/sbin/ifconfig` and `/sbin/route` for the session (writes swallowed, reads report the real interface on any subnet), in both the CRT and the stock/LCD profile | common + the Lindbergh NIC shield (`[configs]` shims over `/sbin/ifconfig` + `/sbin/route`) | TESTED 2026-11-01 (`After Burner Climax`, NIC shield) — Ghost Squad Evolution verified working |
 | Arcade — Windows pinball — Zen Studios (pinballfx, pinballfx2, pinballfx3, pinballm) | Full-frame 4:3 picture fills the whole tube at 480i, text legible one-to-one. Measured on the glass across the family: `The Addams Family` (Pinball FX, 99.3%, 4.6% GPU load), `V12` (Pinball FX2, 99.6%, 1.5% GPU load), `Amusement Park` (Pinball FX3, 99.6%, 6.3% GPU load), and `Chucky` (Pinball M, 99.6%, 85.0% GPU load). Pinball FX, Pinball FX2 and Pinball M render native 640x480i without gamescope; Pinball FX3 wraps its 1080p canvas onto the tube via gamescope. | common + native 640x480i raster (`pinballfx.videomode = 640x480i`, `gamescope = 0` for pinballfx/pinballfx2/pinballm; gamescope 1080p canvas for pinballfx3) | TESTED 2026-10-18 (pinballfx, pinballfx2, pinballfx3, pinballm) |
@@ -183,32 +184,7 @@ unproven — listed, never claimed:
   list until a game is launched on the glass. RGS ships its own `max-*`
   video-mode keys for them inside its tuning zone, and its per-game keys win
   over ours. `typex` and `nesicax` left this list on 2026-10-18, each with
-  content and its own measured row above.
-- `konamipc` — content is on the box (29 roster entries, 2026-11-01). It
-  carries its own researched block in the profile: the class canvas (720p
-  held by gamescope, stretched edge to edge onto the 4:3 glass) for the HD
-  16:9 picture RGS renders, plus per-game canvases from cabinet/dump-author
-  sources: Silent Hill The Arcade runs direct at its native 640x480 4:3,
-  GTI Club Supermini Festa holds its exact 1360x768 canvas, Cooper's 9 holds
-  its 1280x512 double-view frame full-bleed, and confirmed 720p 16:9 titles
-  (DDR 2013, Lethal Enforcers 3 both variants, Road Fighters 3D native
-  1080p, the Silent Scope Bone Eater WS fan edition) ride the class canvas.
-  Every title without a confirmed canvas (Action Deka, both Bishi Bashi,
-  Castlevania, Chase Chase Jokers, Contra Evolution, both Gashaaaan, Hello!
-  Pop'n Music, HyperSports, Metal Gear Arcade, Nobiteke Byon Byon, Rainbow
-  BomberGirl, Steel Chronicle, Thrill Drive 4, Wartran Troopers, both
-  Winning Eleven, Yu-Gi-Oh! Duel Terminal 6) re-checks its canvas and LOAD
-  at tube launch — declared pending per game, not per system. GTI Club is
-  the first title driven on the glass. Launches proved one XACT 2.10 defect
-  in the loader's shared wine prefix: launches whose payload registers its
-  own dump-path InProcServer32 (DDR, Castlevania) leave the XACT engine
-  class on a path that dies when that squashfs unmounts, and titles whose
-  payload does not self-register (GTI) then fail XACTCreateEngine(0x80070005)
-  and crash on the next I/O tick. The profile now keeps the engine class on
-  the prefix's built-in xactengine2_10 per launch (`[runtime]` in the
-  konamipc block, apply at gameStart / registration deleted at gameStop).
-  `gaelco` is deliberately left out: it is a
-  MAME-driven system, not one of these Windows ones.
+  content and its own measured row above; `konamipc` left this list on 2026-11-02.
 - `steam` — declared out of scope (owner decision): the store/client is
   not part of this cab's use, so it is not a certification target even
   though it carries content. Listed so the gap is written down instead of

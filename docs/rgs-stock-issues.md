@@ -116,3 +116,10 @@ accusation against the platform this project is a gift to.
 - Not ours (the page's inclusion test): reproduces bit-for-bit on stock LCD with stock loader template; zero layer files or hooks involved.
 - Suggested fix: patch the height to native 1280x720 (`0x2d0`, hex bytes `d002` -> `WAL_PATCHES: "0x9231:d002"`) so the mode matches standard 720p/1080p displays, or set `WAL_NESICA_REG: "Resolution=0"` to default to native 4:3 SD (640x480).
 
+## 6. Konami PC: Nobiteke! Byon Byon Daisakusen squashfs dump contains nested duplicate of Bishi Bashi Channel
+
+- What you see: launching `Nobiteke! Byon Byon Daisakusen` fails immediately (~1-2 seconds, exit code 1) with error `no <gameid>.windowsloader file in this game dump` in `es_launch_stderr.log`.
+- Measured (2026-11-02, stock RGS 43.75 on LCD): inspecting `/userdata/roms/konamipc/Nobiteke! Byon Byon Daisakusen.squashfs` with `unsquashfs -l` reveals that the squashfs archive contains no game files and no `.windowsloader` manifest; it contains solely `squashfs-root/Bishi Bashi Channel.squashfs`, which is byte-identical to `/userdata/roms/konamipc/Bishi Bashi Channel.squashfs`.
+- Not ours (the page's inclusion test): reproduces bit-for-bit on clean stock RGS on LCD (`rgs-stock`); the ROM package itself is improperly authored upstream.
+- Suggested fix: repackage `/userdata/roms/konamipc/Nobiteke! Byon Byon Daisakusen.squashfs` with the actual game executable tree and its `nobiteke.windowsloader` configuration at the root of the squashfs archive.
+

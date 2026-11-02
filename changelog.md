@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-02
+
+- **KonamiPC: certified 100% on 15 kHz CRT.** The full Konami PC arcade roster is now certified on the tube, scaling high-definition and standard arcade titles to 640x480i via gamescope downscaling with dedicated per-game canvases (1920x1080 for **KonamiPC: Road Fighters 3D**, 1360x768 for **KonamiPC: GTI Club**, 1024x768 for **KonamiPC: HyperSports**, and direct 640x480 for **KonamiPC: Silent Hill**).
+- **Universal configuration cleanup on crash.** Session configuration overrides are now tracked with dirty crash protection across all emulators, ensuring temporary files are cleanly removed at exit and never falsely retained as stock files.
+
 ## 2026-11-01
 
 - **KonamiPC: GTI Club Supermini Festa launches.** The XACT 2.10 engine class was left pointing at a dump path that disappears on unmount, producing a dead COM path and a crash at startup. The engine class is now restored to the loader's stable built-in per launch.
@@ -31,19 +36,3 @@
 - **Display service and diagnostic logging consolidation.** Standardized VNC remote access and diagnostic tools to record logs in `/userdata/system/logs/vnc.log`, keeping system logging uniform.
 - **EmulationStation on-screen update notifications.** The boot service now asynchronously checks for remote updates once EmulationStation and networking are active, displaying a modal message box directly inside EmulationStation when an RGS-CRT layer update is available, or advising the user when a newer base RGS system update must be installed first.
 - **Deploy and session unmount resilience.** The deployment sync script now automatically clears and lazy-unmounts any active squashfs overlay mounts if an emulator session is terminated mid-game, preventing busy device collisions on the next game launch.
-
-## 2026-10-25
-
-- **Ballistics arcade 3D starts in native full-screen.** Removed the widescreen translation canvas and redundant game keys for Ballistics, letting it boot directly into its native full-screen 4:3 640x480 resolution without getting stuck before video mode negotiation.
-- **Bounty Hunter authentic 3:4 vertical arcade display.** Corrected ReShade preset and aspect ratio mapping for Bounty Hunter: disabled artificial flat-panel bezels, virtual CRT curvature and bloom shaders, restoring clean pillarbox black borders and authentic 3:4 TATE arcade geometry on 4:3 CRT monitors.
-- **Arcade PC widescreen gamescope classification.** Cleaned up native 4:3 titles from the 16:9 Gamescope forced list, reserving hardware canvas scaling strictly for actual widescreen titles.
-- **Robust session termination and updater reliability.** Polling guards and update feed probes now handle active wine sessions cleanly, preventing false game timeouts and loop detections.
-
-## 2026-10-22
-
-- **Dreamcast keeps its 4:3 shape.** Dreamcast games now declare the picture
-  as 4:3 in the emulator's aspect setting instead of following the emulator's
-  internal widescreen-shaped picture, so the arcade proportions stay fixed.
-- **NESiCAxLive games lose the smoothing blur.** Namco NESiCAxLive titles now
-  render raw native pixels on the tube instead of the software smoothing
-  filter the emulator layered over the picture.
