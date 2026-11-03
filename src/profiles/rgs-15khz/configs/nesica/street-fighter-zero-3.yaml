@@ -1,0 +1,5 @@
+system: nesica
+name: Street Fighter Zero 3
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

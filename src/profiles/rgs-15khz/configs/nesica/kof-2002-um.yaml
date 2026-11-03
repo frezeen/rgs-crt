@@ -1,0 +1,5 @@
+system: nesica
+name: The King of Fighters 2002 Unlimited Match
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

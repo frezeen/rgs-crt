@@ -1,0 +1,5 @@
+system: nesica
+name: Dragon Dance
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

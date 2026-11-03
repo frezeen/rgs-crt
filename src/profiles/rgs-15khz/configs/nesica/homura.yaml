@@ -1,0 +1,5 @@
+system: nesica
+name: Homura
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

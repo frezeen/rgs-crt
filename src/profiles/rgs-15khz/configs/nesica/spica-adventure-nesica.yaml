@@ -1,0 +1,5 @@
+system: typex
+name: Spica Adventure (NESiCAxLive)
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

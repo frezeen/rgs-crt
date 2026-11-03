@@ -1,0 +1,45 @@
+#!/bin/bash
+# vnc-scaled — VNC launcher that scales the primary output so the full
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# desktop is visible via VNC (e.g. a 640x480 CRT desktop viewed as a
+# larger image). Resets the output transform when VNC exits.
+# Usage: vnc-scaled [port]   (default port: 5900)
+#
+# Same flags as `vnc`,
+# plus a xrandr viewport scale (--scale-from 1920x1080 on the primary
+# output) and -scale 1024x768 for the client stream.
+#
+# NOTE: scaling the CRT breaks the 1:1 layout for the duration of the
+# session — this is a deliberate manual tool (full-desktop view), the
+# transform is reset on exit.
+
+set -uo pipefail
+
+VNC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" 2>/dev/null || VNC_DIR="/userdata/system/crt-dual/src/vnc"
+[ -f "$VNC_DIR/vnc-env.sh" ] && source "$VNC_DIR/vnc-env.sh"
+
+PORT="${1:-5900}"
+export DISPLAY="${DISPLAY:-:0}"
+
+# Primary output (the one the desktop lives on).
+OUTPUT=$(xrandr --listmonitors 2>/dev/null | grep -oP '\+\*\K\S+' | head -1)
+[ -z "$OUTPUT" ] && OUTPUT=$(xrandr 2>/dev/null | grep -o '.* connected' | sed 's/ connected//' | head -1)
+[ -z "$OUTPUT" ] && OUTPUT="DVI-I-0" # last resort, analog-first convention
+
+# Reset any existing transform, then scale the viewport up so VNC shows
+# more than the native desktop.
+xrandr --output "$OUTPUT" --transform none 2>/dev/null || true
+xrandr --output "$OUTPUT" --scale-from 1920x1080 2>/dev/null ||
+	xrandr --output "$OUTPUT" --scale 2x2 2>/dev/null || true # best-effort: primary may be mid-hotplug
+
+# A previous instance on this port would hold it; free it before starting.
+fuser -k "${PORT}/tcp" 2>/dev/null || true
+
+"$VNC_BIN/x11vnc" -forever -noxdamage -noshm -rfbport "$PORT" -shared -scale 1024x768 -nopw -xkb -modtweak
+_rc=$?
+
+# Restore the 1:1 layout when VNC exits.
+xrandr --output "$OUTPUT" --transform none 2>/dev/null || true
+exit "$_rc"

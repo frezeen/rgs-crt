@@ -1,0 +1,5 @@
+system: nesica
+name: Arcana Heart 2
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

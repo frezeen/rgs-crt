@@ -1,0 +1,25 @@
+#!/bin/sh
+# RGS: Lindbergh AM OS shield.
+# The title runs `ifconfig eth0 addr ... netmask ...` to move the NIC onto its
+# arcade subnet (192.168.38.0/24). /userdata/roms is an NFS hard mount from the
+# NAS: once eth0 leaves the LAN the NAS disappears and the title (and the box)
+# blocks forever in an NFS RPC. Writes are swallowed; reads report the real
+# interface so the title sees a configured NIC.
+case "$*" in
+  *addr*|*Addr*|*netmask*|*broadcast*|*up*|*down*|*hw*|*mtu*|*promisc*|*allmulti*|*arp*) exit 0 ;;
+esac
+dev=${1:-eth0}
+line=$(ip -4 -o addr show dev "$dev" 2>/dev/null)
+[ -n "$line" ] || exit 0
+cidr=$(printf '%s\n' "$line" | awk '{print $4}')
+bcast=$(printf '%s\n' "$line" | awk '{print $6}')
+ip=${cidr%/*}
+pre=${cidr#*/}
+case "$pre" in
+  8) mask=255.0.0.0 ;;
+  16) mask=255.255.0.0 ;;
+  24) mask=255.255.255.0 ;;
+  *) mask=255.255.255.0 ;;
+esac
+printf '%s: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n' "$dev"
+printf '        inet addr:%s  Bcast:%s  Mask:%s\n' "$ip" "$bcast" "$mask"

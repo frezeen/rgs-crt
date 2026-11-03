@@ -1,0 +1,9 @@
+#!/bin/sh
+# RGS: Lindbergh AM OS shield.
+# The title deletes the default route and re-adds it via 0.0.0.1, which cuts the
+# NAS (NFS /userdata/roms) and strands the host. Mutations are swallowed; reads
+# report the real table.
+case "$1" in
+  add|del|flush) exit 0 ;;
+esac
+ip route show 2>/dev/null || true

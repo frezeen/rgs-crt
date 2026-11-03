@@ -1,0 +1,8 @@
+system: ringedge
+name: Guilty Gear XX Accent Core Plus R
+
+env:
+  WAL_D3D9_WINDOWED_SIZE: 1280x720
+  WAL_WINDOW_POPUP: "1"
+  WAL_WINDOW_SIZE: screen
+  WAL_D3D9_SOURCE: "160,0,960,720"

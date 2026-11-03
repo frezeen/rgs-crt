@@ -1,0 +1,8 @@
+system: nesica
+name: 'Yatagarasu: Attack on Cataclysm'
+
+env:
+  WAL_WINDOW_SIZE: screen
+  WAL_WINDOW_POPUP: "1"
+  WAL_D3D9_WINDOWED_SIZE: 854x480
+  WAL_D3D9_SOURCE: "107,0,640,480"
