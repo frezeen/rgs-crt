@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-03
+
+- **Sega RingEdge: certified 100% on 15 kHz CRT.** The full Sega RingEdge and RingEdge 2 arcade roster is now certified on the tube. High-definition 16:9 widescreen canvas titles scale edge-to-edge onto the 4:3 glass without letterboxing (**Sega RingEdge: Initial D Arcade Stage 6/7/8**, **Sega RingEdge: Guilty Gear Xrd -SIGN-**, **Sega RingEdge: Guilty Gear Xrd Revelator / Rev2**, **Sega RingEdge: Under Night In-Birth Exe:Late**, **Sega RingEdge: Blade Strangers**, etc.); native 4:3 titles with baked 16:9 pillar bezels (**Sega RingEdge: Guilty Gear XX Accent Core Plus R**, **Sega RingEdge: Melty Blood Actress Again Current Code RE2**) crop directly to authentic 4:3 full-bleed on CRT via D3D9 source rect in Windows Arcade Loader userprofiles with zero GPU overhead.
+- **RGS 43.76 system compatibility.** Layer certified and fully aligned against live RGS 43.76 system update, ensuring display services, launch hooks, and update notifications operate reliably.
+- **EmulationStation on-screen update notifications for RGS base system and CRT layer.** Enhanced update checks to distinguish and notify users via on-screen message box when a newer base RGS system update or combined update is available, with background throttling to prevent duplicate prompts during a session.
+- **Session cleanup and lazy overlay unmount.** Enhanced launch and deploy scripts to automatically clean up squashfs overlay and Wine mount points upon game termination, preventing device-busy collisions.
+
 ## 2026-11-02
 
 - **Sega RingWide: certified 100% on 15 kHz CRT.** The full Sega RingWide / RingEdge arcade roster is now certified on the tube. Direct D3D9 backbuffer scaling fills the 4:3 glass without letterboxing for SD and screen-windowed titles (**Sega RingWide: Dream Raiders**, **Sega RingWide: Chaos Code**, **Sega RingWide: Let's Go Safari**) at 0.8% GPU overhead; Gamescope cleanly downscales XGA titles (**Sega RingWide: Medaru no Gunman**, **Sega RingWide: Melty Blood Actress Again Current Code** from 1024x768 to 640x480) and Full HD 16:9 titles (**Sega RingWide: Sonic & Sega All-Stars Racing** from 1920x1080 to 864x486 stretch pixel); and class-level loader pinning guarantees Windows Arcade Loader execution across all titles.

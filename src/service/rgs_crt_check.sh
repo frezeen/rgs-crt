@@ -254,6 +254,15 @@ fi
 	if [ "$_verdict" = "GREEN" ]; then
 		printf '%s\n' "all green and certified - version $_installed"
 		printf '%s\n' "certified on RGS $_live_rgs"
+		_upstream_rgs="$(bash "$SVC" rgs-upstream-check 2>/dev/null || true)"
+		if [ -n "$_upstream_rgs" ]; then
+			_cmp="$(bash "$SVC" rgs-vercmp "$_upstream_rgs" "$_live_rgs" 2>/dev/null || echo 0)"
+			if [ "$_cmp" = "1" ]; then
+				printf '%s\n' "RGS update available upstream: v$_upstream_rgs"
+			else
+				printf '%s\n' "RGS system is up to date (v$_live_rgs)"
+			fi
+		fi
 	else
 		printf '%s\n' "the rgs-crt layer could not be certified on this system"
 		printf '%s\n' "games run stock-safe meanwhile"

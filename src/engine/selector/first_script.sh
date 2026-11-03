@@ -112,6 +112,11 @@ gameStop)
 		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
 		;;
 	esac
+	# Background update notification check on gameStop (throttled inside zz_rgs_15khz)
+	_svc="${RGS15_SVCDIR:-/userdata/system/services}/zz_rgs_15khz"
+	if [ -x "$_svc" ]; then
+		( "$_svc" update-notify & ) 2>/dev/null || true
+	fi
 	log "gameStop done"
 	;;
 

@@ -805,15 +805,53 @@ feed_probe() {
 	printf '%s\n' "$_line"
 }
 
-# ── update notification (ES messagebox on boot) ──────────────────────────
-# Checks the feed asynchronously after boot once ES and network are ready.
-# If an update is available, displays a modal dialog on ES (:1234/messagebox).
+# ── RGS upstream version probe ───────────────────────────────────────────
+# Queries the official RGS repository for the latest RGS version release.
+rgs_upstream_probe() {
+	local _bat_ver _rgs_url _fetch _timeout _tmp _upstream_rgs
+	_bat_ver="$(cat "$BATOCERA_VERSION_SRC" 2>/dev/null | awk '{print $1}')"
+	[ -n "$_bat_ver" ] || return 1
+	_rgs_url="${RGS15_RGS_UPSTREAM_URL:-https://raw.githubusercontent.com/RGS-MBU/RGS_MBU-R-Batocera-Configuration/main/v${_bat_ver}/version.txt}"
+	_fetch="${RGS15_FETCH_BIN:-curl}"
+	_timeout="${RGS15_FETCH_TIMEOUT:-4}"
+	_tmp="$(mktemp /tmp/rgs-upstream-feed.XXXXXX 2>/dev/null || true)"
+	if [ -n "$_tmp" ] && "$_fetch" -fsSL --max-time "$_timeout" -o "$_tmp" "$_rgs_url" 2>/dev/null; then
+		_upstream_rgs="$(tr -d ' \t\r\n' <"$_tmp" 2>/dev/null || true)"
+		rm -f "$_tmp" 2>/dev/null || true
+		if feed_is_base "$_upstream_rgs"; then
+			printf '%s\n' "$_upstream_rgs"
+			return 0
+		fi
+	fi
+	rm -f "$_tmp" 2>/dev/null || true
+	return 1
+}
+
+# ── update notification (ES messagebox on boot / gameStop) ────────────────
+# Checks the feeds asynchronously once ES and network are ready.
+# Throttled by default (RGS15_NOTIFY_THROTTLE, default 4h) and avoids repeating
+# notifications for the same version during the active session.
+# Displays a modal dialog on ES (:1234/messagebox).
 # Non-blocking, fails safe, exits silently if offline or already current.
 notify_update_worker() {
 	local _max="${RGS15_NOTIFY_WAIT_MAX:-45}" _poll="${RGS15_NOTIFY_WAIT_POLL:-2}"
 	local _es_url="${RGS15_ES_URL:-http://127.0.0.1:1234}"
 	local _fetch="${RGS15_FETCH_BIN:-curl}"
-	local _i=0 _up=0 _line _status _feed_ver _msg
+	local _throttle_sec="${RGS15_NOTIFY_THROTTLE:-14400}"
+	local _stamp_file="/tmp/rgs-notify-last"
+	local _seen_file="/tmp/rgs-notify-seen"
+	local _now _last _i=0 _up=0 _line _status _feed_ver _msg="" _target_key=""
+	local _latest_rgs _live_rgs _rgs_new=0
+
+	if [ "${RGS15_FORCE_CHECK:-0}" != "1" ] && [ -f "$_stamp_file" ]; then
+		_now="$(date +%s 2>/dev/null || echo 0)"
+		_last="$(cat "$_stamp_file" 2>/dev/null || echo 0)"
+		if [ -n "$_now" ] && [ -n "$_last" ] && [ "$_last" -gt 0 ]; then
+			if [ $((_now - _last)) -lt "$_throttle_sec" ]; then
+				return 0
+			fi
+		fi
+	fi
 
 	while [ "$_i" -lt "$_max" ]; do
 		if "$_fetch" -s -m 1 "$_es_url/" >/dev/null 2>&1; then
@@ -825,31 +863,65 @@ notify_update_worker() {
 	done
 	[ "$_up" = "1" ] || return 0
 
+	date +%s >"$_stamp_file" 2>/dev/null || true
+
 	export RGS15_FEED_ALLOW_NET=1
 	_line="$(feed_probe)"
 	_status="${_line%% *}"
 	_feed_ver="$(printf '%s' "$_line" | cut -d' ' -f2 -s)"
 
-	case "$_status" in
-	UPDATE)
-		_msg="RGS-CRT update available (v${_feed_ver})!
+	_latest_rgs="$(rgs_upstream_probe 2>/dev/null || true)"
+	_live_rgs="$(tr -d ' \t\r\n' <"$RGS_VERSION_SRC" 2>/dev/null || true)"
+	if [ -n "$_latest_rgs" ] && [ -n "$_live_rgs" ]; then
+		if [ "$(feed_vercmp "$_latest_rgs" "$_live_rgs")" = "1" ]; then
+			_rgs_new=1
+		fi
+	fi
 
-Open 'CRT Tools' in the Batocera menu to apply the update."
-		"$_fetch" -s -X POST "$_es_url/messagebox" -d "$_msg" >/dev/null 2>&1 || true
-		log "notify: update message sent to ES (v${_feed_ver})"
-		;;
+	case "$_status" in
 	BLOCKED)
 		_msg="New RGS and RGS-CRT (v${_feed_ver}) updates available!
 
 Please update your RGS system first,
 then open 'CRT Tools' to update the CRT layer."
-		"$_fetch" -s -X POST "$_es_url/messagebox" -d "$_msg" >/dev/null 2>&1 || true
+		_target_key="BLOCKED:${_feed_ver}"
 		log "notify: new RGS update message sent to ES (v${_feed_ver})"
 		;;
+	UPDATE)
+		if [ "$_rgs_new" = "1" ]; then
+			_msg="New RGS (v${_latest_rgs}) and RGS-CRT (v${_feed_ver}) updates available!
+
+Please update your RGS system first,
+then open 'CRT Tools' to update the CRT layer."
+			_target_key="BOTH:${_latest_rgs}:${_feed_ver}"
+			log "notify: new RGS and CRT update message sent to ES (rgs=${_latest_rgs}, crt=${_feed_ver})"
+		else
+			_msg="RGS-CRT update available (v${_feed_ver})!
+
+Open 'CRT Tools' in the Batocera menu to apply the update."
+			_target_key="UPDATE:${_feed_ver}"
+			log "notify: update message sent to ES (v${_feed_ver})"
+		fi
+		;;
 	*)
-		# CURRENT, OFFLINE or unexpected: stay silent
+		if [ "$_rgs_new" = "1" ]; then
+			_msg="RGS system update available (v${_latest_rgs})!
+
+Please update your RGS system via the system menu or rgs_upgrade.sh,
+then reboot to re-certify the CRT layer."
+			_target_key="RGS:${_latest_rgs}"
+			log "notify: RGS system update message sent to ES (v${_latest_rgs})"
+		fi
 		;;
 	esac
+
+	if [ -n "$_msg" ]; then
+		_seen="$(cat "$_seen_file" 2>/dev/null || true)"
+		if [ "$_seen" != "$_target_key" ] || [ "${RGS15_FORCE_CHECK:-0}" = "1" ]; then
+			"$_fetch" -s -X POST "$_es_url/messagebox" -d "$_msg" >/dev/null 2>&1 || true
+			echo "$_target_key" >"$_seen_file" 2>/dev/null || true
+		fi
+	fi
 	return 0
 }
 
@@ -1304,8 +1376,17 @@ tool-update)
 	log "update: all green and certified — version $_ver"
 	echo "GREEN"
 	exit 0
-	;;*)
-	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|update-notify|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write}" >&2
+	;;
+rgs-upstream-check)
+	rgs_upstream_probe
+	exit $?
+	;;
+rgs-vercmp)
+	feed_vercmp "${2:-}" "${3:-}"
+	exit 0
+	;;
+*)
+	echo "usage: $0 {start|stop|tool-check|feed-check|tool-update|tool-uninstall|update-notify|gamelist-ensure|amdgpu-legacy|i915-patch|resolution-patch|dotclock-write|rgs-upstream-check|rgs-vercmp}" >&2
 	exit 1
 	;;
 esac
