@@ -122,6 +122,23 @@ Carnegie Mellon University (http://www.cmu.edu/computing/).
   bundled; the three libraries in the table are shipped alongside
   because stock Batocera does not provide them.
 
+## Profile picker artwork (SHIPPED — `src/engine/selector/assets/`)
+
+- **Files**: `crt.png` (arcade cabinet), `lcd.png` (flat-panel TV),
+  `arrow.png` (selection arrow) — the pictures the profile picker draws.
+- **Purpose**: `src/engine/selector/selector-ui.py` shows one picture per
+  profile instead of a text button; the arrow marks the chosen panel.
+- **License**: none claimed and none needed — the artwork was supplied by
+  the project owner and carries no stock-library licence, watermark or
+  third-party mark. The shipped files are that artwork with the background
+  keyed out to alpha, so it composites on the picker's black raster; no
+  other modification.
+- **Provenance**: owner-supplied (2026-11-03), committed at the owner's
+  request. If a picture is ever replaced by a third-party asset, its
+  licence and source belong in this section.
+- **Shipped**: yes — travels with `src/selector` in `install.sh` and is
+  synced by `deploy.sh`; used only by the picker.
+
 ## Switchres (runtime dependency — NOT bundled)
 
 - **Purpose**: CRT modeline generation. Called at runtime through its C

@@ -244,7 +244,7 @@ if [ -d "$PKG/src" ]; then
 	_pkg_drift=""
 	for _d in "$REPO"/src/profiles/*/; do
 		_b="$(basename "$_d")"
-		if [ ! -d "$PKG/profiles/$_b" ] || ! diff -r -x binaries "$_d" "$PKG/profiles/$_b" >/dev/null 2>&1; then
+		if [ ! -d "$PKG/profiles/$_b" ] || ! diff -r -x binaries -x __pycache__ "$_d" "$PKG/profiles/$_b" >/dev/null 2>&1; then
 			_pkg_drift="$_pkg_drift $_b"
 		fi
 	done
