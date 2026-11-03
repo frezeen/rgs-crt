@@ -1,0 +1,5 @@
+system: nesica
+name: Puzzle Bobble
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

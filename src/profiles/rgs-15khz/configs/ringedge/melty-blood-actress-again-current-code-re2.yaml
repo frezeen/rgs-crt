@@ -1,0 +1,8 @@
+system: ringedge
+name: Melty Blood Actress Again Current Code (RingEdge 2)
+
+env:
+  WAL_D3D9_WINDOWED_SIZE: 1920x1080
+  WAL_WINDOW_POPUP: "1"
+  WAL_WINDOW_SIZE: screen
+  WAL_D3D9_SOURCE: "240,0,1440,1080"

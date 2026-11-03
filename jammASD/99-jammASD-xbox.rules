@@ -1,0 +1,7 @@
+# JammASD Xbox 360 daemon — supplemental udev rule
+# Marks the device as NON-keyboard so evsieve/keyboardToPads does not grab it.
+# The Python daemon (started via services) takes the device exclusively.
+SUBSYSTEM=="input", KERNEL=="event*", ACTION=="add", \
+    ATTRS{name}=="ASD JammASD Interface Keyboard", \
+    ENV{ID_INPUT_KEY}="0", ENV{ID_INPUT_KEYBOARD}="0", \
+    RUN+="/usr/bin/python3 /userdata/system/jammASD/on_connect.py $env{DEVNAME}"

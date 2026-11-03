@@ -1,0 +1,5 @@
+system: nesica
+name: 'Street Fighter III 3rd Strike: Fight for the Future'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

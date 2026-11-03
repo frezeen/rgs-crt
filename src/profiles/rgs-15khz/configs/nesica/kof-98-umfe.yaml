@@ -1,0 +1,5 @@
+system: nesica
+name: "The King of Fighters '98 Ultimate Match Final Edition"
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

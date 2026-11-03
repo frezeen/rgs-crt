@@ -1,0 +1,5 @@
+system: nesica
+name: Psychic Force 2012
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

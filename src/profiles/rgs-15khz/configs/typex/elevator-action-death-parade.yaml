@@ -1,0 +1,15 @@
+# Elevator Action Death Parade (Taito Type X2, 2P light guns) — the cabinet's
+# 9:16 screen on the 4:3 tube. The rest of the profile stays the stock template
+# (systemprofiles/typex/elevator-action-death-parade.yaml).
+system: typex
+name: Elevator Action Death Parade
+
+env:
+  # The dump's "Attraction Doors Pack" is a 16:9 composition at every size
+  # (the picture 9:16 at its centre, the walls at both ends): on the tube it can
+  # only be stretched to 4:3, which squashes the picture with it. Off: the
+  # 720x1280 device is presented at its own 9:16 (WAL_D3D9_ASPECT above, aspect
+  # kept), centred on the 640x480i raster; the pack's own walls, porch and
+  # sticker are recomposed for 4:3 in ElevatorAction_Bezel.png and drawn on the
+  # pillars by the profile's [runtime] hook.
+  WAL_TYPEX_DOORS: ""

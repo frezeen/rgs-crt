@@ -1,0 +1,266 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+# zz_crt_dual — CRT-DUAL minimal boot service
+#
+# What it does (and only this):
+#   1. X11 conf: OWNED by the pre-X hook (/etc/init.d/S15crt-dual-gen:
+#      universal roles-per-type conf generated BEFORE X
+#      from sysfs truth at every boot. This service REGENERATES it
+#      unconditionally as self-correction (a present-but-stale conf cannot
+#      be detected as missing - verified live 2026-08-24) and NEVER
+#      persists it (a saved copy becomes inherited poison after any
+#      hardware change).
+#   2. Boot layout: one reconcile pass (display-reconcile.sh --once:
+#      detect -> model -> apply -> verify; the daemon owns the retries).
+#   3. Crash recovery level 2 (crash-clean.sh): removes residual marked
+#      profile blocks from the tracked config files + stale runtime state
+#      left by a crash (prerequisite for the profile engine).
+#   4. Diagnostic snapshot (diag-dump.sh) — self-sufficient logs.
+#   5. Start the display reconcile loop (live hotplug, no reboot).
+#
+# What it does NOT do (by design):
+#   no Python runtime patches, no config-swap engine, no emulator binary
+#   symlinks, no clock-probe daemon, no backup machinery, no update gate,
+#   no udev rule deploy (install.sh owns that). Runtime layout during
+#   games belongs to the selector — this service only sets up
+#   the desktop.
+#
+# Runs from /userdata/system/services (Batocera custom service).
+# Package root: /userdata/system/crt-dual (installed by install.sh).
+
+set -uo pipefail
+
+# ── Auto-capture on non-convergence (U2) ──────────────────────────────
+# The reconciler failed its ONE boot pass. Snapshot the box ONCE, while the
+# fault is still live — the user is never asked to press anything. Guards:
+# a non-blocking flock (a concurrent start cannot double-capture) and a
+# per-boot marker in the state dir (tmpfs, cleared at reboot) so the dump
+# happens at most once per boot. It NEVER loops: one shot, then return.
+# State file (shell-quality §7): $CRT_DUAL_STATE_DIR/diag-not-converged.done
+# — writer/reader = this function, cleaned = reboot (tmpfs).
+diag_capture_not_converged() {
+	# Both roots are caller contract (set in `start` before the early apply).
+	# Guard anyway: with LOG_DIR unset the output path would degrade to
+	# `/diag/...` — a write at the filesystem root (leak found by the
+	# early-apply seam driving this line without LOG_DIR, 2026-10-16).
+	if [ -z "${LOG_DIR:-}" ] || [ -z "${PKG_ROOT:-}" ]; then
+		echo "  diag: LOG_DIR/PKG_ROOT unset — non-convergence snapshot skipped"
+		return 0
+	fi
+	local _dir="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
+	local _mark="$_dir/diag-not-converged.done"
+	local _outdir="$LOG_DIR/diag"
+	[ -f "$_mark" ] && { echo "  diag: non-convergence snapshot already taken this boot"; return 0; }
+	mkdir -p "$_dir" "$_outdir" 2>/dev/null || true
+	exec 8>"$_mark.lock" 2>/dev/null || true
+	if command -v flock >/dev/null 2>&1; then
+		flock -n 8 2>/dev/null || { echo "  diag: non-convergence snapshot skipped (lock busy)"; return 0; }
+	fi
+	[ -f "$_mark" ] && { echo "  diag: non-convergence snapshot already taken this boot"; return 0; }
+	local _dump="$PKG_ROOT/src/tools/diag-dump.sh"
+	if [ -f "$_dump" ]; then
+		local _out="$_outdir/diag-not-converged-$(date +%Y%m%d-%H%M%S).txt"
+		# why-or-true: the snapshot is best-effort — a failing diag-dump must
+		# not block the boot; the marker is set so it is not retried forever.
+		bash "$_dump" >"$_out" 2>&1 || true
+		: >"$_mark"
+		echo "  diag: non-convergence snapshot -> $_out"
+	else
+		echo "  diag: non-convergence snapshot skipped (no $_dump)"
+	fi
+	command -v flock >/dev/null 2>&1 && flock -u 8 2>/dev/null
+	exec 8>&- 2>/dev/null || true
+	return 0
+}
+
+	case "$1" in
+	start)
+		PKG_ROOT="/userdata/system/crt-dual"
+		# Logs live in Batocera's OFFICIAL logs dir (/userdata/system/logs),
+		# beside the stock display.log / mpv.log / es_launch_* (owner directive
+		# 2026-08-29). Truncation is an EXPLICIT per-file list: the dir is
+		# SHARED with stock logs — a glob would truncate stock files too.
+		LOG_DIR="/userdata/system/logs"
+		LOG="$LOG_DIR/service.log"
+		mkdir -p "$LOG_DIR"
+		: >"$LOG"
+		# The /tmp/crt-dual state dir MUST exist before anything writes into
+		# it: the early layout apply takes layout.lock inside it, and a missing
+		# dir failed exec 9> silently (AMD boot 2026-09-01 02:13: no write
+		# traced, "applied" printed anyway — the watcher recovered, the
+		# pre-ES-apply step was a no-op since the dir only appeared at 13.7).
+		mkdir -p "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}" 2>/dev/null || true
+		# All crt-dual logs are persistent (/userdata) — truncate at every boot so each boot starts with clean logs (requested: always-pristine logs).
+		for _cl in service.log selector.log selector-core.log display-reconcile.log gamepad-reprobe.log; do : >"$LOG_DIR/$_cl" 2>/dev/null || true; done
+		exec > >(tee -i "$LOG") 2>&1
+
+		echo ""
+		echo "=== CRT-DUAL BOOT SERVICE (minimal) — $(date) ==="
+
+		# Libs from the package (installed by install.sh).
+		for _lib in "$PKG_ROOT/src/lib/gpu-lib.sh"; do
+			[ -r "$_lib" ] && source "$_lib" 2>/dev/null || true # libs may be missing on a broken install; boot must continue
+		done
+		# Classification vars must exist even if the detect module never ran
+		# (broken install, X down): set -u makes an unset var an error.
+		CRT_OUTS="${CRT_OUTS:-}"
+		CRT_PRESUMED_OUTS="${CRT_PRESUMED_OUTS:-}"
+		LCD_OUTS="${LCD_OUTS:-}"
+		command -v detect_gpu >/dev/null 2>&1 && detect_gpu 2>/dev/null || true # libs may be absent; classification best-effort
+		# RGS-15KHZ-EXT (dotclock): the GPU_DOTCLOCK print REMOVED with
+		# the whitelist — the floor is measured at boot (the S30z hook)
+		# and written into both switchres inis.
+		echo "GPU: ${GPU_VENDOR:-unknown} (${GPU_MODEL:-unknown})"
+
+		# AMD power: avoid 300MHz downclock glitch/lag in LCD-only when analog poll becomes active (seen 2026-08-25: balanced/auto → 300MHz, ES lag + glitch storm on 1s probe). Force high when analog will be watched (LCD-only).
+		if [ "${GPU_VENDOR:-}" = "amd" ]; then
+			echo high > /sys/class/drm/card0/device/power_dpm_force_performance_level 2>/dev/null || true
+		fi
+
+		# ── AMD glitch-free xrandr wrapper — placed by the PRE-X hook, not here ──
+		# (src/service/crt-gen-initd.sh, S15): the service starts after the boot
+		# force-requery callers already execute xrandr — ETXTBSY race (boot
+		# 2026-08-31) and too late for the first glitch-capable calls. Single
+		# writer = the S15 hook; volatile (re-placed every boot, never saved).
+
+		# ── AMD X11 OutputClass — owned by the PRE-X hook, not here ──
+		# (src/service/crt-gen-initd.sh, S15): the neutralization must land
+		# BEFORE X parses xorg.conf.d. The service runs AFTER X start — this
+		# call only ever worked because a past overlay save persisted the
+		# fix; pre-X it is re-applied every boot (volatile, like the
+		# wrapper). Single writer = the S15 hook.
+		# Self-heal: an upgrade wipes /etc init hooks; redeploy the early
+		# generator so the NEXT boot still pre-dates X (bootstrap pattern).
+
+		# ── Crash recovery level 2 (boot) ──
+		# Removes marked profile blocks left by a crash + stale /tmp
+		# state. Runs BEFORE the layout so a stale block cannot surface.
+		if [ -f "$PKG_ROOT/src/service/crash-clean.sh" ]; then
+			bash "$PKG_ROOT/src/service/crash-clean.sh"
+		fi
+
+		# ── X11 config for the CRT ──
+		export DISPLAY="${DISPLAY:-:0}"
+		for i in $(seq 1 15); do
+			xrandr --current 2>/dev/null | grep -q " connected" && break
+			sleep 2
+		done
+		echo "  Outputs — CRT confirmed: ${CRT_OUTS:-none} | presumed: ${CRT_PRESUMED_OUTS:-none} | LCD: ${LCD_OUTS:-none}"
+
+		# ── Boot layout — EARLY (before the generator + overlay save) ──
+		# Apply the dual as soon as X is up, so the CRT is on 15kHz (the driver's
+		# own interlace — NVIDIA needs no custom-named modeline for that, verified
+		# live 2026-08-21 GTX 970: the CRT displays via its own "640x480" interlace
+		# 0x1bd, and a Screen Modes request only feeds the LCD the wrong mode)
+		# BEFORE EmulationStation starts — the user then never sees the X-startup
+		# state (LCD native + CRT dark). Previously the apply ran AFTER the
+		# generator + batocera-save-overlay (a 61MB image save — many seconds),
+		# leaving a ~10-20s broken window. The watcher's first pass then only
+		# verifies (it accepts any 15kHz-class CRT active mode — layout-watch <!-- historical -->
+		# canonicalization). <!-- historical -->
+		# The probe re-detect that ran here (crt_probe + detect_outputs) was
+		# REMOVED: neither function exists on disk any more — ADR-002 gave the
+		# classification to display-detect.sh, which the reconciler call below
+		# reads on its own.
+		# Box keys (es.resolution + global.videomode) are install-owned and
+		# permanently "auto" (2026-09-14, AMD R9 270X, two verbose-proven
+		# boots: with auto the standalone ES picks 640x480i *current on the
+		# CRT itself and native on LCD-only — the value the 480i pins used
+		# to force). NO service writer: a stale key cannot exist because
+		# nothing rewrites these keys after install; verify.sh owns drift.
+		# RGS-15KHZ-EXT (ADR-002 swap, 2026-09-19): the display owner is the
+		# reconciler (src/display/display-reconcile.sh) — detect -> model ->
+		# apply -> verify, one writer. This early pass runs it once (no
+		# session guard yet); the daemon below owns the retries. A missing
+		# module degrades to the WARN branch (never kills the boot).
+		if bash "$PKG_ROOT/src/display/display-reconcile.sh" --once; then echo "  Boot layout applied (early, before ES)"; else echo "  WARN: early layout apply not converged — the reconcile loop owns the retry"; diag_capture_not_converged; fi
+
+		# -- X11 conf: regenerate ALWAYS (revert of tonight's slimming) --
+		# The early hook owns PRE-X generation, but this pass must STILL
+		# regenerate unconditionally: it is the SELF-CORRECTION for stale
+		# confs (a conf present-but-stale can never be detected as "missing",
+		# regression verified live on the AMD re-mount 2026-08-24: stale
+		# nvidia conf survived this pass and kept X dead). The conf is NEVER
+		# persisted (design closed 2026-08-24) and the only overlay save in
+		# this section is the hook bootstrap below (event-gated, not md5).
+		bash "$PKG_ROOT/src/x11/crt-x11-generator.sh" --force || true
+
+		# NO PERSISTENCE of the CONF (design closed 2026-08-24): the pre-X
+		# hook (/etc/init.d/S15crt-dual-gen) regenerates it BEFORE X at every
+		# boot from CURRENT sysfs truth - a saved copy would be either a
+		# useless cache or, after a hardware change, inherited POISON
+		# (wrong-driver fatal, verified twice live). Runtime self-corrects
+		# via always-regenerate.
+		#
+		# Bootstrap FIRST — usage must follow init under set -u (the reversed
+		# order crashed right here: "_hook_installed: unbound variable",
+		# verified boot 2026-08-24). An upgrade wipes /etc/init.d too;
+		# redeploy the PRE-X generator hook if missing.
+		_hook_installed=0
+		if [ -f "$PKG_ROOT/src/service/crt-gen-initd.sh" ] && [ -d /etc/init.d ] && [ ! -f /etc/init.d/S15crt-dual-gen ]; then
+			cp "$PKG_ROOT/src/service/crt-gen-initd.sh" /etc/init.d/S15crt-dual-gen 2>/dev/null \
+				&& chmod +x /etc/init.d/S15crt-dual-gen 2>/dev/null && _hook_installed=1
+		fi
+
+		# The HOOK itself (/etc/init.d/S15crt-dual-gen) lives in the RAM
+		# overlay: persist it right after installing it (only then).
+		if [ "$_hook_installed" = 1 ] && command -v batocera-save-overlay >/dev/null 2>&1; then
+			umount /overlay/saved 2>/dev/null || true
+			batocera-save-overlay >/dev/null 2>&1 && echo "  hook S15 installed AND persisted to overlay"
+		fi
+
+		# ── Diagnostic snapshot (self-sufficient logs) ──
+		if [ -f "$PKG_ROOT/src/tools/diag-dump.sh" ]; then
+			mkdir -p "$(dirname "$LOG")/diag"
+			bash "$PKG_ROOT/src/tools/diag-dump.sh" >"$(dirname "$LOG")/diag/diag-last-boot.txt" 2>&1 || true
+			echo "  Diag dump: $(dirname "$LOG")/diag/diag-last-boot.txt"
+		fi
+
+		# ── Display reconcile loop (live hotplug, no reboot) ──
+		# Gate is -f (exists), NOT -x: the service runs it via `bash`, so an
+		# executable bit is not required to launch it (2026-08-20 lesson).
+		if [ -f "$PKG_ROOT/src/display/display-reconcile.sh" ]; then
+			# Sonda ANCORATA alla riga di comando esatta del demone: la forma
+			# larga ("display-reconcile.sh") e' soddisfatta da qualunque comando
+			# che NOMINA il demone — compresa la shell che lancia il restart, che
+			# cosi' si fa dire "gia' attivo" e non lo avvia (misurato 2026-10-18:
+			# tre volte in una serata, da me).
+			if ! pgrep -f "^bash $PKG_ROOT/src/display/display-reconcile.sh --daemon" >/dev/null 2>&1; then
+				setsid nohup bash "$PKG_ROOT/src/display/display-reconcile.sh" --daemon >/dev/null 2>&1 &
+				echo "  display-reconcile started (live hotplug, one writer)"
+			else
+				echo "  display-reconcile already active"
+			fi
+		fi
+
+		# ── Gamepad manual-reprobe trigger (universal, non-grabbing) ──
+		# Watches any gamepad (the user's driver normalizes arcade encoders
+		# to a pad; standard pads work as-is) for the Select+L1 combo and
+		# touches the manual hotplug trigger, which the watcher consumes
+		# (re-detect + forced apply). This is the MANUAL analog re-probe for
+		# AMD dce_v6 where the periodic forced probe is disabled (glitch).
+		if [ -f "$PKG_ROOT/src/layout/gamepad-reprobe.py" ]; then
+			mkdir -p "$LOG_DIR"
+			pkill -f "gamepad-reprobe.py" 2>/dev/null || true
+			CRT_DUAL_STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}" \
+				setsid nohup python3 -u "$PKG_ROOT/src/layout/gamepad-reprobe.py" \
+				>/dev/null 2>>"$LOG_DIR/gamepad-reprobe.log" &
+			echo "  gamepad-reprobe started (manual hotplug trigger)"
+		fi
+
+		echo "=== CRT-DUAL BOOT SERVICE COMPLETE — $(date) ==="
+		;;
+
+	stop)
+		# Kills the display loop + the gamepad trigger; a service restart
+		# relaunches both (pgrep guard against duplicates in start).
+		pkill -f "display-reconcile.sh" 2>/dev/null || true
+		pkill -f "gamepad-reprobe.py" 2>/dev/null || true
+		;;
+
+	*)
+		echo "Usage: $0 {start|stop}"
+		;;
+esac

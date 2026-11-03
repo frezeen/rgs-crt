@@ -1,0 +1,49 @@
+device_path: /dev/input/by-id/usb-ASD_JammASD_Interface_ASD275D-if01-event-kbd
+log_path: /var/log/jammASD_xbox.log
+reconnect_delay: 1.5
+
+players:
+  - name: "Microsoft X-Box 360 pad"
+    joystick:
+      x_neg: KEY_LEFT
+      x_pos: KEY_RIGHT
+      y_neg: KEY_UP
+      y_pos: KEY_DOWN
+    buttons:
+      KEY_LEFTCTRL:  BTN_SOUTH
+      KEY_LEFTALT:   BTN_EAST
+      KEY_SPACE:     BTN_WEST
+      KEY_LEFTSHIFT: BTN_NORTH
+      KEY_Z:         BTN_TL
+      KEY_X:         BTN_TR
+      KEY_1:         BTN_START
+      KEY_5:         BTN_SELECT
+    triggers:
+      KEY_C: ABS_Z
+      KEY_V: ABS_RZ
+
+  - name: "Microsoft X-Box 360 pad"
+    joystick:
+      x_neg: KEY_D
+      x_pos: KEY_G
+      y_neg: KEY_R
+      y_pos: KEY_F
+    buttons:
+      KEY_A:         BTN_SOUTH
+      KEY_S:         BTN_EAST
+      KEY_Q:         BTN_WEST
+      KEY_W:         BTN_NORTH
+      KEY_I:         BTN_TL
+      KEY_K:         BTN_TR
+      KEY_2:         BTN_START
+      KEY_6:         BTN_SELECT
+    triggers:
+      KEY_J: ABS_Z
+      KEY_L: ABS_RZ
+
+hotkeys:
+  KEY_TAB:   KEY_TAB
+  KEY_ESC:   KEY_ESC
+  KEY_P:     KEY_P
+  KEY_ENTER: KEY_ENTER
+  KEY_GRAVE: KEY_GRAVE

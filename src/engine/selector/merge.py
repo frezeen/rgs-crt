@@ -1,0 +1,1730 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 FreZeeN
+# Part of crt-dual — https://github.com/frezeen
+"""merge.py — CRT-DUAL profile engine: apply/remove marked blocks.
+
+The merge engine (bash glue + python merge). Orchestrated
+by apply_profile.sh / remove_profile.sh. Parses a profile spec and:
+
+  - keypatches LIVING files per key with value-restore (RGS-15KHZ-EXT:
+    [keypatch/<path>] sections — corrective rewrite-or-append on the
+    live file, previous line (or absence) archived per key and restored
+    at gameStop; the batocera.conf pattern generalized, no frozen copies)
+  - provides/restores FULL config files (profile configs/ -> runtime
+    target, with persistent backup of the stock file)
+  - swaps/restores profile binaries (symlink over the stock binary,
+    overlay-safe pattern: the stock binary is the immutable overlay
+    lower, so a symlink + rm restores stock with zero copy)
+  - runs/restores [runtime] command pairs (RGS-15KHZ-EXT: the generic
+    session-scoped "execute/undo" class — a profile runs a shell command
+    at gameStart and its declared undo at gameStop when the need is NOT
+    a key, a file or a binary; plus in-process env/path.prepend, whose
+    marker sitecustomize applies in the configgen process)
+
+Stock files are NEVER touched outside our keypatched keys / provided
+file; everything else in the file is preserved byte-for-byte .
+
+Usage:
+    merge.py apply   <profile-dir> <name> <target-root> <backup-root>
+    merge.py remove  <profile-dir> <name> <target-root> <backup-root>
+    merge.py validate <profile-dir> <name> <target-root>
+
+Exit codes: 0 = ok, 1 = spec/fatal error, 2 = apply failed + rolled back.
+All writes are atomic: temp + fsync + rename in the same directory.
+"""
+import contextlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+
+# ──────────────────────────────────────────────────────────────
+# Spec parsing
+# ──────────────────────────────────────────────────────────────
+class SpecError(Exception):
+    pass
+
+
+# File sections a profile can declare. Anything else in [..] is a SYSTEM
+# BLOCK ([global], [mame], ...). Both use [..] so the INI coloring in an
+# editor colors them identically — the parser disambiguates by this list
+# plus the path/extension rule below.
+_KNOWN_SECTIONS = frozenset((
+    "display", "batocera", "batocera.conf", "config.files",
+    "configs", "binaries", "patches", "runtime",
+))
+
+# Duplicate batocera key precedence: least -> most specific. The runtime
+# picks the definition of the most specific MATCHING block (an index into
+# this tuple; a higher index wins).
+_PRECEDENCE = ("global", "emulator", "system", "core")
+
+
+def _is_section_header(header: str) -> bool:
+    """True = a FILE section, False = a SYSTEM BLOCK ([global], [mame]).
+
+    File sections are the known names ([display], [batocera.conf],
+    [config.files], [binaries], [configs], [patches], [runtime]), the legacy
+    per-emulator [patches.<emu>], the key-injection [configs/<path>], and
+    any header carrying a path/extension (a generator file like
+    [mameGenerator.py], a bare target file like [mame.ini]) — a system
+    name never contains '.' or '/'.
+
+    Typed block tags ([system.mame], [emulator.libretro], [core.snes9x])
+    carry a '.' but are BLOCKS — the explicit prefix wins over the
+    path/extension rule (capability 2026-08-11: match by emulator/core).
+    """
+    if header in _KNOWN_SECTIONS:
+        return True
+    if header.startswith(("system.", "emulator.", "core.")):
+        return False  # typed block tags — see docstring
+    if header.startswith(("patches.", "configs/", "keypatch/")):
+        return True
+    if "." in header or "/" in header:
+        return True
+    return False
+
+
+def parse_spec(profile_dir: Path):
+    """Parse spec.conf -> (label, desc, display_target, batocera, patches, ...,
+    keypatch).
+
+    batocera: dict key -> value (global batocera.conf keys, [batocera])
+    patches: dict key -> value (RAM patches the profile activates, [patches])
+    keypatch: dict target_path -> list[(block, key_line)] (RGS-15KHZ-EXT:
+        [keypatch/<path>] sections — per-key live patch with restore)
+    runtime: {"cmds": id -> {apply|undo: cmd}, "env": [NAME=value, ...],
+        "prepend": [dir, ...]} (RGS-15KHZ-EXT: [runtime] section — the
+        session-scoped execute/undo class + in-process env entries)
+
+    Block syntax: a profile
+    is grouped in SYSTEM blocks `[mame]` / `[snes]` (applied ONLY when a
+    game of that system starts) plus a `[global]` block (applied on
+    every launch). Inside a block, the sections are named after the FILE
+    they modify: [batocera.conf], [mameGenerator.py], [config.files],
+    [keypatch/<path>], [binaries], [runtime]. Both blocks and sections use [..] (so
+    Notepad++ INI coloring colors them all); the parser disambiguates: an
+    unknown header is a SYSTEM BLOCK, a known file-section name is a
+    section (_is_section_header). The parser QUALIFIES every key with the
+    active block name, so the returned dicts are flat and the runtime
+    (merge apply / sitecustomize) is unchanged — a key inside [mame]
+    [batocera.conf] becomes mame.emulator=... exactly as before.
+
+    Legacy flat syntax (no blocks) still parses unchanged.
+
+    RGS-15KHZ-EXT: flat file injection ([configs/<path>] target sections,
+    bare target files, ini sub-sections) is REMOVED — it deleted
+    pre-existing stock lines on remove (measured). Such a header raises
+    SpecError (fail loud at install/verify, never silent).
+    """
+    spec = profile_dir / "spec.conf"
+    if not spec.is_file():
+        raise SpecError(f"spec.conf missing in {profile_dir}")
+
+    label = ""
+    desc = ""
+    display_target = "crt"  # default if missing
+    batocera = {}           # global keys -> value
+    patches = {}            # RAM patches -> value
+    configs = {}            # full-file configs: profile_rel_file -> target
+    binaries = {}           # binary swap: profile_rel_binary -> target
+    keypatch = {}           # RGS-15KHZ-EXT: per-key live patch: target -> [(block, line)]
+    runtime = {"cmds": {}, "env": [], "prepend": []}  # RGS-15KHZ-EXT: [runtime]
+    blocks = set()          # blocks declared ([mame], [global], [system.mame]...)
+    block_of = {}           # section -> block it belongs to (runtime filter)
+    block_type = {}         # block name -> match kind: always/system/emulator/core
+    current_keypatch = None  # RGS-15KHZ-EXT: active [keypatch/<path>] target
+    block = ""              # active block ([mame]) or "" (legacy flat)
+    in_display = False
+    in_batocera = False
+    in_patches = False
+    in_configs = False
+    in_binaries = False
+    in_keypatch = False     # RGS-15KHZ-EXT
+    in_runtime = False     # RGS-15KHZ-EXT ([runtime] section)
+    patches_prefix = ""
+
+    def _key(k: str) -> str:
+        """KEY EXACTNESS: batocera.conf keys
+        are written EXACTLY as they end up in the file — mame.emulator
+        stays mame.emulator, es.resolution stays global. No qualify/strip
+        magic: anyone who knows Batocera keys writes the final key. Only
+        PATCH ops are qualified with the active block when written bare
+        (cli.drop in [mameGenerator.py] -> mame.cli.drop): the block
+        declares the generator (mame/libretro), the profile writes the
+        op. An already-prefixed key (mame.cli.drop) is left untouched.
+        batocera.conf keys are NEVER qualified here."""
+        if in_patches and block and block != "global":
+            prefix = block + "."
+            return k if k.startswith(prefix) else f"{block}.{k}"
+        return k
+
+    for raw in spec.read_text(errors="replace").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("{") and stripped.endswith("}"):
+            # legacy alias: {mame} (first block format, replaced by [mame]
+            # 2026-08-10 so Notepad++ INI colors blocks like sections)
+            block = stripped[1:-1].strip()
+            blocks.add(block)
+            block_type.setdefault(block, "global" if block == "global" else "system")
+            current_keypatch = None
+            in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = in_runtime = False
+            patches_prefix = ""
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            header = stripped[1:-1].strip()
+            if not _is_section_header(header):
+                # SYSTEM BLOCK: [global] / [mame] / [emulator.libretro] —
+                # everything until the next section belongs to it.
+                # Disambiguated from sections by the known-section list
+                # (_is_section_header): INI coloring colors both
+                # identically, the parser knows which headers are files.
+                # Typed tags ([system.X], [emulator.Y], [core.Z]) declare
+                # the match kind; a bare tag is a system block.
+                block = header
+                if block.startswith("system."):
+                    block = block[len("system."):]
+                    block_type[block] = "system"
+                elif block.startswith("emulator."):
+                    block = block[len("emulator."):]
+                    block_type[block] = "emulator"
+                elif block.startswith("core."):
+                    block = block[len("core."):]
+                    block_type[block] = "core"
+                else:
+                    block_type.setdefault(block, "global" if block == "global" else "system")
+                blocks.add(block)
+                current_keypatch = None
+                in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = in_runtime = False
+                patches_prefix = ""
+                continue
+            in_display = header == "display"
+            in_batocera = header == "batocera" or header == "batocera.conf"
+            in_patches = header == "patches" or header.endswith("Generator.py")
+            in_configs = header in ("configs", "config.files")
+            in_binaries = header == "binaries"
+            in_keypatch = header.startswith("keypatch/")
+            in_runtime = header == "runtime"
+            patches_prefix = ""
+            if header.startswith("patches."):
+                # per-emulator patch section: [patches.mame] -> the
+                # emulator name is prepended to every key inside, so the
+                # marker stays flat (mame.cli.drop=-sound) and the RAM
+                # patcher is unchanged. src/engine/dev-docs/PROFILES.md §1 [patches].
+                in_patches = True
+                patches_prefix = header[len("patches."):].strip() + "."
+            if header in ("display", "configs", "binaries", "batocera", "batocera.conf", "patches", "runtime") or in_patches or in_configs or in_binaries or in_keypatch or in_runtime:
+                current_keypatch = None
+                if in_keypatch:
+                    # RGS-15KHZ-EXT: the block is stored per entry (targets
+                    # are unique paths — no block_of collision class).
+                    current_keypatch = header[len("keypatch/"):].strip()
+                elif block and header not in ("display", "patches", "batocera", "batocera.conf"):
+                    block_of[header] = block
+                    # RGS-15KHZ-EXT (configs scope): the apply filters look up
+                    # the legacy spelling "config.files" while the canonical
+                    # section header is "configs" — record both so a [configs]
+                    # section inherits its owning block's match. Without the
+                    # alias the provision stayed global (live 2026-09-10:
+                    # mame.ini provided on every model2/sm2 launch).
+                    if header == "configs":
+                        block_of["config.files"] = block
+            elif "/" in header or "." in header:
+                # RGS-15KHZ-EXT: flat file injection ([configs/<path>],
+                # bare target files, ini sub-sections) is REMOVED — it
+                # deleted pre-existing stock lines on remove (measured).
+                # Use [keypatch/<path>] (living files) or [configs]
+                # (authored full files). Loud here: parse feeds validate
+                # AND apply alike, so a stale section fails at install,
+                # never silently at gameStart.
+                raise SpecError(
+                    f"flat file injection removed: [{header}] — "
+                    "use [keypatch/<path>] for living files")
+            else:
+                # Bare headers are ALWAYS system blocks (see above) — this
+                # branch is unreachable; loud instead of silent misparse.
+                raise SpecError(f"unknown section: [{header}]")
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        value = stripped.split("=", 1)[1].strip() if "=" in stripped else ""
+        if in_display:
+            if key == "target" and value in ("crt", "lcd"):
+                display_target = value
+            continue
+        if in_batocera:
+            if key:
+                full = _key(key)
+                # a key may be declared in several blocks (always + a
+                # typed block); keep EVERY definition — the runtime picks
+                # the most specific matching one (precedence, _filter)
+                batocera.setdefault(full, []).append((block, value))
+            continue
+        if in_patches:
+            if key:
+                # RGS-15KHZ-EXT: duplicate keys accumulate NEWLINE-separated,
+                # one marker line per op value. Space-join was correct only
+                # for cli flags and CORRUPTED config ops (two path|kv entries
+                # fused on one line: the second never applied, the first got
+                # the path embedded — measured 2026-09-06, mupen stayed
+                # 960x720 + video_shader line mangled live). Newline is safe
+                # for cli too (sitecustomize splits each line on whitespace).
+                full_key = patches_prefix + _key(key)
+                if full_key in patches:
+                    patches[full_key] = patches[full_key] + "\n" + value
+                else:
+                    patches[full_key] = value
+            continue
+        if in_configs:
+            if key:
+                configs[key] = value
+                if block:
+                    block_of[f"config.files:{key}"] = block
+                    block_of[f"configs:{key}"] = block
+            continue
+        if in_binaries:
+            if key:
+                binaries[key] = value
+            continue
+        if in_runtime:
+            # RGS-15KHZ-EXT (runtime section): the session execute/undo
+            # class. <id>.apply/<id>.undo form ONE mandatory pair per id
+            # (the pairing gate lives in do_validate — spec errors never
+            # reach gameStart); env/path.prepend accumulate IN ORDER (the
+            # marker is applied in-process by sitecustomize — an env
+            # change inside the gameStart subprocess never reaches the
+            # game, configgen/emulatorlauncher.py:417).
+            if key == "env":
+                runtime["env"].append(value)
+                if block:
+                    block_of[f"runtime:env:{value}"] = block
+            elif key == "path.prepend":
+                runtime["prepend"].append(value)
+                if block:
+                    block_of[f"runtime:prepend:{value}"] = block
+            elif key.endswith((".apply", ".undo")):
+                op = key.rsplit(".", 1)[1]
+                rid = key[: -len(op) - 1]
+                if not rid:
+                    raise SpecError(f"[runtime] command id missing: '{key} = {value}'")
+                runtime["cmds"].setdefault(rid, {})[op] = value
+                if block:
+                    block_of[f"runtime:cmds:{rid}"] = block
+            else:
+                raise SpecError(
+                    f"[runtime] unknown key '{key}' (want <id>.apply/<id>.undo "
+                    "pairs, env = NAME=value, path.prepend = <dir>)")
+            continue
+        if in_keypatch:
+            # RGS-15KHZ-EXT: block stored per entry (targets unique).
+            if key and current_keypatch:
+                keypatch.setdefault(current_keypatch, []).append((block, stripped))
+            continue
+        if key == "label":
+            label = value
+        elif key == "description":
+            desc = value
+        # Any other key outside a known section is ignored (pre-existing
+        # leniency for top-level label/description placement — not extended).
+        continue
+    return (label, desc, display_target, batocera, patches,
+            configs, binaries, blocks, block_of, block_type, keypatch,
+            runtime)
+
+
+def parse_mappings(profile_dir: Path):
+    """Parse the [configs] and [binaries] mapping sections.
+
+    configs: dict profile_relative_file -> absolute target path
+    binaries: dict profile_relative_binary -> absolute target path
+    """
+    spec = profile_dir / "spec.conf"
+    configs, binaries = {}, {}
+    section = None
+    for raw in spec.read_text(errors="replace").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip()
+            continue
+        if section not in ("configs", "binaries") or "=" not in stripped:
+            continue
+        src, dst = (p.strip() for p in stripped.split("=", 1))
+        (configs if section == "configs" else binaries)[src] = dst
+    return configs, binaries
+
+
+# ──────────────────────────────────────────────────────────────
+# Atomic write
+# ──────────────────────────────────────────────────────────────
+def atomic_write(path: Path, content: bytes | str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f".{path.name}.{os.getpid()}.tmp"
+    data = content.encode() if isinstance(content, str) else content
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _sanitize(part: str) -> str:
+    """Archive-path component: '/' and '.' -> '__' (independent
+    replacements, order irrelevant)."""
+    return part.replace("/", "__").replace(".", "__")
+
+
+# ──────────────────────────────────────────────────────────────
+# Marked-block injection / removal
+# ──────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# Configs (full-file provision) and binaries (symlink swap)
+# ──────────────────────────────────────────────────────────────
+def provide_configs(profile_dir: Path, configs: dict, target_root: Path,
+                    backup_root: Path, name: str) -> None:
+    """Backup stock -> copy profile file to target (atomic)."""
+    for rel, dst in configs.items():
+        src = profile_dir / "configs" / rel
+        if not src.is_file():
+            raise SpecError(f"configs file missing: {src}")
+        dstp = Path(dst) if dst.startswith("/") else target_root / dst
+        bak = backup_root / name / "configs" / rel
+        bak.mkdir(parents=True, exist_ok=True)
+        if (bak / "stock").exists() or (bak / "absent").exists():
+            pass  # pre-clean already archived the stock state
+        elif not dstp.is_file() or (dstp.stat().st_size == src.stat().st_size and dstp.read_bytes() == src.read_bytes()):
+            # RGS-15KHZ-EXT (config stock-record defense): a target already
+            # byte-identical to our profile file is orphan residue from an
+            # ungraceful shutdown or crash, never stock. Recording it as
+            # stock archives our own file and restores it forever at gameStop.
+            (bak / "absent").touch()
+        else:
+            shutil.copy2(dstp, bak / "stock")
+        atomic_write(dstp, src.read_bytes())
+        os.chmod(dstp, src.stat().st_mode & 0o7777)
+        print(f"  provided {rel} -> {dstp}")
+
+
+def restore_configs(profile_dir: Path, configs: dict, target_root: Path,
+                    backup_root: Path, name: str) -> None:
+    for rel, dst in configs.items():
+        dstp = Path(dst) if dst.startswith("/") else target_root / dst
+        bak = backup_root / name / "configs" / rel
+        if (bak / "stock").is_file():
+            atomic_write(dstp, (bak / "stock").read_bytes())
+            os.chmod(dstp, (bak / "stock").stat().st_mode & 0o7777)
+            print(f"  restored stock {rel} -> {dstp}")
+        elif (bak / "absent").exists():
+            dstp.unlink(missing_ok=True)
+            print(f"  removed provided {rel} (stock had none)")
+        elif dstp.is_file():
+            # RGS-15KHZ-EXT (config stock-record defense): if backup archive was
+            # missing or wiped, but target is byte-identical to profile file,
+            # it is orphan residue from a crashed session — clean it up.
+            src = profile_dir / "configs" / rel
+            if src.is_file() and dstp.stat().st_size == src.stat().st_size and dstp.read_bytes() == src.read_bytes():
+                dstp.unlink(missing_ok=True)
+                print(f"  removed orphan provided {rel} (byte-identical to profile, no stock archive)")
+        shutil.rmtree(bak, ignore_errors=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# batocera.conf global keys ([batocera] spec section)
+# ──────────────────────────────────────────────────────────────
+# A profile can set GLOBAL emulator keys (e.g. mame.emulator=mame so ES
+# launches the profile's standalone binary instead of a libretro core).
+# The stock tool batocera-settings-set is the canonical write path
+# (verified: writes `key=value`, no spaces). Reversible: the previous
+# value (or absence) is archived per key; remove restores it exactly.
+BATOCERA_SET = "/usr/bin/batocera-settings-set"
+BATOCERA_CONF = "/userdata/system/batocera.conf"
+
+
+def _batocera_prev(key: str, backup_root, name: str) -> Path:
+    d = Path(backup_root) / name / "batocera"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / key.replace(".", "__")
+
+
+def _batocera_set_inplace(key: str, value: str) -> None:
+    # RGS-15KHZ-EXT (position fix, 2026-09-08): batocera-settings-set always
+    # APPENDS at file end (proven: a test write lands on the last line),
+    # relocating keys that live inside the RGS TUNING zone to the user
+    # zone on every apply/restore (observed: global.bezel moved out of the
+    # stock zone). In-place replace keeps the stock position; the stock
+    # tool is used only when the key is absent (no position to keep).
+    # Only the LAST occurrence carries our value: every reader takes the
+    # last line (batocera-settings, _conf_key, UnixSettings), so the last
+    # one is the EFFECTIVE one — and the earlier occurrences are stock
+    # (RGS ships duplicated keys: model2.emulator at 1018 and 1462).
+    # Rewriting all of them edited RGS's own line and the restore (which
+    # archives the effective value only) could not put it back.
+    prefix = key + "="
+    if os.path.exists(BATOCERA_CONF):
+        try:
+            content = Path(BATOCERA_CONF).read_text(encoding="utf-8", errors="replace")
+            lines = content.splitlines(keepends=True)
+            last = -1
+            for i, line in enumerate(lines):
+                if line.startswith(prefix):
+                    last = i
+            if last >= 0:
+                lines[last] = f"{key}={value}\n"
+                tmp = Path(BATOCERA_CONF).with_suffix(".tmp")
+                tmp.write_text("".join(lines), encoding="utf-8")
+                tmp.replace(BATOCERA_CONF)
+                return
+        except OSError:
+            pass
+    subprocess.run([BATOCERA_SET, key, value], check=False, capture_output=True)
+
+
+def _batocera_delete_key(key: str) -> bool:
+    """Remove the key's line from batocera.conf (plain file: in-place rewrite)."""
+    if not os.path.exists(BATOCERA_CONF):
+        return True
+    prefix = key + "="
+    try:
+        content = Path(BATOCERA_CONF).read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines(keepends=True)
+        new_lines = [l for l in lines if not l.startswith(prefix)]
+        if len(new_lines) != len(lines):
+            tmp = Path(BATOCERA_CONF).with_suffix(".tmp")
+            tmp.write_text("".join(new_lines), encoding="utf-8")
+            tmp.replace(BATOCERA_CONF)
+        return True
+    except OSError:
+        return False
+
+
+def apply_batocera(batocera: dict, backup_root, name: str) -> None:
+    if not batocera:
+        return
+    if not os.path.exists(BATOCERA_SET):
+        print(f"  WARN: {BATOCERA_SET} missing — batocera keys not applied")
+        return
+    for key, value in batocera.items():
+        prev_file = _batocera_prev(key, backup_root, name)
+        if not prev_file.exists():
+            # Archive the PREVIOUS state (value or absence) — first apply.
+            # LAST occurrence wins, same as _conf_key/batocera-settings:
+            # with duplicate keys the archive must hold the EFFECTIVE
+            # value, or restore reinstates a dead line (audit 2026-09-18).
+            prev_file.write_text(_conf_key(Path(BATOCERA_CONF), key))
+        if value == "":
+            # RGS-15KHZ-EXT: empty value = session DELETE of a stock key
+            # (default fires unforced). restore_batocera already restores
+            # value-or-absence from the archive — no new restore path.
+            _batocera_delete_key(key)
+            print(f"  batocera: deleted {key} (session; prev archived)")
+            continue
+        _batocera_set_inplace(key, value)
+        print(f"  batocera: {key}={value}")
+
+
+def restore_batocera(batocera: dict, backup_root, name: str, remove_missing: bool = False) -> None:
+    """Restore profile batocera keys at gameStop.
+
+    remove_missing=True (the gameStop path, which knows the launched
+    system): a key of the ACTIVE block without a prev-archive is removed
+    from batocera.conf outright (sed, like the absent case) — the archive
+    may be missing because the profile was first applied onto a dirty
+    conf (pre-2026-08-11 double-prefix era) or a crashed first apply.
+    Leaving it would freeze the profile's key as "stock".
+    remove_missing=False (rollback path, no system): only keys with a
+    recorded previous value are restored — nothing is touched on a
+    guess."""
+    if not batocera:
+        return
+    if not os.path.exists(BATOCERA_SET):
+        return
+    for key in batocera:
+        prev_file = _batocera_prev(key, backup_root, name)
+        if not prev_file.exists():
+            if remove_missing:
+                # active-block key, never archived -> remove the line
+                # exactly (plain file, sed is the canonical removal)
+                if _batocera_delete_key(key):
+                    print(f"  batocera: removed {key} (active block, no prev archive)")
+            continue
+        prev = prev_file.read_text()
+        if prev:
+            _batocera_set_inplace(key, prev)
+            print(f"  batocera: restored {key}={prev}")
+        else:
+            # was absent before: remove the line exactly (no whiteout for
+            # batocera.conf — plain file, sed is the canonical removal)
+            _batocera_delete_key(key)
+            print(f"  batocera: removed {key} (was absent before apply)")
+        prev_file.unlink(missing_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# Keypatch files (RGS-15KHZ-EXT): per-key live patch with value-restore.
+# The batocera.conf pattern (archive prev per key, restore value-or-
+# absence at gameStop) generalized to any flat key=value file — no
+# frozen copies, the live file is always the base, so stock evolution
+# can never silently rot the profile.
+# ──────────────────────────────────────────────────────────────
+def _keypatch_prev(target: str, key: str, backup_root, name: str) -> Path:
+    d = Path(backup_root) / name / "keypatch" / _sanitize(target)
+    d.mkdir(parents=True, exist_ok=True)
+    return d / _sanitize(key)
+
+
+def _keypatch_key(line: str) -> str:
+    return _ini_line(line.split("=", 1)[0])
+
+
+# RGS-15KHZ-EXT (BOM tolerance): PPSSPP saves ppsspp.ini with a UTF-8 BOM,
+# which would otherwise hide the file's first line from section/key matching
+# (a missed [Graphics] makes the keypatch append a DUPLICATE section, and the
+# generator's configparser then fails the whole read and rewrites empty).
+def _ini_line(s: str) -> str:
+    return s.strip().lstrip("\ufeff").strip()
+
+
+# RGS-15KHZ-EXT (section-aware keypatch): a keypatch key may name the INI
+# section it must live in as `Section/Key = value` (first '/' separates).
+# Plain `Key = value` keeps the original flat behavior byte-for-byte.
+def _kp_section(line: str) -> str:
+    left = line.split("=", 1)[0]
+    return left.split("/", 1)[0].strip() if "/" in left else ""
+
+
+def _kp_section_key(line: str) -> tuple[str, str]:
+    left = line.split("=", 1)[0]
+    if "/" in left:
+        s, _, k = left.partition("/")
+        return s.strip(), k.strip()
+    return "", left.strip()
+
+
+def _kp_write_line(line: str) -> str:
+    """The physical line: section qualifier stripped
+    ('Graphics/DisplayStretch = True' -> 'DisplayStretch = True')."""
+    left = line.split("=", 1)[0]
+    if "/" in left:
+        return line.split("/", 1)[1].strip()
+    return line.strip()
+
+
+def _section_bounds(lines: list, section: str):
+    """(header_index, body_end_exclusive) of `[section]`, or None when the
+    header is absent. body_end = next header line or len(lines). BOM-safe."""
+    hi = None
+    for i, ln in enumerate(lines):
+        s = _ini_line(ln)
+        if s.startswith("[") and s.endswith("]") and s[1:-1].strip() == section:
+            hi = i
+            break
+    if hi is None:
+        return None
+    end = len(lines)
+    for j in range(hi + 1, len(lines)):
+        s = _ini_line(lines[j])
+        if s.startswith("[") and s.endswith("]"):
+            end = j
+            break
+    return hi, end
+
+
+def _created_section_marker(target: str, section: str, backup_root, name: str) -> Path:
+    d = Path(backup_root) / name / "keypatch" / _sanitize(target)
+    return d / f"__created_section__{_sanitize(section)}"
+
+
+def _has_ini_sections(lines: list) -> bool:
+    """True when the file carries at least one `[Section]` header (BOM-safe).
+    A flat key appended to such a file lands OUTSIDE its section and is
+    inert — the declared-effect guard warns instead of failing a launch."""
+    for ln in lines:
+        s = _ini_line(ln)
+        if s.startswith("[") and s.endswith("]"):
+            return True
+    return False
+
+
+def _filter_keypatch(keypatch: dict, system: str | None, block_type: dict | None,
+                     emulator: str | None = None, core: str | None = None) -> dict:
+    """Keep only the entries whose block matches this launch (global and
+    legacy-flat always; typed blocks on match — same rule as batocera).
+
+    RGS-15KHZ-EXT (crash-clean restore, 2026-09-16): system None/"" is the
+    rollback / boot-recovery path (merge.py remove without a launch) — keep
+    EVERY entry, the same contract _filter_for_system documents for the
+    other sections. The ARCHIVE is the truth there: a key never applied to
+    a game has no archive and restore_keypatch skips it, so keeping
+    everything is safe (skip-if-no-prev), while filtering it out stranded
+    applied keys. Pre-fix the typed blocks ([emulator.*] / [core.*] /
+    [system.*]) never matched without a launch, so the boot crash-clean left
+    the [emulator.libretro] keypatch live: crt_switch_resolution="1" stayed
+    in retroarchcustom.cfg and an LCD-only libretro launch applied a 15 kHz
+    raster to the panel (black; measured 2026-09-16 R9 270X).
+    """
+    if not system:
+        return keypatch
+    out: dict = {}
+    for target, entries in keypatch.items():
+        kept = [(b, ln) for b, ln in entries
+                if _block_matches(b, block_type, system, emulator, core)]
+        if kept:
+            out[target] = kept
+    return out
+
+
+def apply_keypatch(keypatch: dict, target_root, backup_root, name: str) -> None:
+    """Corrective rewrite-or-append per key on the LIVE file (single
+    read, single atomic write per file). Previous full line archived per
+    key on first apply (crash-rerun keeps the ORIGINAL prev, never the
+    mid-state). Absent file: created, __absent__ recorded (remove deletes
+    it again — no 0-byte residue)."""
+    for target, entries in keypatch.items():
+        p = Path(target) if target.startswith("/") else Path(target_root) / target
+        if p.is_file():
+            lines = p.read_text(errors="replace").splitlines()
+        else:
+            (Path(backup_root) / name / "keypatch"
+             / _sanitize(target)).mkdir(parents=True, exist_ok=True)
+            (Path(backup_root) / name / "keypatch"
+             / _sanitize(target) / "__absent__").touch()
+            lines = []
+            print(f"  keypatch: {target} missing — creating (removed at gameStop)")
+        changed = False
+        for _block, line in entries:
+            qid = _keypatch_key(line)
+            if not qid or "=" not in line:
+                raise SpecError(f"keypatch line without '=': {target}: {line}")
+            value = line.split("=", 1)[1].strip()
+            section = _kp_section(line)
+            if "/" in line.split("=", 1)[0]:
+                _s, _k = _kp_section_key(line)
+                if not _s or not _k:
+                    raise SpecError(
+                        "keypatch sectioned key malformed (want Section/Key): "
+                        f"{target}: {line}")
+            prev_file = _keypatch_prev(target, qid, backup_root, name)
+            if not section:
+                # flat key: corrective rewrite-or-append anywhere (unchanged)
+                idx = next((i for i, l in enumerate(lines)
+                            if _keypatch_key(l) == qid), None)
+                dupes = [i for i, l in enumerate(lines)
+                         if _keypatch_key(l) == qid][1:]
+                if not prev_file.exists():
+                    prev_file.write_text(lines[idx] if idx is not None else "")
+                if idx is None:
+                    if _has_ini_sections(lines):
+                        print(f"  WARN: keypatch: {target}: flat key "
+                              f"'{qid}' appended to a SECTIONED file — it "
+                              f"lands outside any section and is inert; "
+                              f"declare it as Section/{qid}")
+                    lines.append(line)
+                    changed = True
+                elif lines[idx] != line:
+                    lines[idx] = line
+                    changed = True
+                for i in sorted(dupes, reverse=True):
+                    del lines[i]
+                    changed = True
+                print(f"  keypatch: {target}: {qid}={value}")
+                continue
+            # sectioned key: place INSIDE [section] (created if absent)
+            key = _kp_section_key(line)[1]
+            write_line = _kp_write_line(line)
+            bounds = _section_bounds(lines, section)
+            if bounds is None:
+                if not prev_file.exists():
+                    prev_file.write_text("")  # absent before apply
+                _created_section_marker(target, section, backup_root, name).write_text(section)
+                lines.append(f"[{section}]")
+                lines.append(write_line)
+                changed = True
+                print(f"  keypatch: {target}: [{section}] {key}={value} (section created)")
+                continue
+            hi, end = bounds
+            idx = next((i for i in range(hi + 1, end)
+                        if _keypatch_key(lines[i]) == key), None)
+            dupes = [i for i in range(hi + 1, end)
+                     if _keypatch_key(lines[i]) == key][1:]
+            if not prev_file.exists():
+                prev_file.write_text(lines[idx] if idx is not None else "")
+            if idx is None:
+                insert_at = end
+                while insert_at - 1 > hi and not lines[insert_at - 1].strip():
+                    insert_at -= 1
+                lines.insert(insert_at, write_line)
+                changed = True
+            elif lines[idx] != write_line:
+                lines[idx] = write_line
+                changed = True
+            for i in sorted(dupes, reverse=True):
+                del lines[i]
+                changed = True
+            print(f"  keypatch: {target}: [{section}] {key}={value}")
+        if changed or not p.is_file():
+            atomic_write(p, "\n".join(lines) + ("\n" if lines else ""))
+
+
+def restore_keypatch(keypatch: dict, target_root, backup_root, name: str) -> None:
+    """Restore archived lines per key (byte-exact, spacing kept); keys
+    absent pre-apply are deleted; files created by apply are removed
+    again when empty (unlink-if-empty — no residue). Archive cleaned."""
+    for target, entries in keypatch.items():
+        p = Path(target) if target.startswith("/") else Path(target_root) / target
+        base = (Path(backup_root) / name / "keypatch"
+                / _sanitize(target))
+        if not base.is_dir():
+            continue  # never applied — nothing to do
+        qids = list(dict.fromkeys(_keypatch_key(ln) for _, ln in entries if _keypatch_key(ln)))
+        if p.is_file():
+            lines = p.read_text(errors="replace").splitlines()
+        else:
+            lines = []
+        for qid in qids:
+            prev_file = _keypatch_prev(target, qid, backup_root, name)
+            if not prev_file.exists():
+                continue
+            prev = prev_file.read_text(errors="replace")
+            entry_line = next((ln for _, ln in entries if _keypatch_key(ln) == qid), "")
+            section = _kp_section(entry_line)
+            key = _kp_section_key(entry_line)[1]
+            if not section:
+                lines = [l for l in lines if _keypatch_key(l) != key]
+                if prev:
+                    lines.append(prev)
+                    print(f"  keypatch: restored {target}: {qid}")
+                else:
+                    print(f"  keypatch: removed {target}: {qid} (was absent before apply)")
+            else:
+                bounds = _section_bounds(lines, section)
+                if bounds is None:
+                    if prev:
+                        lines.append(prev)
+                        print(f"  keypatch: restored {target}: {qid}")
+                    else:
+                        print(f"  keypatch: removed {target}: {qid} (section already gone)")
+                else:
+                    hi, end = bounds
+                    idxs = [i for i in range(hi + 1, end)
+                            if _keypatch_key(lines[i]) == key]
+                    if idxs:
+                        first = idxs[0]
+                        if prev:
+                            lines[first] = prev
+                        else:
+                            del lines[first]
+                        for i in sorted(idxs[1:], reverse=True):
+                            del lines[i]
+                    elif prev:
+                        lines.insert(hi + 1, prev)
+                    print(f"  keypatch: {'restored' if prev else 'removed'} "
+                          f"{target}: [{section}] {key}")
+            prev_file.unlink(missing_ok=True)
+        # sections WE created: drop the header once the section is empty
+        for marker in sorted(base.glob("__created_section__*")):
+            sect = marker.read_text(errors="replace").strip()
+            b = _section_bounds(lines, sect)
+            if b:
+                hi, end = b
+                body = [l for l in lines[hi + 1:end]
+                        if l.strip() and not l.strip().startswith("#")]
+                if not body:
+                    del lines[hi:end]
+            marker.unlink(missing_ok=True)
+        (base / "__absent__").unlink(missing_ok=True)
+        if not p.is_file() and not lines:
+            pass  # stayed absent — clean
+        elif not lines:
+            with contextlib.suppress(OSError):
+                p.unlink()  # only our lines were ever in it — no residue
+                print(f"  keypatch: removed created file {target}")
+        else:
+            atomic_write(p, "\n".join(lines) + "\n")
+        with contextlib.suppress(OSError):
+            base.rmdir()  # archives unlinked above; empty dir goes too
+
+
+# ──────────────────────────────────────────────────────────────
+# Generator `.config` post-write edits (RGS-15KHZ-EXT genconfig-archive):
+# the sitecustomize wrapper archives the pre-edit line-or-absence per key
+# (first apply wins); gameStop value-restores here. Without this, forced
+# values persist in living files after a clean remove (proven live:
+# video_shader="" stranded post-game despite remove OK — stock never
+# writes that key and RA exit-save is off, so nothing heals it).
+# `.config.drop` is covered by the same archives: the wrapper stores the
+# removed lines (all occurrences, original order) and restore puts them
+# byte-back at gameStop (reversibility, profile-discipline 9).
+# ──────────────────────────────────────────────────────────────
+def _genconfig_prev(target: str, key: str, backup_root, name: str) -> Path:
+    d = (Path(backup_root) / name / "genconfig"
+         / _sanitize(target))
+    return d / _sanitize(key)
+
+
+# RGS-15KHZ-EXT (config-xml): mirror of the wrapper's `<setting id="…">`
+# matcher. NOT `_keypatch_key` — that splits on '=', which an XML
+# attribute line does not carry.
+_SETTING_RE = re.compile(r'<setting\s+id="([^"]+)"')
+
+
+def _setting_id(line: str) -> str:
+    m = _SETTING_RE.search(line)
+    return m.group(1) if m else ""
+
+
+def _restore_config_xml(target: str, kv: str, target_root, backup_root,
+                        name: str) -> None:
+    """Restore the `.config.xml` archives: per id, put the previous
+    `<setting …>` line back IN PLACE, or remove the line when the id was
+    absent before apply.
+    IN PLACE, never appended at the file end: an appended `<setting>`
+    would land AFTER `</settings>` and break the document (mirrored
+    comment on the wrapper's insert side).
+    Mirrors restore_keypatch: no archive -> the entry was never applied,
+    leave the file alone; empty dirs are consumed either way."""
+    p = Path(target) if target.startswith("/") else Path(target_root) / target
+    base = (Path(backup_root) / name / "genconfig" / _sanitize(target))
+    if not base.is_dir():
+        return  # never applied — nothing to do
+    ids = []
+    for item in kv.split(";"):
+        k, _, _v = item.partition("=")
+        k = k.strip()
+        if k and k not in ids:
+            ids.append(k)
+    for sid in ids:
+        prev_file = _genconfig_prev(target, sid, backup_root, name)
+        if not prev_file.exists():
+            continue
+        prev = prev_file.read_text(errors="replace")
+        lines = p.read_text(errors="replace").splitlines() if p.is_file() else []
+        idx = next((i for i, ln in enumerate(lines) if _setting_id(ln) == sid), None)
+        if idx is not None:
+            if prev:
+                lines[idx] = prev          # value we replaced -> original back
+            else:                         # we added the id -> remove our line
+                del lines[idx]
+            atomic_write(p, "\n".join(lines) + ("\n" if lines else ""))
+            print(f"  genconfig: restored {target}: {sid}")
+        prev_file.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        base.rmdir()  # archives unlinked above; empty dir goes too
+    with contextlib.suppress(OSError):
+        # parent skeleton too, when no other target dirs remain
+        (Path(backup_root) / name / "genconfig").rmdir()
+
+
+def restore_genconfig(patches: dict, target_root, backup_root, name: str) -> None:
+    """Restore `.config` post-write edits from the wrapper archives
+    (byte-exact lines; absence restores remove the key). Mirrors
+    restore_keypatch; entries never applied (no archive dir) leave the
+    file untouched. Files are never unlinked (the wrapper only ever
+    edits pre-existing files)."""
+    for full_key, value in patches.items():
+        _head, _, op = full_key.rpartition(".")
+        _gen, _, mid = _head.rpartition(".")
+        if op == "config":
+            pass  # force entries: `path|k=v[;k2=v2]`
+        elif op == "drop" and mid == "config":
+            pass  # RGS-15KHZ-EXT: `.config.drop` — path|key[;key2],
+            # the archive holds the removed lines; bare keys still parse
+            # through the same partition("=") below (no '=' = whole key).
+            # NB op=="drop" alone would collide with `cli.drop` (mid!=config).
+        elif op == "xml" and mid == "config":
+            # RGS-15KHZ-EXT: `.config.xml` — path|id=value[;id2=value2];
+            # the archive holds each id's previous full line (or "" = the
+            # id was absent). NB op=="xml" alone would not be scoped, hence
+            # the mid=="config" test (same guard class as cli.drop).
+            for one in str(value).split("\n"):
+                target, _, kv = one.partition("|")
+                target = (target or "").strip()
+                if not target or not kv.strip():
+                    continue
+                _restore_config_xml(target, kv, target_root, backup_root, name)
+            continue
+        else:
+            continue  # cli.*, mouse, runtime_dir, ensure: no file residue
+            # (`ensure` is a declared NO-RESTORE repair — see the op's
+            # docstring in sitecustomize._apply_ensure_ops.)
+        for one in str(value).split("\n"):
+            target, _, kv = one.partition("|")
+            target = (target or "").strip()
+            if not target or not kv.strip():
+                continue
+            p = Path(target) if target.startswith("/") else Path(target_root) / target
+            base = (Path(backup_root) / name / "genconfig"
+                    / _sanitize(target))
+            if not base.is_dir():
+                continue  # never applied — nothing to do
+            keys = []
+            for item in kv.split(";"):
+                k, _, _v = item.partition("=")
+                k = k.strip()
+                if k and k not in keys:
+                    keys.append(k)
+            if p.is_file():
+                lines = p.read_text(errors="replace").splitlines()
+            else:
+                lines = []
+            for key in keys:
+                prev_file = _genconfig_prev(target, key, backup_root, name)
+                if not prev_file.exists():
+                    continue
+                prev = prev_file.read_text(errors="replace")
+                lines = [l for l in lines if _keypatch_key(l) != key]
+                if prev:
+                    lines.append(prev)
+                    print(f"  genconfig: restored {target}: {key}")
+                else:
+                    print(f"  genconfig: removed {target}: {key} (was absent before apply)")
+                prev_file.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                base.rmdir()  # archives unlinked above; empty dir goes too
+            with contextlib.suppress(OSError):
+                # parent skeleton too, when no other target dirs remain
+                (Path(backup_root) / name / "genconfig").rmdir()
+            atomic_write(p, "\n".join(lines) + ("\n" if lines else ""))
+
+
+def _overlay_lower_path(rel: str) -> str | None:
+    """Find the immutable lower-layer path for a stock file shadowed by the
+    overlay upper (e.g. /usr/bin/mame/mame -> /overlay/base2/usr/bin/mame/mame).
+
+    The lower squashfs holds the stock binary; the upper (tmpfs) only ever
+    shadows it with a symlink. Returning the lower path gives the engine a
+    whiteout-free RESTORE target: retargeting the symlink to it never touches
+    the upper whiteout machinery (verified on stock 2026-08-10: ln -sfn over a
+    lower file = symlink shadow, NO whiteout; rm/mv of the shadowing entry =
+    whiteout char device in the upper that hides the stock forever).
+    """
+    for d in ("/overlay/base2", "/overlay/base", "/overlay_root/base2", "/overlay_root/base"):
+        p = Path(d) / rel
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def swap_binaries(profile_dir: Path, binaries: dict, target_root: Path,
+                  backup_root: Path, name: str) -> None:
+    """Symlink-swap the stock binary. NEVER rm a path that shadows a lower
+    file (whiteout). The upper entry is ALWAYS a symlink: swap = retarget.
+    Restore = retarget back to the immutable lower path (or the original
+    symlink target) — zero copy, zero whiteout."""
+    for rel, dst in binaries.items():
+        src = profile_dir / "binaries" / rel
+        if not src.is_file():
+            raise SpecError(f"binaries file missing: {src} (user must procure it)")
+        dstp = Path(dst)
+        bak = backup_root / name / "binaries" / rel
+        bak.mkdir(parents=True, exist_ok=True)
+        if not (bak / "was_symlink").exists() and not (bak / "was_regular").exists():
+            # RGS-15KHZ-EXT (stock-record defense): a was_symlink record must
+            # be a CREDIBLE stock target — absolute, resolving to an existing
+            # file, never inside the profile binaries tree we swap in. The
+            # record self-consumes at restore (rmtree below), so a garbage
+            # value (relative path / dangling / our own tree) was recorded as
+            # "stock" on the next apply and restored verbatim FOREVER — live
+            # 2026-09-10: /usr/bin/mame/mame -> "src/profiles/rgs-15khz/
+            # binaries/mame" (relative, dangling from PWD=/userdata). Such a
+            # state falls through to the overlay-lower truth instead.
+            _cred = False
+            if dstp.is_symlink():
+                _cur = os.readlink(dstp)
+                if os.path.isabs(_cur):
+                    _curp = Path(_cur)
+                    if (_curp.exists()
+                            and not str(_curp).startswith(str(profile_dir) + os.sep)):
+                        (bak / "was_symlink").write_text(_cur)
+                        _cred = True
+            if not _cred:
+                lower = _overlay_lower_path(dst.lstrip("/"))
+                if lower:
+                    (bak / "stock_lower").write_text(lower)
+                elif dstp.is_file():
+                    # no immutable lower reachable (exotic mount / tests):
+                    # keep an exact copy of the stock so restore is byte-exact
+                    shutil.copy2(dstp, bak / "stock_copy")
+                    print(f"  archived stock copy of {dstp} (no overlay lower found)")
+                elif dstp.is_symlink():
+                    # shadowing symlink with no reachable lower and no credible
+                    # stock target: nothing stock to restore — record it so
+                    # restore cleans the shadow + whiteout (regular-file path)
+                    (bak / "was_regular").touch()
+        dstp.parent.mkdir(parents=True, exist_ok=True)
+        # retarget-only: if a regular file is still in place (first swap after
+        # install without conversion), ln -sfn shadows it with no whiteout
+        dstp.unlink(missing_ok=True)
+        os.symlink(src, dstp)
+        print(f"  swapped {rel} -> {dstp}")
+
+
+def restore_binaries(profile_dir: Path, binaries: dict, target_root: Path,
+                     backup_root: Path, name: str) -> None:
+    for rel, dst in binaries.items():
+        dstp = Path(dst)
+        bak = backup_root / name / "binaries" / rel
+        if not any((bak / r).exists() for r in
+                   ("was_symlink", "was_regular", "stock_lower", "stock_copy")):
+            continue  # nothing recorded (never swapped) — no-op
+        target = None
+        if (bak / "was_symlink").exists():
+            target = (bak / "was_symlink").read_text().strip() or None
+        elif (bak / "stock_lower").exists():
+            target = (bak / "stock_lower").read_text().strip() or None
+        if target:
+            dstp.unlink(missing_ok=True)
+            os.symlink(target, dstp)
+            print(f"  restored stock {rel} -> {dstp} -> {target}")
+        elif (bak / "stock_copy").is_file():
+            atomic_write(dstp, (bak / "stock_copy").read_bytes())
+            print(f"  restored stock {rel} (copied back)")
+        else:
+            # no immutable lower found (rare): remove the shadowing symlink and
+            # the whiteout char device from the overlay upper, then revalidate
+            if dstp.is_symlink():
+                dstp.unlink(missing_ok=True)
+            for upper in ("/overlay/overlay", "/overlay_root/overlay"):
+                w = Path(upper) / dst.lstrip("/")
+                try:
+                    w.unlink(missing_ok=True)
+                except OSError:
+                    continue  # upper not reachable from this namespace; boot restores it
+            print(f"  restored stock {rel} ({dstp}, whiteout cleanup)")
+        shutil.rmtree(bak, ignore_errors=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# [runtime] section (RGS-15KHZ-EXT, runtime capability): the session-scoped
+# "execute/undo" class for profile needs that are NOT a key, a file or a
+# binary (profile-discipline 3 — the standing generic-[runtime] candidate).
+# Two op families:
+#   <id>.apply / <id>.undo  shell commands run at gameStart / gameStop
+#                           (/bin/sh -c in the hook's root context;
+#                           warn-not-fail, apply_profile.sh:87 style);
+#   env / path.prepend      applied IN-PROCESS in the configgen process —
+#                           the gameStart hook is a subprocess.call child
+#                           (configgen/emulatorlauncher.py:407-417) and the
+#                           game env is rebuilt from the CONFIGGEN process
+#                           os.environ (emulatorlauncher.py:585-587, Popen
+#                           596), so an env change inside the hook never
+#                           reaches the game. merge.py only WRITES the
+#                           marker (/tmp/crt-dual/runtime-env, read by
+#                           sitecustomize after the gameStart hooks).
+# Crash-safety mirrors configs/binaries: a successful apply records
+# `<id>.applied` under <backup_root>/<name>/runtime/; the next apply's
+# pre-clean and the remove run the recorded id's undo in REVERSE
+# declaration order and consume the record. env/path.prepend are
+# in-process only (they die with the per-launch configgen process) — the
+# marker file is their whole state, removed at gameStop.
+# ──────────────────────────────────────────────────────────────
+RUNTIME_ENV_STATE = "/tmp/crt-dual/runtime-env"
+
+
+def _runtime_record(backup_root, name: str, rid: str) -> Path:
+    # Path ONLY: the WRITER (apply_runtime) creates the parent. A read
+    # (undo_runtime) must never have a directory-creation side effect.
+    return Path(backup_root) / name / "runtime" / f"{rid}.applied"
+
+
+def _run_runtime_cmd(rid: str, verb: str, cmd: str) -> int | None:
+    """Run one [runtime] command (/bin/sh -c). Output is captured and
+    reported; a non-zero exit WARNs and never breaks the launch (mirror
+    of the display hand-over style, apply_profile.sh:87). Returns the
+    exit code, or None when the command could not be started at all."""
+    try:
+        proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
+                              text=True, errors="replace")
+    except OSError as e:
+        print(f"  WARN: runtime {verb} {rid}: cannot run: {e}")
+        return None
+    for stream in (proc.stdout, proc.stderr):
+        for line in (stream or "").splitlines():
+            print(f"    runtime {rid}: {line}")
+    if proc.returncode != 0:
+        print(f"  WARN: runtime {verb} {rid} exited {proc.returncode} (continuing)")
+    return proc.returncode
+
+
+def apply_runtime(cmds: dict, backup_root, name: str) -> None:
+    """Run every filtered `<id>.apply` in DECLARATION order; a successful
+    run (exit 0) records `<id>.applied` so the undo is crash-safe."""
+    for rid, ops in cmds.items():
+        cmd = ops.get("apply")
+        if not cmd:
+            continue  # undo-only id — the pairing gate is do_validate's
+        print(f"  runtime: {rid} apply")
+        if _run_runtime_cmd(rid, "apply", cmd) == 0:
+            rec = _runtime_record(backup_root, name, rid)
+            rec.parent.mkdir(parents=True, exist_ok=True)
+            rec.touch()
+        else:
+            print(f"  WARN: runtime {rid} not recorded (apply failed — its undo will not fire)")
+
+
+def undo_runtime(cmds: dict, backup_root, name: str) -> None:
+    """Run the undo of every id carrying an `.applied` record, in REVERSE
+    declaration order, and consume the record. The record is the truth:
+    an id with no record was never applied — its undo never runs (skips
+    cleanly on a crash-clean re-run, like restore_configs)."""
+    for rid, ops in reversed(cmds.items()):
+        rec = _runtime_record(backup_root, name, rid)
+        if not rec.exists():
+            continue  # never applied — nothing to undo
+        cmd = ops.get("undo")
+        if cmd:
+            print(f"  runtime: {rid} undo")
+            _run_runtime_cmd(rid, "undo", cmd)
+        else:
+            # pairing is a do_validate gate — this is the loud fallback
+            # for a spec that reached the box without passing validate.
+            print(f"  WARN: runtime {rid}: .applied record without an undo command")
+        rec.unlink(missing_ok=True)
+
+
+def apply_runtime_env(name: str, envs: list, prepends: list) -> None:
+    """Write the in-process env marker sitecustomize reads (profile
+    header + `env NAME=value` + `prepend <dir>` lines, in declaration
+    order). An EMPTY filtered set removes a stale marker instead: no
+    entries = stock env (a crash-stranded marker must not leak)."""
+    p = Path(RUNTIME_ENV_STATE)
+    if not envs and not prepends:
+        p.unlink(missing_ok=True)
+        return
+    lines = [f"profile={name}"]
+    lines += [f"env {e}" for e in envs]
+    lines += [f"prepend {d}" for d in prepends]
+    atomic_write(p, "\n".join(lines) + "\n")
+    print(f"  runtime-env: {len(envs)} env, {len(prepends)} prepend -> {p}")
+
+
+def restore_runtime_env() -> None:
+    """Remove the in-process env marker at gameStop (next launch =
+    stock; the env itself dies with the configgen process)."""
+    Path(RUNTIME_ENV_STATE).unlink(missing_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# Emulator/core PIN marker (RGS-15KHZ-EXT, "the profile decides")
+# ──────────────────────────────────────────────────────────────
+# Why this exists: RGS's own es_systems command for some systems (model2)
+# passes -emulator %EMULATOR% / -core %CORE% to configgen, and configgen
+# gives that ARGUMENT priority over batocera.conf
+# (configgen/Emulator.py:198-202). For those systems a conf pin cannot
+# switch the emulator — RGS's own sm2 pin is dead for exactly that reason
+# (their line 1027 is overridden by their line 1462, and ES passes
+# libretro/mame: measured 2026-10-20, their 43.68 pack).
+# Systems whose command does NOT pass the emulator (mame) are decided by
+# the conf, so their profile pin already works.
+# The profile is the layer that decides: merge.py writes the declared
+# pin here and sitecustomize rewrites the launcher's args from it (the
+# hoisted gameStart runs before configgen resolves the generator).
+# Session-scoped like the runtime-env marker: written at gameStart,
+# removed at gameStop; a crash leaves it, the next apply rewrites it.
+PIN_STATE = "/tmp/crt-dual/pin"
+
+
+def apply_pin(system: str, batocera: dict, name: str) -> None:
+    """Write the emulator/core pin marker for the launched system, from
+    the PROFILE's own declarations only (<system>.emulator /
+    <system>.core). No declaration = no marker = stock behaviour (ES's
+    choice decides)."""
+    p = Path(PIN_STATE)
+    if not system:
+        p.unlink(missing_ok=True)
+        return
+    emu = str(batocera.get(f"{system}.emulator", "") or "")
+    core = str(batocera.get(f"{system}.core", "") or "")
+    if not emu and not core:
+        p.unlink(missing_ok=True)
+        return
+    atomic_write(p, f"profile={name}\npin {system} {emu or '-'} {core or '-'}\n")
+    print(f"  pin: {system} emulator={emu or '-'} core={core or '-'} -> {p}")
+
+
+def restore_pin() -> None:
+    """Remove the pin marker at gameStop (next launch = stock choice)."""
+    Path(PIN_STATE).unlink(missing_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# Apply / remove / validate
+# ──────────────────────────────────────────────────────────────
+PATCH_STATE = "/tmp/crt-dual/patches"
+
+
+def apply_patches(patches: dict) -> None:
+    """Write the ACTIVE RAM patches marker . The engine
+    applies — the sitecustomize.py patchers are PASSIVE: they read this file
+    at import/call time and act only for declared patches. With no profile
+    active the file is absent -> patchers behave exactly stock.
+    RGS-15KHZ-EXT: one line per op VALUE (keys repeat) — the reader
+    groups by key prefix, so multi-value ops (two libretro.config
+    entries) each parse as path|kv."""
+    Path(PATCH_STATE).parent.mkdir(parents=True, exist_ok=True)
+    if patches:
+        lines = []
+        for k, v in patches.items():
+            for one in str(v).split("\n"):
+                lines.append(f"{k}={one}")
+        Path(PATCH_STATE).write_text("\n".join(lines) + "\n")
+    else:
+        Path(PATCH_STATE).unlink(missing_ok=True)
+
+
+def restore_patches(patches: dict) -> None:
+    """Remove the active-patches marker at gameStop (next launch = stock)."""
+    Path(PATCH_STATE).unlink(missing_ok=True)
+
+
+def _block_kind(block: str, block_type: dict | None) -> str:
+    """The match kind of a block: global/system/emulator/core. Bare
+    blocks and legacy flat sections are global."""
+    if not block or block == "global":
+        return "global"
+    return (block_type or {}).get(block, "system")
+
+
+def _block_matches(block: str, block_type: dict | None, system: str | None,
+                   emulator: str | None, core: str | None) -> bool:
+    """Does the block apply to this launch? global/legacy -> yes; a typed
+    block matches its kind ([system.X] -> X == system, [emulator.Y] ->
+    Y == resolved emulator, [core.Z] -> Z == resolved core); a bare block
+    is a system block (legacy [mame])."""
+    if not block or block == "global":
+        return True
+    kind = (block_type or {}).get(block, "system")
+    if kind == "emulator":
+        return emulator is not None and emulator == block
+    if kind == "core":
+        return core is not None and core == block
+    return block == system
+
+
+def _conf_key(conf: Path, key: str) -> str:
+    """batocera.conf lookup: the LAST `key=value` line wins (same as
+    batocera-settings semantics). Returns '' when absent."""
+    if not conf.is_file():
+        return ""
+    val = ""
+    with contextlib.suppress(OSError):
+        for ln in conf.read_text(errors="replace").splitlines():
+            s = ln.strip()
+            if s.startswith(key + "="):
+                val = s.split("=", 1)[1].strip()
+    return val
+
+
+def _defaults_val(system: str, field: str, defaults_dir: Path) -> str:
+    """Stock default library lookup, mirroring configgen Emulator()
+    (verified 2026-08-11 on box 43.1): configgen-defaults-arch.yml
+    overrides configgen-defaults.yml, per-system overrides [default].
+    Returns '' when absent."""
+    try:
+        import yaml
+    except ImportError as e:
+        print(f"CRT-DUAL-MERGE: WARN defaults library skipped, pyyaml unavailable ({e})", file=sys.stderr)
+        return ""
+    for yml_name in ("configgen-defaults-arch.yml", "configgen-defaults.yml"):
+        p = defaults_dir / yml_name
+        if not p.is_file():
+            continue
+        try:
+            data = yaml.safe_load(p.read_text(errors="replace"))
+        except (OSError, yaml.YAMLError) as e:
+            print(f"CRT-DUAL-MERGE: WARN defaults library unreadable ({p}): {e} — skipping to next file", file=sys.stderr)
+            continue
+        if not isinstance(data, dict):
+            continue
+        entry = data.get(system) or data.get("default") or {}
+        if isinstance(entry, dict) and entry.get(field):
+            return str(entry[field])
+    return ""
+
+
+def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
+    """The emulator/core the launched system will use, resolved exactly
+    like configgen (Emulator `_load_system_config` over `_load_defaults`;
+    line refs re-checked 2026-09-18): batocera.conf
+    <system>.emulator/.core first, then the stock default library
+    (configgen-defaults-arch.yml over configgen-defaults.yml, per-system
+    over [default]). Returns (emulator, core) — each '' when unknown.
+
+    The gameStart hook receives emulator/core EMPTY (the RAM patch hoists
+    the hook before configgen resolves them, sitecustomize.py) — the
+    engine resolves them itself for the [emulator.X]/[core.X] block match.
+    Resolution is called TWICE by do_apply (RGS-15KHZ-EXT post-pin):
+    PRE-pin (stock config) for the file-based selections, whose emulator
+    keys live in system blocks and must not feed back; POST-pin (after the
+    keys landed) for the runtime consumers — keypatch and
+    the resolve-record — matching what configgen reads at launch.
+    do_remove prefers the apply-time record (RGS-15KHZ-EXT), live is
+    fallback."""
+    conf = Path(target_root) / "batocera.conf"
+    emu = _conf_key(conf, system + ".emulator")
+    core = _conf_key(conf, system + ".core")
+    if defaults_dir is None:
+        defaults_dir = Path("/usr/share/batocera/configgen")
+    if not emu:
+        emu = _defaults_val(system, "emulator", defaults_dir)
+    if not core:
+        core = _defaults_val(system, "core", defaults_dir)
+    return emu, core
+
+
+# RGS-15KHZ-EXT (resolve-record): gameStop must filter with the
+# APPLY-time resolution, not the live one. A profile block that flips
+# <system>.emulator with its own keys (e.g. [mame] libretro->standalone)
+# would otherwise hide [emulator.*]/[core.*] sections from do_remove:
+# apply resolves stock (match), remove re-resolves modified (no match)
+# and the keypatch strands with exit 0 (measured live 2026-09-04 vf).
+# do_apply records, do_remove prefers the record, live is the fallback.
+# These 3 helpers + the 1-line call sites in do_apply/do_remove keep the
+# stock line visible in batocera.conf (the record supplies the pre-apply
+# name; live is the fallback).
+def _resolve_record_path(backup_root, name: str) -> Path:
+    return Path(backup_root) / name / ".resolve"
+
+
+def _write_resolve(backup_root, name: str, system: str, emulator, core) -> None:
+    try:
+        p = _resolve_record_path(backup_root, name)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"{system}\n{emulator or ''}\n{core or ''}\n")
+    except OSError:
+        pass  # record is an optimization; live resolution stays fallback
+
+
+def _read_resolve(backup_root, name: str, system: str):
+    """(emulator, core) recorded at apply, or None (absent/stale/other)."""
+    try:
+        lines = _resolve_record_path(backup_root, name).read_text().splitlines()
+    except OSError:
+        return None
+    if len(lines) < 3 or lines[0] != system:
+        return None
+    return lines[1], lines[2]
+
+
+def _filter_for_system(mapping: dict, system: str | None, block_of: dict, section: str, all_blocks: set | None = None, emulator: str | None = None, core: str | None = None, block_type: dict | None = None):
+    """Keep only the entries belonging to the launched launch (system +
+    resolved emulator/core).
+
+    Block syntax: batocera keys are EXACT (2026-08-11 directive — written
+    as they end up in the file: mame.emulator stays mame.emulator); a key
+    may be declared in several blocks and every definition is kept in
+    mapping (key -> list[(block, value)]) — the runtime picks the most
+    specific MATCHING definition (precedence: core > system > emulator >
+    always, the exact key wins unchanged). PATCH keys are qualified with
+    the owning block ([mame] [mameGenerator.py] cli.drop ->
+    mame.cli.drop — the marker keeps the generator prefix the RAM patcher
+    reads, _marker_ops('mame')); the section's block decides the match.
+    configs/binaries keys are bare (the section's block is known via
+    block_of). system=None or "" (remove/validate/full apply) keeps
+    everything.
+    """
+    if section == "batocera.conf":
+        # NO early return on system=None here: the definitions map must
+        # ALWAYS be collapsed to the final key->value form (a full apply
+        # without a system only matches always/legacy blocks).
+        out: dict = {}
+        for k, defs in mapping.items():
+            best = None  # (precedence_index, value) — most specific match
+            for blk, val in defs:
+                if not _block_matches(blk, block_type, system, emulator, core):
+                    continue
+                prec = _PRECEDENCE.index(_block_kind(blk, block_type))
+                if best is None or prec > best[0]:
+                    best = (prec, val)
+            if best is not None:
+                out[k] = best[1]
+        return out
+    if not system:
+        return mapping
+    if section.endswith("Generator.py") or section == "patches":
+        block = block_of.get(section, "")
+        if _block_matches(block, block_type, system, emulator, core):
+            if not block or block == "global":
+                out = dict(mapping)  # global/legacy: everything
+            else:
+                prefix = block + "."
+                out = {k: v for k, v in mapping.items() if k.startswith(prefix)}
+        else:
+            out = {}
+        if all_blocks:  # legacy flat / [global] bare keys -> global
+            for k, v in mapping.items():
+                if not any(k.startswith(b + ".") for b in all_blocks):
+                    out[k] = v
+        return out
+    if section in ("config.files", "configs"):
+        out = {}
+        for k, v in mapping.items():
+            blk = block_of.get(f"{section}:{k}", block_of.get(section, ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out[k] = v
+        return out
+    if section == "runtime":
+        out = {"cmds": {}, "env": [], "prepend": []}
+        matched_any = False
+        for rid, ops in mapping.get("cmds", {}).items():
+            blk = block_of.get(f"runtime:cmds:{rid}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["cmds"][rid] = ops
+                matched_any = True
+        for env_item in mapping.get("env", []):
+            blk = block_of.get(f"runtime:env:{env_item}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["env"].append(env_item)
+                matched_any = True
+        for prep_item in mapping.get("prepend", []):
+            blk = block_of.get(f"runtime:prepend:{prep_item}", block_of.get("runtime", ""))
+            if _block_matches(blk, block_type, system, emulator, core):
+                out["prepend"].append(prep_item)
+                matched_any = True
+        return out if matched_any else {}
+    block = block_of.get(section, "")
+    if _block_matches(block, block_type, system, emulator, core):
+        return mapping  # always/legacy or a matching block
+    return {}
+
+
+def do_apply(profile_dir, name: str, target_root, backup_root, system: str | None = None):
+    profile_dir = Path(profile_dir)
+    target_root = Path(target_root)
+    backup_root = Path(backup_root)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
+
+    # per-system filter (block syntax): apply only the launched system's
+    # block (+ always + legacy). system=None -> everything (validate path).
+    # emulator/core are RESOLVED from the stock config (batocera.conf +
+    # configgen-defaults) — the gameStart hook receives them empty (the
+    # RAM patch hoists the hook before configgen resolves them,
+    # sitecustomize.py). Matched only by [emulator.X]/[core.X] blocks.
+    # PRE-pin resolution: drives the FILE-based selections only (keys,
+    # patches, configs, binaries). The emulator-pinning keys live in system
+    # blocks and must not feed back into their own block selection.
+    emulator, core = _resolve_emulator_core(system, target_root) if system else (None, None)
+    batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
+    patches = _filter_for_system(patches, system, block_of, "mameGenerator.py", blocks, emulator, core, block_type)
+    configs = _filter_for_system(configs, system, block_of, "config.files", blocks, emulator, core, block_type)
+    binaries = _filter_for_system(binaries, system, block_of, "binaries", blocks, emulator, core, block_type)
+    # RGS-15KHZ-EXT (runtime section): the WHOLE [runtime] section belongs
+    # to one block (block_of is per section name, like [binaries]), so one
+    # _filter_for_system call scopes the commands AND the env/prepend
+    # entries together ({} = block mismatch = stock behavior).
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, emulator, core, block_type)
+
+    # pre-clean (crash level 1): half-provided files from a previous
+    # session that ended without gameStop. Idempotent, no-op when clean —
+    # the recovery rule: the backup archive is the truth, restore it
+    # before applying fresh.
+    restore_configs(profile_dir, configs, target_root, backup_root, name)
+    restore_binaries(profile_dir, binaries, target_root, backup_root, name)
+    # RGS-15KHZ-EXT (runtime section): the DECLARED ids are pre-cleaned,
+    # not the filtered ones — an .applied record is the truth that the
+    # command ran once, so even a record stranded by a changed block
+    # match gets its undo before the fresh apply (self-healing; the
+    # remove path filters, its records were created by a matching apply).
+    undo_runtime(runtime.get("cmds", {}), backup_root, name)
+
+    # provide full configs + swap binaries + batocera keys + RAM patches
+    provide_configs(profile_dir, configs, target_root, backup_root, name)
+    swap_binaries(profile_dir, binaries, target_root, backup_root, name)
+    apply_batocera(batocera, backup_root, name)
+    # RGS-15KHZ-EXT (pin marker): the profile's OWN emulator/core
+    # declaration, handed to the launcher (configgen gives ES's -emulator
+    # argument priority over the conf — see PIN_STATE above).
+    apply_pin(system, batocera, name)
+    apply_patches(patches)
+    # RGS-15KHZ-EXT (runtime section): command ops in declaration order,
+    # then the in-process env marker (its own state: no archive, the
+    # configgen process is per launch — sitecustomize applies it).
+    apply_runtime(runtime_f.get("cmds", {}), backup_root, name)
+    apply_runtime_env(name, runtime_f.get("env", []), runtime_f.get("prepend", []))
+    # RGS-15KHZ-EXT (post-pin resolve): configgen resolves AT LAUNCH, AFTER
+    # this apply's own keys landed (the [mame] block pins mame.emulator=mame).
+    # The runtime consumers must match the launch that will actually run,
+    # not the pre-apply stock default (live 2026-09-10: a standalone-mame
+    # session carried the [emulator.libretro] retroarch keypatch — mis-scoped).
+    emulator, core = _resolve_emulator_core(system, target_root) if system else (None, None)
+    if system:
+        _write_resolve(backup_root, name, system, emulator, core)  # RGS-15KHZ-EXT (resolve-record, POST)
+    apply_keypatch(_filter_keypatch(keypatch, system, block_type, emulator, core),
+                   target_root, backup_root, name)
+    return True
+
+
+def do_remove(profile_dir, name: str, target_root, backup_root, system: str | None = None):
+    profile_dir = Path(profile_dir)
+    target_root = Path(target_root)
+    backup_root = Path(backup_root)
+    _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
+
+    # per-system filter (mirror of do_apply): with the launched system
+    # (gameStop passes it — first_script.sh remove_profile "$2"), only the
+    # ACTIVE block's keys are restored/removed with remove_missing, so a
+    # key of a block never applied to this game is never touched. Without
+    # a system (rollback path) everything is processed with the old
+    # skip-if-no-prev semantics.
+    if system:
+        # RGS-15KHZ-EXT (resolve-record): prefer the apply-time record —
+        # live conf may carry our own emulator flip (see helper docstring).
+        rec = _read_resolve(backup_root, name, system)
+        emulator, core = rec if rec is not None else _resolve_emulator_core(system, target_root)
+        batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
+
+    restore_configs(profile_dir, configs, target_root, backup_root, name)
+    restore_binaries(profile_dir, binaries, target_root, backup_root, name)
+    restore_batocera(batocera, backup_root, name, remove_missing=bool(system))
+    restore_patches(patches)
+    _em, _co = (emulator, core) if system else (None, None)
+    # RGS-15KHZ-EXT (runtime section): same judge as do_apply (the
+    # resolve-record lesson), then undo the recorded ids in REVERSE
+    # declaration order and drop the in-process env marker (the env dies
+    # with the configgen process — the marker must not outlive the
+    # session).
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, _em, _co, block_type)
+    undo_runtime(runtime_f.get("cmds", {}), backup_root, name)
+    restore_runtime_env()
+    restore_pin()
+    restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co),
+                     target_root, backup_root, name)
+    # RGS-15KHZ-EXT (genconfig-archive): the SAME patches filter as
+    # do_apply (same judge for apply and remove — the resolve-record
+    # lesson), then value-restore the wrapper `.config` archives.
+    restore_genconfig(_filter_for_system(patches, system, block_of, "mameGenerator.py",
+                                         blocks, _em, _co, block_type),
+                      target_root, backup_root, name)
+    with contextlib.suppress(OSError):  # RGS-15KHZ-EXT (resolve-record): record consumed
+        _resolve_record_path(backup_root, name).unlink()
+    return True
+
+
+# RGS-15KHZ-EXT (stock raster channel): the static spec gate. Tube safety
+# is SwitchRes's OWN job — the stock preset (arcade_15, the same one MAME/
+# RetroArch and the patched launcher compute through) governs every modeline;
+# this gate only guards OUR spec's static consistency: the channel's value
+# shape and one-timing-per-pool-name (profile-discipline 4: spec errors
+# never reach gameStart). Owner decision 2026-09-13: no external veto above
+# the API — if a computed raster is wrong, the preset is wrong, and the
+# preset is the one place to fix it.
+_RASTER_SHAPE = re.compile(r"([0-9]+)x([0-9]+)(i)?(?:\.([0-9.]+))?$")
+
+
+def _validate_rasters(batocera: dict):
+    """Every literal raster videomode value must be shape-valid and map to a
+    UNIQUE pool name at one timing (two keys must never compete for one pool
+    entry at different rates). max-*/empty/auto pass untouched (stock
+    channels)."""
+    seen = {}  # pool name -> full value
+    for key, defs in batocera.items():
+        if not key.endswith(".videomode"):
+            continue
+        for _blk, val in defs:
+            v = (val or "").strip()
+            if not v or v.startswith("max-") or v == "auto":
+                continue
+            if not _RASTER_SHAPE.fullmatch(v):
+                raise SpecError(
+                    f"{key}: invalid raster '{v}' (the channel speaks "
+                    "WxH[i][.RATE] — max-* forms stay stock)")
+            pool_name = v.split(".", 1)[0]
+            if seen.setdefault(pool_name, v) != v:
+                raise SpecError(
+                    f"pool-name collision '{pool_name}': '{seen[pool_name]}' "
+                    f"vs '{v}' — one pool entry, one timing")
+
+
+def do_validate(profile_dir: Path, name: str, target_root: Path):
+    """Static spec validation — called at install/verify, NEVER at gameStart."""
+    label, _desc, display_target, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
+    if not label:
+        raise SpecError("spec has no label")
+    if display_target not in ("crt", "lcd"):
+        raise SpecError(f"invalid [display] target: {display_target}")
+    _validate_rasters(batocera)
+    # RGS-15KHZ-EXT (runtime section): undo is MANDATORY — an <id> with
+    # .apply but no .undo (or vice versa) is a design error
+    # (profile-discipline 9) and fails HERE, at install/verify, never at
+    # gameStart (profile-discipline 4).
+    for rid, ops in runtime.get("cmds", {}).items():
+        if not ops.get("apply") or not ops.get("undo"):
+            raise SpecError(
+                f"[runtime] '{rid}': <id>.apply and <id>.undo are both "
+                "required (undo is mandatory — a change that cannot be "
+                "undone is a design error)")
+    configs, binaries = parse_mappings(profile_dir)
+    for rel in configs:
+        if not (profile_dir / "configs" / rel).is_file():
+            raise SpecError(f"configs file missing: {profile_dir}/configs/{rel}")
+    for rel in binaries:
+        if not (profile_dir / "binaries" / rel).is_file():
+            # binary is user-procured (official-script pattern): warn, not fail
+            print(f"  WARN: {profile_dir}/binaries/{rel} missing — "
+                  f"user must procure it (never shipped)")
+    for target, entries in keypatch.items():
+        p = Path(target) if target.startswith("/") else target_root / target
+        if p.is_file() and not p.read_text(errors="replace"):
+            raise SpecError(f"target file empty: {p}")
+        for _block, line in entries:
+            if "=" not in line:
+                raise SpecError(f"keypatch line without '=': {target}: {line}")
+            left = line.split("=", 1)[0].strip()
+            if "/" in left:
+                sect, _, k = left.partition("/")
+                if not sect.strip() or not k.strip():
+                    raise SpecError(
+                        "keypatch sectioned key malformed (want Section/Key): "
+                        f"{target}: {line}")
+    print(f"  spec OK: {name} — {label} ({display_target})")
+    return True
+
+
+def main():
+    if len(sys.argv) < 5:
+        print(__doc__)
+        return 1
+    cmd = sys.argv[1]
+    if cmd == "validate":
+        profile_dir, name, target_root = sys.argv[2:5]
+        pd, tr = Path(profile_dir), Path(target_root)
+        try:
+            do_validate(pd, name, tr)
+        except SpecError as e:
+            print(f"CRT-DUAL-MERGE: {e}", file=sys.stderr)
+            return 1
+        except Exception:
+            traceback.print_exc()
+            return 1
+        return 0
+    if len(sys.argv) < 6:
+        print(__doc__)
+        return 1
+    profile_dir, name, target_root, backup_root = sys.argv[2:6]
+    system = sys.argv[6] if len(sys.argv) > 6 else None
+    pd, tr, br = Path(profile_dir), Path(target_root), Path(backup_root)
+    try:
+        if cmd == "apply":
+            do_apply(pd, name, tr, br, system)
+        elif cmd == "remove":
+            do_remove(pd, name, tr, br, system)
+        else:
+            print(f"unknown command: {cmd}", file=sys.stderr)
+            return 1
+    except SpecError as e:
+        print(f"CRT-DUAL-MERGE: {e}", file=sys.stderr)
+        return 1
+    except Exception:
+        traceback.print_exc()
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

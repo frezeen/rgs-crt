@@ -1,0 +1,5 @@
+system: nesica
+name: 'Vampire Savior: The Lord of Vampire'
+
+env:
+  WAL_NESICA_REG: "Resolution=0"

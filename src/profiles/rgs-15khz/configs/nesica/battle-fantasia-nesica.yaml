@@ -1,0 +1,6 @@
+system: typex
+name: Battle Fantasia (NESiCAxLive)
+
+env:
+  WAL_NESICA_REG: "Resolution=0"
+  WAL_D3D9_FULLSCREEN_SIZE: ""
