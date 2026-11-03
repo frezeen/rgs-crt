@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-04
+
+- **Taito Type X2: King of Fighters Maximum Impact Regulation A now draws its intro on the tube.** The title runs direct on the 640x480i raster (`gamescope` off for this game alone), which is what lets the runner's patched ddraw put its CRI Sofdec intro — a DirectDraw YUY2 overlay — on the real screen instead of on a nested swapchain: on the glass the intro comes up and the frame keeps being presented. The title still closes by itself after about half a minute inside a Wine OpenGL thread fault, so it is not certified: `docs/emulators-status.md` keeps it OPEN.
+
 ## 2026-11-03
 
 - **Profile picker: two pictures instead of two buttons.** The launch-time profile chooser now shows the arcade cabinet for the 15 kHz CRT profile and a flat-panel TV for the LCD one, each with its name and description ("4:3 CRT 15 kHz", "modern LCD/TV 16:9 high definition"), and a large up-arrow under the selected panel as the selection indicator. The artwork is transparent and composites on the picker's black raster, so the tube shows the cabinet and the TV and nothing else; the unselected picture steps back, dimmed.
@@ -33,15 +37,3 @@
 - **ArcadePC: Pop Moto direct 3D startup sequence.** Configured custom 3D rasterizer startup commands and canvas scaling to launch smoothly and fill the 15kHz CRT display.
 - **ArcadePC: The House of the Dead III high-resolution raster scaling.** High-resolution 1280x1024 PC rendering scaled cleanly to native 640x480i CRT raster, preserving smooth arcade frame pacing without downscaling artifacts.
 - **Clean emulator exit and resource release on Windows arcade games.** Background helper daemons and temporary wine filesystem mounts are now automatically unmounted and terminated upon game exit, preventing locked loop devices and ensuring smooth transitions back to EmulationStation without hangs.
-
-## 2026-10-27
-
-- **NESiCAxLive: Space Invaders authentic 3:4 vertical arcade display with dedicated side bezels.** Configured authentic 3:4 playfield proportions on 4:3 15kHz CRT monitors, filling the symmetrical 114-pixel side pillar margins with dedicated arcade cabinet bezels via native daemonized overlay without Gamescope downscaling or input latency.
-- **NESiCAxLive: SD resolution direct rendering and crash fixes.** Resolved startup crashes and eliminated letterboxing across native SD titles: **NESiCAxLive: Exception** runs direct native 4:3 (640x480i) bypassing the 720p crash; **NESiCAxLive: Tottemo E Mahjong** boots directly into 640x480i fixing the stock 1280x800 template crash; **NESiCAxLive: Trouble Witches AC Episode 1** runs native 640x480i direct; and **NESiCAxLive: Yatagarasu - Attack on Cataclysm** runs direct borderless at 640x480i with 16:9 side banners cropped cleanly.
-- **ArcadePC: Bug Busters full-screen 4:3 direct launch with video decoding.** Configured direct 640x480i full-screen playback on 15kHz CRT with DirectShow MPEG-1 video decoding re-enabled under Wine, allowing the game's animated intro and title sequence to play smoothly without stalling.
-- **ArcadePC: Bullseye / Crack Shot authentic lightgun arcade bezels.** Added dedicated 16:9 arcade cabinet side bezels for **ArcadePC: Bullseye** and **ArcadePC: Crack Shot**, preserving authentic CRT arcade artwork without artificial flat-panel distortion.
-- **Taito Type X: 3D Cosplay Mahjong authentic 3:4 vertical arcade display with dedicated side bezels.** Configured 1:1 direct 3:4 raster rendering on 640x480i CRT without horizontal squishing or Gamescope lag, framing the 140-pixel side borders with the game's authentic Japanese calligraphy and character artwork.
-- **RGS 43.75 and 43.72 system compatibility.** Layer certified and fully aligned against live RGS 43.72 and 43.75 updates, ensuring display services, launch hooks, and update feed checks operate reliably across upgrades.
-- **Display service and diagnostic logging consolidation.** Standardized VNC remote access and diagnostic tools to record logs in `/userdata/system/logs/vnc.log`, keeping system logging uniform.
-- **EmulationStation on-screen update notifications.** The boot service now asynchronously checks for remote updates once EmulationStation and networking are active, displaying a modal message box directly inside EmulationStation when an RGS-CRT layer update is available, or advising the user when a newer base RGS system update must be installed first.
-- **Deploy and session unmount resilience.** The deployment sync script now automatically clears and lazy-unmounts any active squashfs overlay mounts if an emulator session is terminated mid-game, preventing busy device collisions on the next game launch.
