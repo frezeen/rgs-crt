@@ -1,0 +1,16 @@
+# The King of Fighters XII (SNK, Taito Type X2)
+# DirectShow opening.wmv video playback: the game looks the video decoder up
+# by name ("WMVideo Decoder DMO") to splice SampleGrabber onto its out0;
+# Wine's FindFilterByName returns the file reader instead, leaving SampleGrabber
+# disconnected and video stuck on a black screen. WAL_DSHOW_FIND_FILTER: "1"
+# intercepts FindFilterByName and provides the video decoder filter.
+# WAL_D3D9_FULLSCREEN_SIZE: 1280x720 matches the gamescope 16:9 canvas so
+# CreateDevice succeeds directly instead of failing with 0x8876086a.
+system: typex
+name: The King of Fighters XII
+
+env:
+  WAL_DSHOW_FIND_FILTER: "1"
+  WAL_DSHOW_TRACE: "1"
+  WAL_D3D9_FULLSCREEN_SIZE: 1280x720
+

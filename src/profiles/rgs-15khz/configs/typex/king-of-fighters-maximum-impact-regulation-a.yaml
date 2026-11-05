@@ -1,26 +1,17 @@
 # King of Fighters Maximum Impact Regulation A (SNK, Taito Type X2) — the rest of
 # the profile stays the stock template
 # (systemprofiles/typex/king-of-fighters-maximum-impact-regulation-a.yaml).
-# This override makes the title's end visible: it loads, renders (a 640x480
-# fullscreen d3d8 device, valid JVS) and then the session is over, returning to
-# ES with no error on screen. The payload's exit trace says nothing about it,
-# so the witness is the Wine server's own trace (see wine_debug below); the
-# launcher's default `wine_debug: "-all"` silences the runner's errors too.
+# The CRI Sofdec video player uses a DirectDraw YUY2 overlay on wined3d GL.
+# Mesa's multithreaded OpenGL (mesa_glthread) suffers a TLS fault in Wine WOW64
+# (__pthread_getspecific+0xf SIGSEGV in gl0), while DRI3 vblank page flips on
+# 640x480i interlaced mode trigger CS rejection in amdgpu (CS rejected -2).
+# mesa_glthread: "false", LIBGL_DRI3_DISABLE: "1" and vblank_mode: "0" ensure
+# stable, synchronous DRI2 presentation without driver drops.
 system: typex
 name: King of Fighters Maximum Impact Regulation A
 
-# Wine's exception dump. The session ends with no payload exit line and no
-# Windows request at all (the server trace acquitted every Windows process over
-# two runs: no `terminate_process` from or to game.exe), while ftrace names a
-# SIGSEGV (SEGV_MAPERR) in a thread of the game called `game.exe:gl0`. What is
-# left to read is the fault itself: `+seh` makes Wine print the unhandled
-# exception (fault address, faulting eip, module and offset, backtrace), and
-# `+ddraw` says whether the DirectDraw YUY2 overlay of the CRI Sofdec intro is
-# created and dequeued at all.
-wine_debug: "-all,+seh,+err,+ddraw"
-
 env:
-  # The payload traces only an end that passes through the game's own ntdll
-  # stub (`exit: process ends from the executable's +0x…` / `exit:
-  # NtTerminateProcess(…)`) — kept as the process-side half of the two.
-  WAL_TRACE_EXIT: "1"
+  mesa_glthread: "false"
+  MESA_GLTHREAD: "false"
+  vblank_mode: "0"
+  LIBGL_DRI3_DISABLE: "1"
