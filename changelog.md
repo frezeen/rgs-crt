@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-06
+
+- **Sega Chihiro: interlaced 480i raster pinned for 15 kHz CRT.** All Chihiro arcade titles draw at 640x480@60p; pinning `chihiro.videomode = 640x480i` ensures clean interlaced presentation on 15 kHz tubes without mode switching delays.
+- **RGS utility menu: direct 480i canvas.** Shell utilities and maintenance scripts launched from the +rgs menu now stay on the 640x480i canvas with scaled xterm fonts, preventing unnecessary display mode reinitialization.
+
 ## 2026-11-05
 
 - **Taito Type X2: certified 100% on 15 kHz CRT (25/25 titles, owner verde).** Every dump in `/userdata/roms/typex2/` was launched one by one on the glass. Three titles carry their own canvas: Chase H.Q. 2 and Wacky Races declare an 800x600 fullscreen 4:3 device (payload note / dump `wr.ini`) and run nested 800x600 with the 640x480 output raster so Wine scales nothing and the picture is not distorted; Cyber Diver (Source engine, picture laid out for the window's client size) pins the payload's declared 1360x768 gamescope canvas. The rest run on the class 1280x720 → 864x486 stretch canvas, plus the already-certified exceptions (Elevator Action Death Parade portrait direct with its own cabinet strips, KOF MIRA direct 640x480, KOF XII DirectShow WMV shim).
