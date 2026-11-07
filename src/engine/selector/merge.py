@@ -1233,19 +1233,34 @@ PIN_STATE = "/tmp/crt-dual/pin"
 def apply_pin(system: str, batocera: dict, name: str) -> None:
     """Write the emulator/core pin marker for the launched system, from
     the PROFILE's own declarations only (<system>.emulator /
-    <system>.core). No declaration = no marker = stock behaviour (ES's
-    choice decides)."""
+    <system>.core and per-game <system>["<game>"].emulator / .core).
+    No declaration = no marker = stock behaviour (ES's choice decides)."""
     p = Path(PIN_STATE)
     if not system:
         p.unlink(missing_ok=True)
         return
+    lines = [f"profile={name}"]
+    prefix = f"{system}["
+    game_keys = set()
+    for k in batocera:
+        if k.startswith(prefix) and (k.endswith(".emulator") or k.endswith(".core")):
+            target = k.rsplit(".", 1)[0]
+            game_keys.add(target)
+    for target in sorted(game_keys):
+        g_emu = str(batocera.get(f"{target}.emulator", "") or "")
+        g_core = str(batocera.get(f"{target}.core", "") or "")
+        if g_emu or g_core:
+            lines.append(f"pin {target} {g_emu or '-'} {g_core or '-'}")
     emu = str(batocera.get(f"{system}.emulator", "") or "")
     core = str(batocera.get(f"{system}.core", "") or "")
-    if not emu and not core:
+    if emu or core:
+        lines.append(f"pin {system} {emu or '-'} {core or '-'}")
+    if len(lines) == 1:
         p.unlink(missing_ok=True)
         return
-    atomic_write(p, f"profile={name}\npin {system} {emu or '-'} {core or '-'}\n")
-    print(f"  pin: {system} emulator={emu or '-'} core={core or '-'} -> {p}")
+    atomic_write(p, "\n".join(lines) + "\n")
+    for ln in lines[1:]:
+        print(f"  {ln} -> {p}")
 
 
 def restore_pin() -> None:

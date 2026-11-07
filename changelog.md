@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-07
+
+- **Global VR: the whole arcade roster gets its 15 kHz canvas.** All 26 Global VR titles now declare the picture they ship: the widescreen 16:9 lineup (**Aliens Extermination**, the **NASCAR** series, **Redline Rampage**, **Twisted NSR**, **NFS Carbon**, **Blazing Angels**, **Far Cry Paradise Lost**, **Justice League**, **The Swarm**, **UltraPin**) scales onto the 4:3 glass edge to edge, while the **Beach Head** series draws direct at native 640x480i with no compositor overhead. Titles that ship their own native loader (**America's Army**, **Puck Off**, **Madden NFL Football Season 2**) now run on it per game instead of inheriting the system default. Configured from the packs; the tube pass on all 26 titles comes next.
+- **Per-game loader choices are honoured.** A profile's per-game emulator/core choice now wins over the system default even when the frontend passes its own loader flag, so a single title can run on a different loader from its siblings.
+- **UNIS Arcade Machines: per-title 15 kHz canvas for all nine cabinets.** Every UNIS cabinet in the package is an HD LCD, so each title now renders on the canvas it actually declares and the 4:3 tube shows it stretched edge to edge (the same declared trade as the other HD arcade systems): 1920x1080 for **After Dark**, **Crazy Ride**, **Fantasy Soccer**, **Night Hunter**, **Raccoon Rampage** and **Wicked Tuna**; 1280x720 for **Dino Invasion** and **Mighty Moto**. **Elevator Action Invasion** is the exception: its portrait 1080x1920 picture is composed inside the game's own 1280x800 cabinet bezel, and the whole cabinet frame is squeezed onto the 4:3 raster — never cropped. The games keep running on stock Wine with RGS's per-game runners (the loader's UNIS profiles need a different dump format).
+
 ## 2026-11-06
 
 - **Sega Chihiro: interlaced 480i raster pinned for 15 kHz CRT.** All Chihiro arcade titles draw at 640x480@60p; pinning `chihiro.videomode = 640x480i` ensures clean interlaced presentation on 15 kHz tubes without mode switching delays.
@@ -38,16 +44,3 @@
 - **KonamiPC: researched per-game canvas block for the 15 kHz CRT.** All 29 titles now carry explicit canvases (native 640x480 4:3 direct where correct, exact per-title canvases like GTI Club 1360x768 and Cooper's 9 1280x512, HD 16:9 on the shared 720p canvas) filling the tube without distortion.
 - **Lindbergh: host network no longer frozen by the title's AM OS.** After Burner Climax reconfigures the NIC onto an arcade subnet; the host interface is now shielded so NFS-mounted roms remain reachable and the box no longer locks up.
 
-## 2026-10-31
-
-- **ArcadePC: Sega Rally 2 25th Anniversary [4-3] runs on the solo 15 kHz CRT.** Its D3D layer dereferences NULL when its device is created with the LCD disabled (page fault in MGameD3D.dll); hosting the title under a 4:3 gamescope canvas (1280x960 → 640x480) with authored dgVoodoo (FullScreenMode=true, ScalingMode=stretched) gives it its own output so the disabled CRT never reaches the game — full-frame 4:3 picture, no letterbox.
-- **ArcadePC: Senninha GP runs on the solo 15 kHz CRT.** The stock wine-tkg runner ships a 4 KB ddraw.dll stub with no exports, so DirectDrawCreateEx is unimplemented and the title dies at startup; running it under the wine-9.17 runner (full 32-bit ddraw) with the same 4:3 gamescope canvas restores the picture with the LCD off.
-- **Cleaner teardown on game launch.** Orphaned Windows processes and stale wine mount points are now cleared at gameStart, preventing locked loop devices and hangs when re-launching a title.
-
-## 2026-10-29
-
-- **ArcadePC: Family Guy Bowling Arcade canvas adaptation.** Configured high-definition 16:9 widescreen canvas adaptation scaled cleanly to 640x480 on 15kHz CRT monitors.
-- **ArcadePC: Friction widescreen rendering.** High-definition 16:9 arcade canvas configured to scale edge-to-edge onto the 4:3 15kHz tube.
-- **ArcadePC: Pop Moto direct 3D startup sequence.** Configured custom 3D rasterizer startup commands and canvas scaling to launch smoothly and fill the 15kHz CRT display.
-- **ArcadePC: The House of the Dead III high-resolution raster scaling.** High-resolution 1280x1024 PC rendering scaled cleanly to native 640x480i CRT raster, preserving smooth arcade frame pacing without downscaling artifacts.
-- **Clean emulator exit and resource release on Windows arcade games.** Background helper daemons and temporary wine filesystem mounts are now automatically unmounted and terminated upon game exit, preventing locked loop devices and ensuring smooth transitions back to EmulationStation without hangs.

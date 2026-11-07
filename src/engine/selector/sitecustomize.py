@@ -113,10 +113,9 @@ def _apply_runtime_env() -> None:
 PIN_STATE = Path('/tmp/crt-dual/pin')
 
 
-def _pin_declared(system_name: str) -> tuple[str, str]:
-    """(emulator, core) the ACTIVE profile declares for this system;
+def _pin_declared(system_name: str, rom: str = "") -> tuple[str, str]:
+    """(emulator, core) the ACTIVE profile declares for this system or game;
     ('', '') = not declared (stock). Never raises."""
-    emu = core = ''
     try:
         active = _active_profile()
         if not active or not PIN_STATE.is_file():
@@ -127,23 +126,32 @@ def _pin_declared(system_name: str) -> tuple[str, str]:
         if lines[0][len('profile='):].strip() != active:
             _log.warning("crt-dual: pin marker profile mismatch (%s) — skipped", lines[0])
             return ('', '')
+        pins = {}
         for line in lines[1:]:
-            if not line.startswith('pin '):
-                continue
-            parts = line.split()
-            if len(parts) < 4 or parts[1] != system_name:
-                continue
-            emu = '' if parts[2] == '-' else parts[2]
-            core = '' if parts[3] == '-' else parts[3]
-            break
+            tokens = line.rsplit(maxsplit=2)
+            if len(tokens) == 3 and tokens[0].startswith('pin '):
+                target = tokens[0][len('pin '):].strip()
+                pins[target] = ('' if tokens[1] == '-' else tokens[1],
+                                '' if tokens[2] == '-' else tokens[2])
+        if rom:
+            rom_path = Path(rom)
+            key_exact = f'{system_name}["{rom_path.name}"]'
+            key_stem = f'{system_name}["{rom_path.stem}"]'
+            if key_exact in pins:
+                return pins[key_exact]
+            if key_stem in pins:
+                return pins[key_stem]
+        if system_name in pins:
+            return pins[system_name]
     except Exception as e:  # patch-discipline: never break a launch
         _log.warning("crt-dual: pin marker read failed (%s): %s", PIN_STATE, e)
-    return (emu, core)
+    return ('', '')
 
 
-def _apply_pin(args, system_name: str) -> None:
+def _apply_pin(args, system_name: str, rom: str = "") -> None:
     """Make the launcher's emulator/core the PROFILE's declaration."""
-    emu, core = _pin_declared(system_name)
+    rom_target = rom or getattr(args, 'rom', '') or ''
+    emu, core = _pin_declared(system_name, rom=str(rom_target))
     if not emu and not core:
         return
     try:
@@ -151,8 +159,9 @@ def _apply_pin(args, system_name: str) -> None:
             args.emulator = emu
         if core:
             args.core = core
+        label = f'{system_name}["{Path(rom_target).name}"]' if rom_target else system_name
         _log.info("crt-dual: pin %s -> emulator=%s core=%s (profile decision)",
-                  system_name, args.emulator, args.core)
+                  label, args.emulator, args.core)
     except Exception as e:  # patch-discipline: never break a launch
         _log.warning("crt-dual: pin apply failed: %s", e)
 
@@ -205,7 +214,7 @@ def _patch_emulatorlauncher(module):
         # es_systems command) would otherwise win over the conf
         # (configgen/Emulator.py:198-202) and the profile's pin would be
         # a silent no-op on those systems.
-        _apply_pin(args, system_name)
+        _apply_pin(args, system_name, rom=str(original_rom or rom or ''))
         module.callExternalScripts = _patched_ces
         # RGS-15KHZ-EXT (runtime env marker): AFTER the gameStart hooks
         # (they ran merge.py apply, which wrote /tmp/crt-dual/runtime-env)
