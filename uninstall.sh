@@ -46,8 +46,22 @@ fail() {
 [ "$(id -u)" = "0" ] || fail "run as root"
 
 # ── Guard: no game session may be active ──
-if [ -f "$TMP_DIR/crt-dual/profile" ] || [ -f "$TMP_DIR/crt-dual-mode" ]; then
-	if pgrep -x retroarch >/dev/null 2>&1 || pgrep -f "[e]mulatorlauncher -system" >/dev/null 2>&1; then
+# Self-update exception: the RGS-CRT CHECK tool runs INSIDE its own game
+# session (ES launches it as +rgs via emulatorlauncher, so the hook writes
+# the guard files for the tool itself) — an automatic update from the tool
+# would ALWAYS deadlock on this guard. The tool proves the session is its
+# own by carrying RGS15_ALLOW_ACTIVE_SESSION=1 on the tool-update call
+# chain only (rgs_crt_check.sh sets it; get.sh inherits it here); a
+# hand-run get.sh over SSH never carries it and still refuses. Loud either
+# way, never silent.
+# Process patterns match deploy.sh (generic emulatorlauncher, never the
+# "-system"-adjacent shape that missed real cmdlines; arcade-launcher
+# covers WAL) — a session the patterns miss but the files catch still
+# refuses when a player process is alive.
+if [ "${RGS15_ALLOW_ACTIVE_SESSION:-0}" = "1" ]; then
+	echo "  self tool session allowed (RGS15_ALLOW_ACTIVE_SESSION=1) — updating from inside the check tool"
+elif [ -f "$TMP_DIR/crt-dual/profile" ] || [ -f "$TMP_DIR/crt-dual-mode" ]; then
+	if pgrep -x retroarch >/dev/null 2>&1 || pgrep -f "[e]mulatorlauncher" >/dev/null 2>&1 || pgrep -f "[a]rcade-launcher" >/dev/null 2>&1; then
 		fail "a game session is active — quit the game first (refusing to pull the runtime)"
 	fi
 fi

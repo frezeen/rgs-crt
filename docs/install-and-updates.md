@@ -238,7 +238,10 @@ installs one on the spot if it is certified for this box, re-certifies
 the layer against the RGS version the box runs, and shows each step as it
 happens, then the verdict.
 Nothing reboots on its own — an update installs in place, and you
-restart by hand when RGS says a reboot is due.
+restart by hand when RGS says a reboot is due. Opening the tool counts
+as a game session (it runs as a game entry itself), and the update it
+installs is allowed to proceed from inside that session — you never
+quit the tool to let its own update in.
 
 | Verdict | Meaning | Your options |
 | --- | --- | --- |

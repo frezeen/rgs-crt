@@ -1298,25 +1298,53 @@ tool-update)
 	case "$_feed" in
 	UPDATE)
 		log "update: found $_feed_ver"
+		if [ "${RGS15_ALLOW_ACTIVE_SESSION:-0}" = "1" ]; then
+			log "update: self tool session (the game guard seen below is this tool — bypass armed)"
+		fi
 		log "update: download"
 		log "update: install"
 		_src="${RGS15_SRC:-$(cat "$PKG/install-source" 2>/dev/null || true)}"
 		_get="${RGS15_UPDATE_GET:-$_src/get.sh}"
+		# get.sh's whole output lands in a capture file first: on the
+		# success path it is appended to the log untouched, on failure the
+		# tail is mirrored onto "update:" lines for the tool window
+		# (rgs_crt_check shows those only). mktemp failure = the /tmp
+		# naming is still ours to own.
+		if ! _cap="$(mktemp /tmp/rgs-crt-get-cap.XXXXXX 2>/dev/null)"; then
+			_cap="/tmp/rgs-crt-get-cap.$$"
+		fi
 		if [ -n "$_src" ] && [ -f "$_get" ]; then
 			if [ -e "$_src/.git" ]; then
 				log "update: dev worktree detected ($_src/.git exists) — skipping get.sh release install"
-			elif bash "$_get" >>"$LOG" 2>&1; then
+			elif bash "$_get" >"$_cap" 2>&1; then
+				cat "$_cap" >>"$LOG" 2>/dev/null || true
 				log "update: installed $_feed_ver"
 				_installed=1
 			else
 				_rc=$?
+				cat "$_cap" >>"$LOG" 2>/dev/null || true
 				log "update: ERROR get.sh failed (rc=$_rc, $_get) — the version is NOT re-labelled"
+				# The tool window shows ONLY the update:-prefixed log
+				# lines (rgs_crt_check tail_log), so get.sh's own output
+				# ("ERROR: …" on stderr) would never reach the screen —
+				# mirror the last lines of its capture here: the exact
+				# fail() line plus the phase context before it, without
+				# needing the log by hand.
+				if [ -s "$_cap" ]; then
+					while IFS= read -r _dline || [ -n "$_dline" ]; do
+						[ -n "$_dline" ] || continue
+						log "update:  | $(printf '%s' "$_dline" | cut -c1-90)"
+					done < <(tail -n 6 "$_cap")
+				else
+					log "update:  | (no output from get.sh — died at rc=$_rc before printing; run $_get by hand)"
+				fi
 				_pending=1
 			fi
 		else
 			log "update: ERROR no usable get.sh (src='${_src:-?}' get='${_get:-?}') — run get.sh from the project folder by hand"
 			_pending=1
 		fi
+		rm -f "$_cap" 2>/dev/null || true
 		;;
 	*)
 		# CURRENT / BLOCKED / OFFLINE (and any unknown word): never

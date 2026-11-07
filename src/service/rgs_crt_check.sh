@@ -231,10 +231,16 @@ _PYPID=$!
 # 2. The automatic flow: feed check -> install a newer certified release
 #    via get.sh -> certify -> on green the version rises to the RGS it
 #    just certified. RGS15_FEED_ALLOW_NET=1 is the feed probe's opt-in.
+#    RGS15_ALLOW_ACTIVE_SESSION=1 proves the game session get.sh will see
+#    is this tool itself (ES launches the tool as +rgs via emulatorlauncher,
+#    so the hook writes the guard files for us) — without it the OLD
+#    uninstall inside get.sh deadlocks on its own game guard and no
+#    automatic update from the tool can ever install. A hand-run get.sh
+#    over SSH never carries it and still refuses mid-game.
 #    No reboot. stdout is the verdict (GREEN|RED); rc 2 = certified but
 #    the install failed (loud in the log, no re-label).
 _rc=0
-_verdict="$(RGS15_FEED_ALLOW_NET=1 bash "$SVC" tool-update 2>/dev/null)" || _rc=$?
+_verdict="$(RGS15_FEED_ALLOW_NET=1 RGS15_ALLOW_ACTIVE_SESSION=1 bash "$SVC" tool-update 2>/dev/null)" || _rc=$?
 [ "$_verdict" = "GREEN" ] || _verdict="RED"
 
 # 3. Compose the outcome + rows and hand them to the window. The verdict

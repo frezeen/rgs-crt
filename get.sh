@@ -127,6 +127,11 @@ log "coherence: archive VERSION matches ($VERSION)"
 
 # ── c) installed? run the OLD uninstall from $SRC first ($SRC resolved
 # to the recorded install folder above, so this is the right old tree) ──
+# Self-update: when the check tool drives this chain it exports
+# RGS15_ALLOW_ACTIVE_SESSION=1 (its own game session is the one the
+# guard would see); the variable inherits into the OLD uninstall below,
+# which honours it. A hand run over SSH never carries it and still
+# refuses mid-game — nothing to pass explicitly, the env is the channel.
 if [ -d "$PKG/src" ]; then
 	[ -x "$SRC/uninstall.sh" ] \
 		|| fail "installed ($PKG/src exists) but $SRC/uninstall.sh is missing — refusing to strand the box (inspect by hand)"
