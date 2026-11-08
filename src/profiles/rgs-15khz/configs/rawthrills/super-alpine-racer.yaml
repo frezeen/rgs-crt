@@ -1,0 +1,6 @@
+system: rawthrills
+name: Super Alpine Racer
+
+env:
+  WAL_BEZEL: ""
+
