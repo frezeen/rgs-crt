@@ -1,0 +1,6 @@
+system: adrenaline
+name: Shooty Skies
+
+env:
+  WAL_BEZEL: ""
+

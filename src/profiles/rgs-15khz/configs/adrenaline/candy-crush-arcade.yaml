@@ -1,0 +1,6 @@
+system: adrenaline
+name: Candy Crush Arcade
+
+env:
+  WAL_BEZEL: ""
+

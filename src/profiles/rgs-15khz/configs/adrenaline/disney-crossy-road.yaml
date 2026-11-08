@@ -1,0 +1,6 @@
+system: adrenaline
+name: Disney Crossy Road
+
+env:
+  WAL_BEZEL: ""
+

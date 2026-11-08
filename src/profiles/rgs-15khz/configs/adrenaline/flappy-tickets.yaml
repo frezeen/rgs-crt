@@ -1,0 +1,6 @@
+system: adrenaline
+name: Flappy Tickets
+
+env:
+  WAL_BEZEL: ""
+

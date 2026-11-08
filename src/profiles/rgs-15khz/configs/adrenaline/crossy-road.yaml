@@ -1,0 +1,6 @@
+system: adrenaline
+name: Crossy Road
+
+env:
+  WAL_BEZEL: ""
+
