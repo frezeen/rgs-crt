@@ -165,7 +165,8 @@ def game_window(x11, d):
             if window_name(x11, d, win) == PICKER_TITLE:
                 continue
             if attrs.width * attrs.height * 2 >= sw * sh \
-                    or (attrs.width >= 640 and attrs.height >= 480):
+                    or (attrs.width >= 640 and attrs.height >= 480) \
+                    or (attrs.height >= 400 and attrs.width >= 240):
                 if kids:
                     x11.XFree(kids)
                 return win
@@ -306,6 +307,8 @@ def stop():
 
 
 def start(image_path, game_token=None, strip_w=None):
+    if game_token and process_with(game_token) is None:
+        sys.exit(0)
     stop()
     pid = os.fork()
     if pid > 0:
