@@ -130,3 +130,11 @@ accusation against the platform this project is a gift to.
 - Not ours (the page's inclusion test): reproduces on clean stock RGS; zero layer files involved.
 - Suggested fix: add the missing hyphen ` - ` in `batocera.conf` or declare `segarw.emulator = windows-arcade-loader` in `es_systems_segarw.cfg`.
 
+
+## 8. Global VR .NET 1.1: the frontend dies on the stock `dotnet11` prefix, and its WMV intros never present
+
+- What you see: Madden NFL Football Season 2 and the other .NET Global VR titles (NASCAR Racing, NASCAR Team Racing, PGA Tour Golf Team Challenge, Redline Rampage, Twisted Nitro Stunt Racing, Need for Speed Underground/Carbon) show a black screen and never reach their attract screen.
+- Measured (2026-11-08, stock RGS on LCD): the stock `wine-prefix/dotnet11` is prepared under Wine's new WoW64 mode (`wow64.dll`); the mixed-mode .NET 1.1 frontend (`gvr\shell\shell.exe`) dies with `StackOverflowException` while unwinding through `wow64.dll`, before it draws its first frame. The `.NET 1.1 SP1` CLR does not change it.
+- Measured (workaround, not shipped): on a prefix prepared under the legacy WoW64 path (Wine 11 `GE-Proton11-10`, `wow64: false`) the frontend starts, but the WMV3 intro movies never present — the DirectShow renderer stays on the first frame with the native `wmvdmod` decoder, with `winegstreamer` (`asfdemux` + `avdec_wmv3`) and with native LAVFilters + `devenum` (all three loaded in the process, verified from `/proc/<pid>/maps`); `Wine-GE-Proton7-43` does not start the game at all.
+- Not ours (the page's inclusion test): the `StackOverflowException` reproduces on clean stock RGS with no layer file involved; the movie stall reproduces with the stock runner and stock prefix contents.
+- Suggested fix: prepare `dotnet11` under a WoW64 mode the .NET 1.1 runtime survives, and ship a DirectShow video renderer that presents under the WAL window (or re-encode the WMV3 intros to a format the stock graph plays).
