@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-08
+
+- **Global VR: the arcade roster is certified on the 15 kHz tube.** Every Global VR title that starts on stock RGS now plays on the CRT: the widescreen 16:9 lineup (**Aliens Extermination**, **Blazing Angels**, **Far Cry Paradise Lost**, **Justice League**, **The Swarm**) fills the 4:3 glass edge to edge, the **Beach Head** series draws direct at its native 640x480i with no compositor in the path, and the native Linux titles (**America's Army**, **Puck Off**) keep their own loader. Eight dumps do not start even on stock RGS with an LCD panel — **Madden NFL**, **NASCAR Racing**, **NASCAR Team Racing**, **Need for Speed Carbon**, **Need for Speed Underground**, **PGA Tour Golf Team Challenge**, **Redline Rampage** and **Twisted** — and are recorded as such instead of being patched around here.
+- **UltraPin: the table fills the tube.** The pinball front-end builds the cabinet's own two-monitor desktop (2640x1024) and the loader can only show the playfield monitor's slice, so the title now declares that monitor as its canvas (1280x1024 → 640x480): the table fills the glass at its own proportions instead of sitting in a corner. The table selector keeps the front-end's own narrow, left-anchored preview — that layout belongs to the game, not to the display layer.
+
 ## 2026-11-07
 
 - **The check tool now installs its own update without quitting.** Opening **RGS-CRT CHECK & UPDATE** runs as a game entry itself, and the layer update refused to install while any game was open — including the tool. The offered release now installs in place from inside the tool; nothing reboots on its own.
