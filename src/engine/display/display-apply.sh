@@ -375,11 +375,13 @@ _legs=$_batch_legs
 [ -n "$_clear_out" ] && _legs=$(( _legs + 1 ))
 
 # Nessuna gamba da scrivere = l'unica cosa fuori e' la post-condizione SCREEN.
-# Non si scrive (non c'e' nulla che la sistemi) e non si finge verde: si urla,
-# e la cosa si vede. Uno SCREEN che segue gli output non arriva mai qui.
+# In dry run non si scrive (non c'e' nulla che la sistemi direttamente nel delta);
+# in --apply si procede perche' il repair (off->on) riallinea il framebuffer al piano.
 if [ "$_legs" -le 0 ]; then
-	echo "display-apply: LOUD FAILURE — mismatch con zero gambe scrivibili ($mismatch): lo schermo segue gli output, quindi non c'e' cosa scrivere" >&2
-	exit 1
+	if [ "$mode" != "--apply" ]; then
+		echo "display-apply: LOUD FAILURE — mismatch con zero gambe scrivibili ($mismatch): lo schermo segue gli output, quindi non c'e' cosa scrivere" >&2
+		exit 1
+	fi
 fi
 
 if [ "$mode" != "--apply" ]; then
@@ -409,8 +411,7 @@ for _o in $_clear_out; do
 done
 if [ "$_batch_legs" -gt 0 ]; then
 	_err=$("${cmd[@]}" 2>&1) || {
-		echo "display-apply: batch FAILED: $_err" >&2
-		exit 1
+		echo "display-apply: batch FAILED ($mismatch): $_err — fallthrough to repair" >&2
 	}
 fi
 # ES tiene la geometria VECCHIA finche' non gliela si cambia: la finestra resta
