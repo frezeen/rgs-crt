@@ -234,6 +234,33 @@ def _patch_emulatorlauncher(module):
     return True
 
 
+def _patch_vpinball_table_ini(module) -> bool:
+    """Map 4:3 resolutions (such as 640x480 on CRT) to .ini1600x1200 table ini variant,
+    preventing vpinballTableIni from falling back to 16:9 .inifhd."""
+    orig_suffix = getattr(module, '_suffixForResolution', None)
+    if orig_suffix is None:
+        _log.warning("crt-dual: vpinballTableIni._suffixForResolution not found")
+        return False
+
+    def patched_suffixForResolution(gameResolution):
+        active = _active_profile()
+        if active.startswith('rgs-15khz'):
+            try:
+                w = gameResolution.get('width', 0) if isinstance(gameResolution, dict) else getattr(gameResolution, 'width', 0)
+                h = gameResolution.get('height', 0) if isinstance(gameResolution, dict) else getattr(gameResolution, 'height', 0)
+                if w > 0 and h > 0:
+                    major, minor = max(w, h), min(w, h)
+                    if abs(major / minor - 4 / 3) < 0.05:
+                        return '.ini1600x1200'
+            except Exception as e:
+                _log.warning("crt-dual: vpinballTableIni suffix resolution check failed: %s", e)
+        return orig_suffix(gameResolution)
+
+    module._suffixForResolution = patched_suffixForResolution
+    _log.info("crt-dual: vpinballTableIni._suffixForResolution monkey-patched (4:3 aspect -> .ini1600x1200)")
+    return True
+
+
 # GENERIC profile-driven patch engine ( / src/engine/dev-docs/PROFILES.md)
 # ──────────────────────────────────────────────
 # The universal system: the PROFILE declares WHAT to touch in its [patches]
@@ -676,6 +703,7 @@ def _patch_generic(module, short: str) -> bool:
 # modules are handled generically by _patch_generic (profile-driven).
 _PATCHERS = {
     'configgen.emulatorlauncher': _patch_emulatorlauncher,
+    'configgen.generators.vpinball.vpinballTableIni': _patch_vpinball_table_ini,
     # utils.videoMode: NOT patched — the raster channel lives in the stock
     # launcher (the applied resolution-crt-patch hunks announce+generate the
     # declared keys natively; verify.sh 4d owns the drift check).
@@ -748,11 +776,12 @@ class _CrtDualMetaFinder(importlib.abc.MetaPathFinder):
 # Activate the hook BEFORE all other finders.
 sys.meta_path.insert(0, _CrtDualMetaFinder())
 
-# Force-import emulatorlauncher so the hook triggers at startup
-# (emulatorlauncher is the entry point of configgen launches).
-if 'configgen.emulatorlauncher' not in sys.modules:
-    with contextlib.suppress(Exception):
-        import importlib
-        importlib.import_module('configgen.emulatorlauncher')
+# Force-import registered modules so their hooks trigger at startup
+# (emulatorlauncher is the entry point; vpinballTableIni is patched on import).
+import importlib
+for _mod in list(_PATCHERS):
+    if _mod not in sys.modules:
+        with contextlib.suppress(Exception):
+            importlib.import_module(_mod)
 
 _log.debug("crt-dual: import hook installed, %d modules registered", len(_PATCHERS))
