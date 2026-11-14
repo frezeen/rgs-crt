@@ -2,6 +2,26 @@
 
 ## 2026-11-14
 
+- **DOS (`dosbox_pure`): certified on the 15 kHz CRT (owner verde).** 4:3 CRT aspect ratio enforced on SwitchRes native modes; multi-executable archives pause at the DOSBox Pure Start Menu until `Set Auto Start` is set once.
+
+- **Future Pinball (`fpinball`): certified on the 15 kHz CRT (owner verde).** Native `640x480i` 4:3 pipeline without gamescope (`AspectRatio = 43`); all 377 `.fpt` tables audited (`Tales of the Arabian Nights` stock-pack folder ships with no `.fpt`).
+
+- **Pinball FX (`pinballfx`): certified on the 15 kHz CRT (owner verde).** All 125 `.bat` table launchers audited 1:1 on the shared `640x480i` native pipeline without gamescope.
+
+- **Pinball FX2 (`pinballfx2`): certified on the 15 kHz CRT (owner verde).** All 77 `.bat` table launchers and `.pxp` table packs audited 1:1 on the shared `640x480i` native pipeline without gamescope.
+
+- **Pinball FX3 (`pinballfx3`): certified on the 15 kHz CRT (owner verde).** 1-pass 720p native rendering (`1280x720` → `864x486` stretch via gamescope); all 100 `.bat` table launchers and `.pxp` packs audited 1:1.
+
+- **Pinball M (`pinballm`): certified on the 15 kHz CRT (owner verde).** All 7 `.bat` table launchers and `.pak` chunks audited 1:1 on the shared `640x480i` native pipeline without gamescope.
+
+- **Visual Pinball (`vpinball`): certified on the 15 kHz CRT (owner verde).** All 701 `.vpx` table directories audited 1:1 on the native `640x480i` pipeline with 4:3 `.ini1600x1200` selection.
+
+- **Zaccaria Pinball (`zaccariapinball`): certified on the 15 kHz CRT (owner verde).** All 126 `.bat` table launchers audited 1:1 on the shared `640x480i` native pipeline without gamescope.
+
+- **DXX-Rebirth (`dxx-rebirth`): certified on the 15 kHz CRT (owner verde).** Both `Descent` and `Descent II` run on native `640x480i` fullscreen with the host cursor arrow hidden.
+
+- **Game Boy Advance (`gba`): certified on the 15 kHz CRT (owner verde).** All 1129 `.gba` ROMs audited 1:1 on `libretro:mgba` SwitchRes with authentic 3:2 core aspect.
+
 - **Dreamcast (`dreamcast`): certified on the 15 kHz CRT (owner verde).** 313 titles on the console's native 640x480i over the TV (RGB) SCART cable — 275 `.chd`, 11 `.m3u`, 27 `.cdi` — NTSC broadcast, default region, widescreen hack off.
 
 - **Sega Model 2 (`model2`): certified on the 15 kHz CRT (owner verde).** The board's own 693x520i at 57.52 Hz, pinned to `sm2` with native 1:1 render and the arcade monitor's bilinear scaling; 29 of 31 stock ROMs green.
