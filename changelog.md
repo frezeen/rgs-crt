@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- **Amiga Ransom (`amiga_ransom`): certified on the 15 kHz CRT (owner verde).** Native `640x480i` 4:3 framing overriding the inherited Windows WinUAE resolutions and `2x` zoom inside `.uae` files; all 9482 `.uae` launchers audited (9441 valid media, 41 stock-pack anomalies).
+
 - **DOS (`dosbox_pure`): certified on the 15 kHz CRT (owner verde).** 4:3 CRT aspect ratio enforced on SwitchRes native modes; multi-executable archives pause at the DOSBox Pure Start Menu until `Set Auto Start` is set once.
 
 - **Future Pinball (`fpinball`): certified on the 15 kHz CRT (owner verde).** Native `640x480i` 4:3 pipeline without gamescope (`AspectRatio = 43`); all 377 `.fpt` tables audited (`Tales of the Arabian Nights` stock-pack folder ships with no `.fpt`).
