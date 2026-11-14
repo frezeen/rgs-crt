@@ -1,9 +1,8 @@
 # profile binaries are USER-PROCURED, never shipped — EXCEPT the engine
-# VNC payload (x11vnc + libs: GPL-2+/CMU-BSD, THIRD-PARTY.md)
+# VNC payload (X0tigervnc + libjpeg: GPL-2.0 / IJG-BSD-zlib, THIRD-PARTY.md)
 **/binaries/
 !src/engine/vnc/binaries/
 !src/engine/vnc/binaries/**
-src/engine/vnc/binaries/libcrypt.so.1
 __pycache__/
 *.pyc
 *.log

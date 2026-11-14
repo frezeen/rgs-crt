@@ -33,6 +33,7 @@ NAME="$1"
 SYSTEM="${2:-}" # system that was launched (active-block filter for the
 # batocera restore/removal — merge.py remove mirrors the apply filter; a
 # key of a block never applied to this game is never touched)
+ROM="${3:-}"
 PROFILE_DIR="$PROFILES_ROOT/$NAME"
 
 [ -d "$PROFILE_DIR" ] || {
@@ -49,7 +50,7 @@ log() { echo "CRT-DUAL-REMOVE [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 log "removing profile '$NAME'"
 
 # ── 1. Merge remove (blocks + configs + binaries) — idempotent ──
-if ! python3 "$MERGE" remove "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT" "$SYSTEM"; then
+if ! python3 "$MERGE" remove "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT" "$SYSTEM" "$ROM"; then
 	log "FAILED to remove '$NAME'"
 	exit 1
 fi

@@ -1,26 +1,38 @@
 #!/bin/bash
-# vnc — VNC launcher for the crt-dual layer (bundled x11vnc)
+# vnc — VNC launcher for the crt-dual layer (bundled TigerVNC shadow server)
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 FreZeeN
 # Part of crt-dual — https://github.com/frezeen
 # Usage: vnc [port]   (default port: 5900)
 #
-# Ported from the original dual-output project (2026-08-10) with the
-# same flags and a self-contained environment (LD_LIBRARY_PATH +
-# libcrypt.so.1 symlink via vnc-env.sh).
+# X0tigervnc is a SHADOW server: it serves the X display that is already
+# running (the CRT desktop the tube shows), it does not create one. That is
+# the requirement here — a virtual X server would show something the glass
+# never sees.
 #
 # Flags (established conventions, see vnc-env.sh):
-#   -forever   keep serving after a client disconnects
-#   -noxdamage avoid the crash on resolution changes (the CRT switches
-#              modes often) — NEVER -clip
-#   (no -xrandr) RandR-following is DROPPED: on the AMD dce_v6 the
-#              -xrandr mode polls RandR every ~4s, and every RandR
-#              contact blips the display (verified 2026-08-12, R9 270X).
-#              The VNC is a debug tool and must stay a passive grab.
-#   -noshm     avoid shared-memory issues over the network
-#   -shared    allow multiple simultaneous clients
-#   -nopw      no password (local-network use; documented limitation)
-#   -xkb -modtweak  keyboard mapping
+#   -display :0          the live screen (DISPLAY, default :0)
+#   -SecurityTypes None  LAN debug tool, no password (documented limitation:
+#                        a remote exposure needs -PasswordFile/-X509 first)
+#   -AlwaysShared        several viewers at once; a second client never kicks
+#                        the first one out
+#   -AcceptPointerEvents -AcceptKeyEvents
+#                        the viewer drives the session: the lightgun path
+#                        (emuinput) reads the X pointer, so input must reach
+#                        the game. Declared even though they default on, so a
+#                        future default flip cannot silently cut the guns.
+#   -FrameRate 60        cap per client (default 60, declared)
+#   -MaxProcessorUsage 100
+#                        TigerVNC throttles itself to 35% of a core by default
+#                        and stretches its polling cycle to get there; a
+#                        full-motion 640x480 game is the case that needs the
+#                        headroom (measured 25-38 updates/s with this value)
+#   -PollingCycle 10     ms per poll (default 30)
+#   -Log '*:stderr:30'   the service redirects stderr into vnc.log
+#
+# No RandR following: every RandR contact blips the display on the AMD
+# dce_v6 (verified 2026-08-12, R9 270X). The VNC is a debug tool and stays a
+# passive grab — the CRT display service owns the raster.
 
 set -uo pipefail
 
@@ -34,4 +46,8 @@ export DISPLAY="${DISPLAY:-:0}"
 # manual run); free it before starting.
 fuser -k "${PORT}/tcp" 2>/dev/null || true
 
-exec "$VNC_BIN/x11vnc" -forever -noxdamage -noshm -rfbport "$PORT" -shared -nopw -xkb -modtweak
+exec "$VNC_BIN/X0tigervnc" -display "$DISPLAY" -rfbport "$PORT" \
+	-SecurityTypes None -AlwaysShared \
+	-AcceptPointerEvents -AcceptKeyEvents \
+	-FrameRate 60 -MaxProcessorUsage 100 -PollingCycle 10 \
+	-Log '*:stderr:30'

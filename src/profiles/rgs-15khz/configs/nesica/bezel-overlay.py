@@ -88,6 +88,29 @@ class XWindowAttributes(ctypes.Structure):
     ]
 
 CWOverrideRedirect = 1 << 9
+CWCursor = 1 << 14
+
+
+def blank_cursor(x11, d, root):
+    """A transparent 1x1 cursor for the strip windows.
+
+    An override-redirect window without a cursor inherits the root's, and the
+    server draws that pointer over the art: the pointer rests at 0,0 during a
+    game, so the black arrow sat on the cabinet. A cursor of its own, empty,
+    keeps the pointer off the strips."""
+    x11.XCreateBitmapFromData.restype = ctypes.c_ulong
+    x11.XCreatePixmapCursor.restype = ctypes.c_ulong
+    bm = x11.XCreateBitmapFromData(ctypes.c_void_p(d), ctypes.c_ulong(root),
+                                   ctypes.c_char_p(b"\x00"), 1, 1)
+    class XColor(ctypes.Structure):
+        _fields_ = [("pixel", ctypes.c_ulong), ("red", ctypes.c_ushort),
+                    ("green", ctypes.c_ushort), ("blue", ctypes.c_ushort),
+                    ("flags", ctypes.c_char), ("pad", ctypes.c_char)]
+    fg = XColor()
+    bg = XColor()
+    return x11.XCreatePixmapCursor(ctypes.c_void_p(d), ctypes.c_ulong(bm),
+                                   ctypes.c_ulong(bm), ctypes.byref(fg),
+                                   ctypes.byref(bg), 0, 0)
 
 
 def open_display():
@@ -175,11 +198,13 @@ def game_window(x11, d):
     return None
 
 
-def create_strip(x11, d, root, visual, depth, x, y, w, h, img_crop):
+def create_strip(x11, d, root, visual, depth, x, y, w, h, img_crop, cursor=0):
     attr = XSetWindowAttributes()
     attr.override_redirect = 1
+    attr.cursor = cursor
     win = x11.XCreateWindow(ctypes.c_void_p(d), root, x, y, w, h, 0,
-                            depth, 1, visual, CWOverrideRedirect, ctypes.byref(attr))
+                            depth, 1, visual, CWOverrideRedirect | CWCursor,
+                            ctypes.byref(attr))
     bgra = Image.new("RGBA", (w, h))
     bgra.paste(img_crop, (0, 0))
     r, g, b, a = bgra.split()
@@ -231,13 +256,14 @@ def run_overlay(image_path, game_token=None, strip_w=None):
     W, H = im.size
     left_w = strip_w if (strip_w and strip_w > 0) else DEFAULT_STRIP_W
     right_x = W - left_w
+    cursor = blank_cursor(x11, d, root)
     strips = []
 
     def draw():
         strips.append(create_strip(x11, d, root, visual, depth, 0, 0,
-                                   left_w, H, im.crop((0, 0, left_w, H))))
+                                   left_w, H, im.crop((0, 0, left_w, H)), cursor))
         strips.append(create_strip(x11, d, root, visual, depth, right_x, 0,
-                                   left_w, H, im.crop((right_x, 0, W, H))))
+                                   left_w, H, im.crop((right_x, 0, W, H)), cursor))
 
     def show():
         # Map + raise: the game presents over the strips when it redraws, and

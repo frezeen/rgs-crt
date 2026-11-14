@@ -7,9 +7,10 @@
 # larger image). Resets the output transform when VNC exits.
 # Usage: vnc-scaled [port]   (default port: 5900)
 #
-# Same flags as `vnc`,
-# plus a xrandr viewport scale (--scale-from 1920x1080 on the primary
-# output) and -scale 1024x768 for the client stream.
+# Same server and flags as `vnc`, plus a xrandr viewport scale
+# (--scale-from 1920x1080 on the primary output). The scaling is the
+# server-side X transform: TigerVNC has no client-stream scale option, so
+# the viewer receives the already-scaled desktop.
 #
 # NOTE: scaling the CRT breaks the 1:1 layout for the duration of the
 # session — this is a deliberate manual tool (full-desktop view), the
@@ -37,7 +38,11 @@ xrandr --output "$OUTPUT" --scale-from 1920x1080 2>/dev/null ||
 # A previous instance on this port would hold it; free it before starting.
 fuser -k "${PORT}/tcp" 2>/dev/null || true
 
-"$VNC_BIN/x11vnc" -forever -noxdamage -noshm -rfbport "$PORT" -shared -scale 1024x768 -nopw -xkb -modtweak
+"$VNC_BIN/X0tigervnc" -display "$DISPLAY" -rfbport "$PORT" \
+	-SecurityTypes None -AlwaysShared \
+	-AcceptPointerEvents -AcceptKeyEvents \
+	-FrameRate 60 -MaxProcessorUsage 100 -PollingCycle 10 \
+	-Log '*:stderr:30'
 _rc=$?
 
 # Restore the 1:1 layout when VNC exits.

@@ -37,6 +37,7 @@ MERGE="$PKG_ROOT/src/selector/merge.py"
 }
 NAME="$1"
 SYSTEM="${2:-}" # system being launched ({mame} block filter; empty = legacy full apply)
+ROM="${3:-}"
 PROFILE_DIR="$PROFILES_ROOT/$NAME"
 
 [ -d "$PROFILE_DIR" ] || {
@@ -55,7 +56,7 @@ log() { echo "CRT-DUAL-APPLY [$(date +%H:%M:%S.%3N)]: $*" >&2; }
 log "applying profile '$NAME'"
 
 # ── 2. Merge (blocks + configs + binaries), with rollback on failure ──
-if ! python3 "$MERGE" apply "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT" "$SYSTEM"; then
+if ! python3 "$MERGE" apply "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT" "$SYSTEM" "$ROM"; then
 	log "FAILED to apply '$NAME' — rolling back"
 	python3 "$MERGE" remove "$PROFILE_DIR" "$NAME" "$TARGET_ROOT" "$BACKUP_ROOT" >/dev/null 2>&1 || true # best-effort rollback; absence is the clean state
 	exit 2

@@ -1,0 +1,11 @@
+system: unis
+name: Elevator Action Invasion
+
+# The cabinet's real neon wall, composed for the 4:3 tube: this PNG is 640x480 with the
+# picture's opening 185/270/185, so the payload fits it 1:1 (no lateral crop). The stock
+# profile points the payload at the generic landscape wall, and the pack's own
+# "real bezel-doors/1080" wall is 16:9: the payload scales it by height and crops ~12% per
+# side. The doors stay the stock portrait set (540x1920 each): the pack's real one is built
+# for a 1200-wide portrait monitor, so its doors land outside the 1080-wide picture.
+env:
+  WAL_BEZEL: 'Z:\userdata\system\crt-dual\profiles\rgs-15khz\configs\unis\ElevatorActionInvasion_Bezel.png'

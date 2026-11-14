@@ -65,7 +65,11 @@ is. The block types:
 | `[core.snes9x]` | games running that specific core |
 
 When two blocks set the same setting, **the more specific one wins**:
-core beats system beats emulator beats global.
+core beats system beats emulator beats global. Inside `[emulator.*]` and
+`[core.*]`, bare `[batocera.conf]` keys (like `videomode = 640x480i`)
+automatically apply as `<system>.<key>` to every profiled system running
+that emulator or core, so shared defaults live in one place and only
+system-specific overrides stay in `[<system>]`.
 
 > **Gotcha that bites everyone once:** every `[...]` header is a block.
 > ini-style sub-headings like `[Graphics]` do not exist here — such a
@@ -281,11 +285,10 @@ key if RGS knows one (`snes.smooth = false` style), or `cli.drop` +
 the keypatch (2) — nothing on disk survives the session.
 
 **"Adopt the one-line bezel fix":** the stock-compat profile ships a
-commented corrective (the black-border case described in
-[Stock RGS notes](rgs-stock-issues.md) §2). Copy that profile folder
-to a name of your own, uncomment the two lines there, run `./verify.sh`
-(your folder is validated, never drift) — done. That is profile
-maintenance in one move.
+commented corrective (the black-border case on integer-scaled bezels).
+Copy that profile folder to a name of your own, uncomment the two lines
+there, run `./verify.sh` (your folder is validated, never drift) — done.
+That is profile maintenance in one move.
 
 ## Maintenance rules that keep you safe
 
@@ -297,9 +300,9 @@ maintenance in one move.
   well-formed in practice, not just on paper.
 - **Keep it small.** One system, one effect, then the next. A profile
   that touches everything is a profile you cannot debug.
-- **Comment your whys.** The shipped specs carry the reason and the
-  measured result beside each group — six months later, that is the
-  difference between tuning and archaeology.
+- **Comment your whys.** The shipped specs carry a single factual line
+  above each non-default override stating why the mechanism is needed
+  (never dates, GPU names, or test history).
 - **When a knob seems missing, say so.** A genuinely missing
   capability is a framework question for the maintainers, not a
   per-profile hack.

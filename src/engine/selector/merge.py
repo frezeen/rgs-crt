@@ -157,11 +157,16 @@ def parse_spec(profile_dir: Path):
         PATCH ops are qualified with the active block when written bare
         (cli.drop in [mameGenerator.py] -> mame.cli.drop): the block
         declares the generator (mame/libretro), the profile writes the
-        op. An already-prefixed key (mame.cli.drop) is left untouched.
-        batocera.conf keys are NEVER qualified here."""
+        op. An already-prefixed key (mame.cli.drop, hypseus_singe.cli.drop)
+        is left untouched. batocera.conf keys are NEVER qualified here."""
         if in_patches and block and block != "global":
-            prefix = block + "."
-            return k if k.startswith(prefix) else f"{block}.{k}"
+            bname = block.split(".", 1)[1] if block.startswith(("emulator.", "core.", "system.")) else block
+            bname_u = bname.replace("-", "_")
+            if k.startswith((bname + ".", bname_u + ".")):
+                return k
+            if not (k.startswith(("cli.", "config.", "mouse", "runtime_dir", "ensure")) or k == "config"):
+                return k
+            return f"{bname}.{k}"
         return k
 
     for raw in spec.read_text(errors="replace").splitlines():
@@ -193,13 +198,17 @@ def parse_spec(profile_dir: Path):
                     block = block[len("system."):]
                     block_type[block] = "system"
                 elif block.startswith("emulator."):
-                    block = block[len("emulator."):]
+                    name = block[len("emulator."):]
                     block_type[block] = "emulator"
+                    block_type.setdefault(name, "emulator")
+                    blocks.add(name)
                 elif block.startswith("core."):
-                    block = block[len("core."):]
+                    name = block[len("core."):]
                     block_type[block] = "core"
+                    block_type.setdefault(name, "core")
+                    blocks.add(name)
                 else:
-                    block_type.setdefault(block, "global" if block == "global" else "system")
+                    block_type[block] = "global" if block == "global" else "system"
                 blocks.add(block)
                 current_keypatch = None
                 in_display = in_batocera = in_patches = in_configs = in_binaries = in_keypatch = in_runtime = False
@@ -280,6 +289,8 @@ def parse_spec(profile_dir: Path):
                     patches[full_key] = patches[full_key] + "\n" + value
                 else:
                     patches[full_key] = value
+                if block:
+                    block_of[f"patches:{full_key}"] = block
             continue
         if in_configs:
             if key:
@@ -291,6 +302,8 @@ def parse_spec(profile_dir: Path):
         if in_binaries:
             if key:
                 binaries[key] = value
+                if block:
+                    block_of[f"binaries:{key}"] = block
             continue
         if in_runtime:
             # RGS-15KHZ-EXT (runtime section): the session execute/undo
@@ -450,7 +463,11 @@ BATOCERA_CONF = "/userdata/system/batocera.conf"
 def _batocera_prev(key: str, backup_root, name: str) -> Path:
     d = Path(backup_root) / name / "batocera"
     d.mkdir(parents=True, exist_ok=True)
-    return d / key.replace(".", "__")
+    # A per-folder key carries "/" inside itself (xbox360.folder["/userdata/
+    # roms/..."].key): as a file name it is a path separator and the archive
+    # write dies on the missing intermediate dir (launch 2026-11-13). One
+    # mapping point: apply/rollback/restore all name the archive here.
+    return d / key.replace(".", "__").replace("/", "-")
 
 
 def _batocera_set_inplace(key: str, value: str) -> None:
@@ -1303,6 +1320,12 @@ def _block_kind(block: str, block_type: dict | None) -> str:
     blocks and legacy flat sections are global."""
     if not block or block == "global":
         return "global"
+    if block.startswith("emulator."):
+        return "emulator"
+    if block.startswith("core."):
+        return "core"
+    if block.startswith("system."):
+        return "system"
     return (block_type or {}).get(block, "system")
 
 
@@ -1314,12 +1337,13 @@ def _block_matches(block: str, block_type: dict | None, system: str | None,
     is a system block (legacy [mame])."""
     if not block or block == "global":
         return True
-    kind = (block_type or {}).get(block, "system")
+    kind = _block_kind(block, block_type)
+    target = block.split(".", 1)[1] if block.startswith(("emulator.", "core.", "system.")) else block
     if kind == "emulator":
-        return emulator is not None and emulator == block
+        return emulator is not None and emulator == target
     if kind == "core":
-        return core is not None and core == block
-    return block == system
+        return core is not None and core == target
+    return target == system
 
 
 def _conf_key(conf: Path, key: str) -> str:
@@ -1346,12 +1370,13 @@ def _defaults_val(system: str, field: str, defaults_dir: Path) -> str:
     except ImportError as e:
         print(f"CRT-DUAL-MERGE: WARN defaults library skipped, pyyaml unavailable ({e})", file=sys.stderr)
         return ""
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
     for yml_name in ("configgen-defaults-arch.yml", "configgen-defaults.yml"):
         p = defaults_dir / yml_name
         if not p.is_file():
             continue
         try:
-            data = yaml.safe_load(p.read_text(errors="replace"))
+            data = yaml.load(p.read_text(errors="replace"), Loader=loader)
         except (OSError, yaml.YAMLError) as e:
             print(f"CRT-DUAL-MERGE: WARN defaults library unreadable ({p}): {e} — skipping to next file", file=sys.stderr)
             continue
@@ -1363,11 +1388,12 @@ def _defaults_val(system: str, field: str, defaults_dir: Path) -> str:
     return ""
 
 
-def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
+def _resolve_emulator_core(system: str, target_root, defaults_dir=None, rom: str | None = None):
     """The emulator/core the launched system will use, resolved exactly
     like configgen (Emulator `_load_system_config` over `_load_defaults`;
     line refs re-checked 2026-09-18): batocera.conf
-    <system>.emulator/.core first, then the stock default library
+    <system>["<rom>"].emulator/.core (when rom is given), then
+    <system>.emulator/.core, then the stock default library
     (configgen-defaults-arch.yml over configgen-defaults.yml, per-system
     over [default]). Returns (emulator, core) — each '' when unknown.
 
@@ -1382,8 +1408,16 @@ def _resolve_emulator_core(system: str, target_root, defaults_dir=None):
     do_remove prefers the apply-time record (RGS-15KHZ-EXT), live is
     fallback."""
     conf = Path(target_root) / "batocera.conf"
-    emu = _conf_key(conf, system + ".emulator")
-    core = _conf_key(conf, system + ".core")
+    emu = ""
+    core = ""
+    if rom:
+        rom_name = Path(rom).name
+        emu = _conf_key(conf, f'{system}["{rom_name}"].emulator')
+        core = _conf_key(conf, f'{system}["{rom_name}"].core')
+    if not emu:
+        emu = _conf_key(conf, system + ".emulator")
+    if not core:
+        core = _conf_key(conf, system + ".core")
     if defaults_dir is None:
         defaults_dir = Path("/usr/share/batocera/configgen")
     if not emu:
@@ -1448,36 +1482,60 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
         # NO early return on system=None here: the definitions map must
         # ALWAYS be collapsed to the final key->value form (a full apply
         # without a system only matches always/legacy blocks).
-        out: dict = {}
+        # Bare keys (no '.' and no '[') inside [emulator.*]/[core.*]/[<sys>]
+        # qualify as <system>.<key> for profiled systems, with precedence
+        # global < emulator < system < core.
+        sys_blocks = {b for b, t in (block_type or {}).items() if t == "system"}
+        best_map: dict = {}  # target_key -> (precedence_index, value)
         for k, defs in mapping.items():
-            best = None  # (precedence_index, value) — most specific match
+            is_bare = ("." not in k and "[" not in k)
             for blk, val in defs:
-                if not _block_matches(blk, block_type, system, emulator, core):
-                    continue
-                prec = _PRECEDENCE.index(_block_kind(blk, block_type))
-                if best is None or prec > best[0]:
-                    best = (prec, val)
-            if best is not None:
-                out[k] = best[1]
-        return out
+                kind = _block_kind(blk, block_type)
+                prec = _PRECEDENCE.index(kind)
+                if is_bare:
+                    if not blk or kind == "global":
+                        targets = [k]
+                    elif kind == "system":
+                        if system and blk != system:
+                            continue
+                        targets = [f"{blk}.{k}"]
+                    elif system:
+                        if system not in sys_blocks or not _block_matches(blk, block_type, system, emulator, core):
+                            continue
+                        targets = [f"{system}.{k}"]
+                    else:
+                        targets = [f"{s}.{k}" for s in sys_blocks]
+                else:
+                    if not _block_matches(blk, block_type, system, emulator, core):
+                        continue
+                    targets = [k]
+                for tk in targets:
+                    cur = best_map.get(tk)
+                    if cur is None or prec > cur[0]:
+                        best_map[tk] = (prec, val)
+        return {tk: v for tk, (_p, v) in best_map.items()}
     if not system:
         return mapping
     if section.endswith("Generator.py") or section == "patches":
-        block = block_of.get(section, "")
-        if _block_matches(block, block_type, system, emulator, core):
-            if not block or block == "global":
-                out = dict(mapping)  # global/legacy: everything
-            else:
-                prefix = block + "."
-                out = {k: v for k, v in mapping.items() if k.startswith(prefix)}
-        else:
-            out = {}
-        if all_blocks:  # legacy flat / [global] bare keys -> global
-            for k, v in mapping.items():
-                if not any(k.startswith(b + ".") for b in all_blocks):
+        out = {}
+        for k, v in mapping.items():
+            pkey = f"patches:{k}"
+            if pkey in block_of:
+                if _block_matches(block_of[pkey], block_type, system, emulator, core):
                     out[k] = v
+                continue
+            block = block_of.get(section, "")
+            if _block_matches(block, block_type, system, emulator, core):
+                if not block or block == "global":
+                    out[k] = v
+                else:
+                    bname = block.split(".", 1)[1] if block.startswith(("emulator.", "core.", "system.")) else block
+                    if k.startswith(bname + "."):
+                        out[k] = v
+            if all_blocks and not any(k.startswith(b + ".") for b in all_blocks):
+                out[k] = v
         return out
-    if section in ("config.files", "configs"):
+    if section in ("config.files", "configs", "binaries"):
         out = {}
         for k, v in mapping.items():
             blk = block_of.get(f"{section}:{k}", block_of.get(section, ""))
@@ -1509,7 +1567,7 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
     return {}
 
 
-def do_apply(profile_dir, name: str, target_root, backup_root, system: str | None = None):
+def do_apply(profile_dir, name: str, target_root, backup_root, system: str | None = None, rom: str | None = None):
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
@@ -1524,7 +1582,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     # PRE-pin resolution: drives the FILE-based selections only (keys,
     # patches, configs, binaries). The emulator-pinning keys live in system
     # blocks and must not feed back into their own block selection.
-    emulator, core = _resolve_emulator_core(system, target_root) if system else (None, None)
+    emulator, core = _resolve_emulator_core(system, target_root, rom=rom) if system else (None, None)
     batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
     patches = _filter_for_system(patches, system, block_of, "mameGenerator.py", blocks, emulator, core, block_type)
     configs = _filter_for_system(configs, system, block_of, "config.files", blocks, emulator, core, block_type)
@@ -1567,7 +1625,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     # The runtime consumers must match the launch that will actually run,
     # not the pre-apply stock default (live 2026-09-10: a standalone-mame
     # session carried the [emulator.libretro] retroarch keypatch — mis-scoped).
-    emulator, core = _resolve_emulator_core(system, target_root) if system else (None, None)
+    emulator, core = _resolve_emulator_core(system, target_root, rom=rom) if system else (None, None)
     if system:
         _write_resolve(backup_root, name, system, emulator, core)  # RGS-15KHZ-EXT (resolve-record, POST)
     apply_keypatch(_filter_keypatch(keypatch, system, block_type, emulator, core),
@@ -1575,7 +1633,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     return True
 
 
-def do_remove(profile_dir, name: str, target_root, backup_root, system: str | None = None):
+def do_remove(profile_dir, name: str, target_root, backup_root, system: str | None = None, rom: str | None = None):
     profile_dir = Path(profile_dir)
     target_root = Path(target_root)
     backup_root = Path(backup_root)
@@ -1591,7 +1649,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
         # RGS-15KHZ-EXT (resolve-record): prefer the apply-time record —
         # live conf may carry our own emulator flip (see helper docstring).
         rec = _read_resolve(backup_root, name, system)
-        emulator, core = rec if rec is not None else _resolve_emulator_core(system, target_root)
+        emulator, core = rec if rec is not None else _resolve_emulator_core(system, target_root, rom=rom)
         batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
 
     restore_configs(profile_dir, configs, target_root, backup_root, name)
@@ -1639,7 +1697,7 @@ def _validate_rasters(batocera: dict):
     channels)."""
     seen = {}  # pool name -> full value
     for key, defs in batocera.items():
-        if not key.endswith(".videomode"):
+        if key != "videomode" and not key.endswith(".videomode"):
             continue
         for _blk, val in defs:
             v = (val or "").strip()
@@ -1723,12 +1781,13 @@ def main():
         return 1
     profile_dir, name, target_root, backup_root = sys.argv[2:6]
     system = sys.argv[6] if len(sys.argv) > 6 else None
+    rom = sys.argv[7] if len(sys.argv) > 7 else None
     pd, tr, br = Path(profile_dir), Path(target_root), Path(backup_root)
     try:
         if cmd == "apply":
-            do_apply(pd, name, tr, br, system)
+            do_apply(pd, name, tr, br, system, rom)
         elif cmd == "remove":
-            do_remove(pd, name, tr, br, system)
+            do_remove(pd, name, tr, br, system, rom)
         else:
             print(f"unknown command: {cmd}", file=sys.stderr)
             return 1

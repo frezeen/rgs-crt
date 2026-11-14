@@ -1,0 +1,96 @@
+# CRT profile patch — Gears of War 2
+# Adapted from the Xenia community patch "4D53082D - Gears of War 2.patch.toml" (xenia-canary/xenia-canary, BSD-3-Clause).
+# Enabled here (the tube: 640x480i, 60 Hz): Unlock FPS, Black Shading Fix, Disable Motion Blur, Ambient Occlusion - Option B: Disable, Disable Lens Flares, Depth of Field, Option B - Disable Entire DoF Pipeline, Disable Bloom
+# Xenia applies a patch file only when the loaded title id AND the XEX content hash
+# match, so this file stays inert on any other revision of the game.
+title_name = "Gears of War 2"
+title_id = "4D53082D" # MS-2093
+hash = "BDB97753374D520A" # default.xex
+#media_id = "33FCE762" # Disc (Europe): http://redump.org/disc/19951
+
+[[patch]]
+    name = "Unlock FPS"
+    desc = "See note about framerate patches in the README."
+    author = "illusion, boma"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x824a2e94
+        value = 0x60000000
+    [[patch.be8]]
+        address = 0x8298cfb3
+        value = 0x01
+
+[[patch]]
+    name = "Black Shading Fix"
+    desc = "Effectively turns off MSAA, solving the dynamic lighting artifacts caused by MSAA resolve imperfections. Use in tandem with either Ambient Occlusion or Upscaling Fix patches to prevent nearly all other artifacts."
+    author = "illusion, boma"
+    is_enabled = true
+
+    [[patch.be32]] # GUseTilingMode = FALSE
+        address = 0x82806a44
+        value = 0x39600000 # li r11, 0
+
+[[patch]]
+    name = "Ambient Occlusion - Option B: Disable"
+    desc = "Fixes various artifacts when using upscaling."
+    author = "illusion"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x826f9d18
+        value = 0x39600000
+
+[[patch]]
+    name = "Disable Motion Blur"
+    desc = "Solves most ghosting and artifacting caused by quickly panning cameras."
+    author = "illusion"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x8236004c
+        value = 0x39600000
+
+[[patch]]
+    name = "Disable Lens Flares"
+    desc = "Fixes unoccluded bright lights on-screen."
+    author = "boma"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x827b817c
+        value = 0x39400000
+
+[[patch]]
+    name = "Depth of Field, Option B - Disable Entire DoF Pipeline"
+    desc = "Disables the Uber postprocess shader pipeline. Produces a completely sharp image at all distances but also removes most post-processing effects, including tonemapping and color grading. Use Option A if you do not like the results of this patch."
+    author = "boma"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x823e1720
+        value = 0x39600000
+    [[patch.be32]]
+        address = 0x824eceec
+        value = 0x39200000
+    [[patch.be32]]
+        address = 0x824ed06c
+        value = 0x39600000
+    [[patch.be32]]
+        address = 0x824ed0b0
+        value = 0x39600000
+
+[[patch]]
+    name = "Disable Bloom"
+    author = "boma"
+    is_enabled = true
+
+    [[patch.be32]]
+        address = 0x824ecef8
+        value = 0x39400000
+    [[patch.be32]]
+        address = 0x824ed078
+        value = 0x39600000
+    [[patch.be32]]
+        address = 0x824ed0a4
+        value = 0x39400000

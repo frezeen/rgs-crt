@@ -188,7 +188,7 @@ its dependencies and reports loudly.
   across the whole test period the box crashed two or three times
   around a plug event, every time recovered by a reboot (the setups
   page states it with the same honesty).
-- The layer ships a VNC server (x11vnc) for test and tuning sessions.
+- The layer ships a VNC server (TigerVNC's shadow server) for test and tuning sessions.
   It starts at boot and serves port **5900 without a password** — keep
   the box on a trusted network, or stop it when you do not need it
   ([details](docs/install-and-updates.md#remote-access-vnc)).
@@ -207,10 +207,6 @@ its dependencies and reports loudly.
 - After an RGS system update, reinstalling this layer is required if
   its self-check cannot vouch for the new system — by design, so you
   never run a half-verified setup.
-- Two stock RGS behaviors found on the way (with evidence) are
-  documented for the RGS team in
-  **[docs/rgs-stock-issues.md](docs/rgs-stock-issues.md)** — none of
-  them is caused by this layer.
 
 ## The manual
 
@@ -221,7 +217,6 @@ its dependencies and reports loudly.
 | [Writing & maintaining profiles](docs/writing-profiles.md) | You want to build your own, or tune the shipped ones — every command, with examples. |
 | [Install & updates](docs/install-and-updates.md) | You want to know exactly what the install touches, and what happens after an RGS update. |
 | [Compatibility map](docs/emulators-status.md) | You want to know if your system works — with the measured numbers. |
-| [Stock RGS notes](docs/rgs-stock-issues.md) | You hit something that looks like RGS's own behavior, not ours. |
 | [The manual map](docs/docs-map.md) | You want to know what is in this manual and where to start. |
 
 ## License

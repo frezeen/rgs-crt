@@ -69,7 +69,7 @@ fi
 echo "=== RGS+15KHZ UNINSTALL (CRT path) — $(date +%FT%T) ==="
 
 # ── 1. Services: stop running instances, disable, remove files ──
-# (stop FIRST: x11vnc/watcher execute from the package — removing files
+# (stop FIRST: the VNC server/watcher execute from the package — removing files
 # under them orphans headless processes; disable alone does not stop.)
 if [ -z "${RGS15_SKIP_ENABLE:-}" ]; then
 	for _s in "$VNC_SVC" "$ENGINE_SVC" "$OUR_SVC"; do

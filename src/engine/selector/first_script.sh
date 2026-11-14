@@ -46,8 +46,11 @@ gameStart)
 	exec 1>&2 # RGS-15KHZ-EXT — same rule as gameStop (see block there)
 	log "gameStart ($2, core=${3:-unknown})"
 
+	# A previous session that died hard can leave gamescope/reaper behind on any
+	# system: end them before a new launch (no-op when clean).
+	killall -q -9 gamescope gamescopereaper 2>/dev/null || true
 	case "$2" in
-	arcadepc|windows|wine)
+	arcadepc|windows|wine|xbox360|pinballfx3|globalvr)
 		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
 		while IFS= read -r _m; do
 			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
@@ -67,7 +70,7 @@ gameStart)
 
 	if [ -n "$_CHOICE" ]; then
 		log "profile chosen: $_CHOICE"
-		if bash "$ENGINE_DIR/apply_profile.sh" "$_CHOICE" "$2"; then
+		if bash "$ENGINE_DIR/apply_profile.sh" "$_CHOICE" "$2" "${5:-}"; then
 			echo "$_CHOICE" >"$STATE_FILE" # single writer log "profile $_CHOICE active"
 		else
 			log "WARN: apply_profile failed for $_CHOICE — running stock (fallback)"
@@ -97,15 +100,20 @@ gameStop)
 	_PREV="$(cat "$STATE_FILE" 2>/dev/null)"
 	if [ -n "$_PREV" ] && [ -d "$ENGINE_DIR" ]; then
 		log "removing profile $_PREV (system=$2)"
-		bash "$ENGINE_DIR/remove_profile.sh" "$_PREV" "$2" || log "WARN: remove_profile failed for $_PREV"
+		bash "$ENGINE_DIR/remove_profile.sh" "$_PREV" "$2" "${5:-}" || log "WARN: remove_profile failed for $_PREV"
 	else
 		# no profile active — restore the desktop layout (CRT-only gameStop
 		# fallback when the state file was lost, e.g. crash + manual exit)
 		command -v restore_after_game >/dev/null 2>&1 && restore_after_game >/dev/null 2>&1 || true # best-effort; see apply
 	fi
 	rm -f "$STATE_FILE"
+	# gamescope's wrapper and its reaper outlive the game on EVERY system that
+	# uses them (the RGS gamescope patch); with the launcher no longer waiting
+	# for their pipe EOF (stdio detach) nothing else would end them. No-op when
+	# they are already gone — the wine family adds its .exe services below.
+	killall -q -9 gamescope gamescopereaper 2>/dev/null || true
 	case "$2" in
-	arcadepc|windows|wine)
+	arcadepc|windows|wine|xbox360|pinballfx3|globalvr)
 		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
 		while IFS= read -r _m; do
 			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true

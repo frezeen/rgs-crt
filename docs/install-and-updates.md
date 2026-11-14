@@ -255,7 +255,8 @@ in the log, never silently ignored.
 
 ## Remote access (VNC)
 
-The layer ships a VNC server (x11vnc) for test and tuning sessions. It
+The layer ships a VNC server (TigerVNC's shadow server, `X0tigervnc`)
+for test and tuning sessions. It
 starts at boot and serves port **5900 without a password** — a
 documented limitation for local-network use. Handy to watch the
 machine's output from another screen; keep the box on a trusted network,
@@ -265,12 +266,11 @@ or stop it when you do not need it:
 batocera-services stop zz_crt_dual_vnc
 ```
 
-The server ships with the layer (x11vnc and its libraries travel in the
-repository and are installed with everything else — nothing to
-download) and is free software: x11vnc and LibVNCServer under
-GPL-2.0-or-later (x11vnc keeps its upstream OpenSSL linking exception),
-the SASL library under the Carnegie Mellon BSD-style license. The
-required notices and the written source offer live in
+The server ships with the layer (the binary and the one JPEG library it
+needs travel in the repository and are installed with everything else —
+nothing to download) and is free software: TigerVNC under
+GPL-2.0-or-later, libjpeg-turbo under its IJG/BSD/zlib triple license.
+The required notices and the written source offer live in
 [THIRD-PARTY.md](../THIRD-PARTY.md). If the binary is ever missing
 (damaged install), the boot service says so once and stays off instead
 of retrying.

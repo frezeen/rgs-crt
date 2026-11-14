@@ -133,7 +133,7 @@ for _d in "$REPO"/src/engine/*/; do
 done
 find "$PKG/src" -type f -name "*.sh" -exec chmod +x {} \;
 find "$PKG/src/selector" "$PKG/src/api" -type f -name "*.py" -exec chmod +x {} \;
-chmod +x "$PKG/src/vnc/vnc" "$PKG/src/vnc/vnc-scaled" "$PKG/src/vnc/binaries/x11vnc" 2>/dev/null || true
+chmod +x "$PKG/src/vnc/vnc" "$PKG/src/vnc/vnc-scaled" "$PKG/src/vnc/binaries/X0tigervnc" 2>/dev/null || true
 mkdir -p "$PKG/profiles"
 cp -a "$REPO/src/profiles/." "$PKG/profiles/"
 echo "  package -> $PKG (src + profiles)"

@@ -303,8 +303,11 @@ _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES 
 		if [ "$_sw" -gt 0 ] && [ "$_sh" -gt 0 ]; then
 			# Real game window: either occupies >= half of the screen raster (native low-res
 			# like 256x224, 320x240, TATE 240x320) OR has standard game dimensions (>=640x480,
-			# 720p, 1080p, super-res) while strictly rejecting tiny wine helper windows (1x1, 160x20).
-			if [ $(( _w * _h * 2 )) -ge $(( _sw * _sh )) ] || { [ "$_w" -ge 640 ] && [ "$_h" -ge 480 ]; }; then
+			# 720p, 1080p, super-res) OR is a letterboxed picture window (portrait cabinet on
+			# the 4:3 raster, 270x480) while strictly rejecting tiny wine helper windows
+			# (1x1, 160x20) and the overlay's own strips (185 wide, no class).
+			if [ $(( _w * _h * 2 )) -ge $(( _sw * _sh )) ] || { [ "$_w" -ge 640 ] && [ "$_h" -ge 480 ]; } \
+				|| { [ "$_h" -ge 400 ] && [ "$_w" -ge 240 ]; }; then
 				return 0
 			fi
 		elif [ "$_w" -ge 320 ] && [ "$_h" -ge 240 ]; then

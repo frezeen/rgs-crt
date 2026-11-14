@@ -1,0 +1,7 @@
+system: unis
+name: Crazy Ride
+
+# The game sizes its 16:9 picture from the desktop's height: at 1280x720 it renders 720
+# instead of 1920x1080 (the stock desktop), so the GPU work drops with the picture.
+env:
+  WAL_DESKTOP_SIZE: 1280x720

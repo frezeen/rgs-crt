@@ -30,6 +30,8 @@ import logging
 import os  # RGS-15KHZ-EXT (genconfig-archive): CRT_DUAL_BACKUP_ROOT seam
 import re  # RGS-15KHZ-EXT (config-xml): <setting id="…"> matching
 import shutil  # RGS-15KHZ-EXT (ensure): stock file copy
+import subprocess  # RGS-15KHZ-EXT (stdio stream): stock capture, streamed
+import threading  # RGS-15KHZ-EXT (stdio stream): pipe readers that never wait EOF
 import sys
 from pathlib import Path
 
@@ -66,6 +68,13 @@ def _active_profile() -> str:
 # with it (reversible by construction, profile-discipline 9).
 # ──────────────────────────────────────────────────────────────
 RUNTIME_ENV_STATE = Path('/tmp/crt-dual/runtime-env')
+
+# RGS-15KHZ-EXT (stdio stream): a profile's `[runtime] env = RGS_STDIO_DETACH=1`
+# keeps the stock capture (the game's stdout/stderr still land in the launcher's
+# own logs at debug/error level, no new file) but drains it in streaming and
+# returns with the direct child, instead of waiting for the pipe EOF that the
+# gamescope reaper and the wine services never close.
+STDIO_DETACH_ENV = 'RGS_STDIO_DETACH'
 
 
 def _apply_runtime_env() -> None:
@@ -231,6 +240,57 @@ def _patch_emulatorlauncher(module):
 
     module.start_rom = patched_start_rom
     _log.info("crt-dual: emulatorlauncher.start_rom monkey-patched (gameStart first)")
+
+    # RGS-15KHZ-EXT (stdio detach): the stock runCommand launches the game
+    # with stdout/stderr pipes and returns on their EOF. The gamescope wrapper
+    # that RGS patched into the launcher spawns a reaper, and the wine service
+    # processes, which inherit those pipes and outlive the game: EOF never
+    # comes, the launcher waits, and only the display layer's session grace
+    # (GONE_POLLS x POLL) ends it — a frozen last frame before ES.
+    # A profile that declares `[runtime] env = RGS_STDIO_DETACH=1` gets the
+    # game's stdio written to files instead: the launcher waits for its direct
+    # child alone, and the profile's gameStop cleanup reaps the leftovers.
+    orig_run = getattr(module, 'runCommand', None)
+    if orig_run is None:
+        # Optional capability: the start_rom patch above is the contract.
+        _log.warning("crt-dual: emulatorlauncher.runCommand not found (stdio detach unavailable)")
+    else:
+        def patched_run_command(command):
+            if not os.environ.get(STDIO_DETACH_ENV):
+                return orig_run(command)
+            envvars = dict(os.environ)
+            envvars.update(command.env)
+            command.env = envvars
+            try:
+                proc = subprocess.Popen(command.array, env=command.env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as e:
+                _log.warning("crt-dual: stdio stream failed (%s) — stock capture", e)
+                return orig_run(command)
+            module.proc = proc  # the launcher's SIGINT handler kills this child
+            logger = module._logger
+
+            def pump(stream, emit):
+                try:
+                    for chunk in iter(lambda: stream.readline(65536), b""):
+                        text = chunk.decode(errors="backslashreplace").rstrip("\n")
+                        if text.strip():
+                            emit(text)
+                except (ValueError, OSError, AttributeError):
+                    pass  # pipe closed on return: the session is over
+
+            for stream, emit in ((proc.stdout, logger.debug), (proc.stderr, logger.error)):
+                threading.Thread(target=pump, args=(stream, emit), daemon=True).start()
+            # Return with the direct child. The pumps are daemons on purpose:
+            # closing a buffered pipe from here while a reader thread is inside
+            # read() blocks on the object's lock (measured: the launcher hung
+            # until the display layer's grace, 2026-11-13 22:35). The gameStop
+            # cleanup ends the leftovers, which closes the pipes from the other
+            # side and lets the readers finish on their own.
+            return proc.wait()
+
+        module.runCommand = patched_run_command
+        _log.info("crt-dual: emulatorlauncher.runCommand stdio detach armed")
     return True
 
 

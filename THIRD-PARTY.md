@@ -2,125 +2,62 @@
 
 This repository bundles the following third-party components. All are
 under free-software licenses compatible with this repository's LICENSE
-(GPL-2.0): the VNC components are GPL-2.0-or-later (x11vnc carries an
-explicit OpenSSL linking exception), the SASL library is under the
-Cyrus SASL (Carnegie Mellon) BSD-style license. They are shipped for
-stock Batocera, where the equivalent tool is not present (verified: no
-x11vnc/wayvnc/tigervnc on stock Batocera 43.1).
+(GPL-2.0): the VNC server is GPL-2.0-or-later, the JPEG library is under
+the libjpeg-turbo triple license (IJG / BSD-3-Clause / zlib). They are
+shipped for stock Batocera, where no VNC server is present (verified: no
+wayvnc/tigervnc/x0vncserver on stock Batocera 43.1).
 
-## x11vnc 0.9.17 (SHIPPED — `src/engine/vnc/binaries/x11vnc`)
+## TigerVNC 1.12.0 (SHIPPED — `src/engine/vnc/binaries/X0tigervnc`)
 
-- **Purpose**: VNC server for the X11 desktop (the `vnc` / `vnc-scaled`
-  launchers and the `zz_crt_dual_vnc` autostart service).
-- **License**: GPL-2.0-or-later. Copyright (C) 2002-2010 Karl J. Runge
-  and others. The upstream source header reads: "This is free software;
-  you can redistribute it and/or modify it under the terms of the GNU
-  General Public License as published by the Free Software Foundation;
-  version 2 of the License, or (at your option) any later version", plus
-  an explicit exception: "as a special exception, Karl J. Runge gives
-  permission to link the code of its release of x11vnc with the OpenSSL
-  project's 'OpenSSL' library (or with modified versions of it that use
-  the same license) and distribute the linked executables. You must obey
-  the GNU General Public License in all respects for all of the code used
-  other than 'OpenSSL'." The distribution below relies on that exception
-  (this box's x11vnc links the system OpenSSL 3 — nothing is bundled).
-- **Provenance**: binary version verified live (`x11vnc -version` ->
-  `0.9.17 lastmod: 2025-04-11`), built from the upstream release, ported
-  from a private development repository (not part of this public tree).
-  Corresponding source: <https://github.com/LibVNC/x11vnc> (tag 0.9.17).
-- **Modifications**: none — the binary is used as-is. Its only runtime
-  adaptation is a `libcrypt.so.1` symlink to the system's
-  `libcrypt.so.2` (stock Batocera 43 ships only .2; the crypt ABI is
-  stable — created at runtime by `src/engine/vnc/vnc-env.sh`, never
-  shipped, never committed).
-- **Shipped**: yes — it travels in this repository and is installed to
-  the deployed package by `install.sh`, so the `vnc` command and the
-  boot service work with no user action.
+- **Purpose**: VNC shadow server for the X11 desktop (the `vnc` /
+  `vnc-scaled` launchers and the `zz_crt_dual_vnc` autostart service).
+  It serves the display that is already running — it creates no virtual X.
+- **License**: GPL-2.0-or-later. Copyright (C) 1998-2022 TigerVNC Team
+  and others (the project forks TightVNC, which derives from AT&T's VNC);
+  the upstream licence text is `LICENCE.TXT`.
+- **Provenance**: Debian bookworm package `tigervnc-scraping-server`
+  `1.12.0+dfsg-8` (amd64), binary extracted as-is from the package's
+  `data.tar.xz`; version verified live: `X0tigervnc --version` ->
+  `TigerVNC Server version 1.12.0, built 2023-01-06`. Corresponding
+  source: <https://github.com/TigerVNC/tigervnc> (tag v1.12.0) and the
+  Debian source package `tigervnc 1.12.0+dfsg-8`.
+- **Modifications**: none — the binary is used as-is. It needs no runtime
+  symlink: it links the system's X11/GnuTLS/PAM libraries plus the
+  bundled `libjpeg.so.62` (below).
 
-## Bundled shared libraries (SHIPPED — `src/engine/vnc/binaries/`)
+## Bundled shared library (SHIPPED — `src/engine/vnc/binaries/`)
 
 | File | Component | License |
 | --- | --- | --- |
-| `libvncserver.so.1` | LibVNCServer 0.9.12 (server library for x11vnc) | GPL-2.0-or-later |
-| `libvncclient.so.1` | LibVNCClient 0.9.12 (client library for x11vnc) | GPL-2.0-or-later |
-| `libsasl2.so.2` | Cyrus SASL 2.1.28 (SASL support for x11vnc) | CMU BSD-style (text below) |
+| `libjpeg.so.62` | libjpeg-turbo 2.1.5 | IJG / BSD-3-Clause / zlib (three compatible BSD-style licenses) |
 
-- **Provenance**: version strings read from the shipped binaries
-  (`LibVNCServer 0.9.12`; `Cyrus SASL 2.1.28`); LibVNCServer is linked
-  against the system GnuTLS (not OpenSSL), so the exception above is not
-  needed for these libraries. Corresponding sources:
-  <https://github.com/LibVNC/libvncserver> (tag v0.9.12) and
-  <https://github.com/cyrusimap/cyrus-sasl> (release 2.1.28).
+- **Provenance**: Debian bookworm package `libjpeg62-turbo` `1:2.1.5-2`
+  (amd64), library extracted as-is. Stock Batocera 43 ships
+  `libjpeg.so.8` only and X0tigervnc links `.62`; the library travels
+  beside the binary and is loaded through `LD_LIBRARY_PATH`
+  (`src/engine/vnc/vnc-env.sh`), nothing is installed system-wide.
+  Upstream: <https://github.com/libjpeg-turbo/libjpeg-turbo> (2.1.5) —
+  copyright (C) 2009-2023 D. R. Commander and (C) 1991-2020 Thomas G.
+  Lane / Guido Vollbeding; the three license texts live in the project's
+  `LICENSE.md` and remain embedded in the library.
 - **Modifications**: none.
 
-## Cyrus SASL license (required notice for `libsasl2.so.2`)
+## GPL compliance note (TigerVNC)
 
-```
-/* CMU libsasl
- * Tim Martin
- * Rob Earhart
- * Rob Siemborski
- */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. The name "Carnegie Mellon University" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact
- *      Office of Technology Transfer
- *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
- *
- * 4. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by Computing Services
- *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
- *
- * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
- * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
- * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
- * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
- * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-```
-
-This product includes software developed by Computing Services at
-Carnegie Mellon University (http://www.cmu.edu/computing/).
-
-## GPL compliance note (x11vnc / LibVNCServer)
-
-- The shipped binaries are UNMODIFIED upstream releases; the complete
-  GNU GPL v2 text is this repository's `LICENSE` file, and the upstream
-  notices remain embedded in the binaries.
+- The shipped binary is an UNMODIFIED upstream release; the complete GNU
+  GPL v2 text is this repository's `LICENSE` file, and the upstream
+  notices remain embedded in the binary.
 - **Written offer (GPL-2 section 3b)**: this project offers, valid for
-  at least three years from 2026-09-22 (the date of the first public
-  distribution of these binaries), to give any third party the complete
+  at least three years from 2026-11-14 (the date of the first public
+  distribution of this binary), to give any third party the complete
   corresponding source code of the components above, for no more than
   the cost of physically performing the distribution, on request through
-  this repository's issue tracker. The upstream links above are the
-  exact source releases the bundled binaries were built from.
-- The binaries are dynamically linked against the system's own
-  libraries (X11, OpenSSL, GnuTLS, cairo, ...) — none of those are
-  bundled; the three libraries in the table are shipped alongside
-  because stock Batocera does not provide them.
+  this repository's issue tracker. The links above are the exact source
+  releases the bundled binary was built from.
+- The binary is dynamically linked against the system's own libraries
+  (X11, Xdamage/Xfixes/Xrandr/Xtst, GnuTLS, PAM, pixman, zlib) — none of
+  those are bundled; the one library in the table is shipped alongside
+  because stock Batocera does not provide it.
 
 ## Profile picker artwork (SHIPPED — `src/engine/selector/assets/`)
 

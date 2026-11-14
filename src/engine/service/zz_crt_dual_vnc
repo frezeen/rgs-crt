@@ -8,13 +8,12 @@
 # What it does (and only this):
 #   1. Waits for X (:0) to be up — the CRT service may still be preparing
 #      the display modes when this service starts (zz_ = late).
-#   2. Starts the bundled x11vnc (src/vnc/vnc) on port 5900, standard
-#      (unscaled) view, under a respawn loop: x11vnc 0.9.17 can segfault
-#      on X damage storms (observed 2026-08-10 on this box — signal 11,
-#      even with -noxdamage), and a boot service must come back on its
-#      own. The loop PID lives in /tmp/crt-dual-vnc.pid; stop kills the
-#      loop first (no respawn) then x11vnc.
-#   3. Bounds that loop, because a respawn is a full x11vnc start (a
+#   2. Starts the bundled VNC server (src/vnc/vnc — TigerVNC's shadow
+#      server) on port 5900, standard (unscaled) view, under a respawn
+#      loop: a boot service must come back on its own after a crash. The
+#      loop PID lives in /tmp/crt-dual-vnc.pid; stop kills the loop first
+#      (no respawn) then the server.
+#   3. Bounds that loop, because a respawn is a full server start (a
 #      display probe of its own) and the loop used to do it every 2 s
 #      forever: with X absent it waits on the X socket instead of burning
 #      a rebirth (the 16-19/10 log: 240 starts, 229 died on XOpenDisplay
@@ -52,13 +51,13 @@ case "$1" in
 			exit 1
 		}
 		# The payload SHIPS with the layer (src/engine/vnc/binaries —
-		# GPL-2+/CMU-BSD, THIRD-PARTY.md): a missing binary must fail
+		# GPL-2.0, THIRD-PARTY.md): a missing binary must fail
 		# ONCE here. Without this guard the respawn loop below retries
 		# every 2 s forever (2026-09-22 tester report: 523 log lines of
 		# "No such file or directory" on a box that installed before the
 		# payload was distributed).
-		[ -x "$PKG_ROOT/src/vnc/binaries/x11vnc" ] || {
-			echo "zz_crt_dual_vnc: x11vnc missing ($PKG_ROOT/src/vnc/binaries/x11vnc) — VNC stays off; the payload ships with the layer (reinstall if it is gone)" >&2
+		[ -x "$PKG_ROOT/src/vnc/binaries/X0tigervnc" ] || {
+			echo "zz_crt_dual_vnc: X0tigervnc missing ($PKG_ROOT/src/vnc/binaries/X0tigervnc) — VNC stays off; the payload ships with the layer (reinstall if it is gone)" >&2
 			exit 1
 		}
 
@@ -80,6 +79,10 @@ case "$1" in
 		# $2 launcher, $3 log, $4 X socket, $5 healthy-run seconds,
 		# $6 consecutive quick deaths allowed.
 		nohup bash -c '
+			# A signal on the loop is the only way VNC disappears without a
+			# trace (the loop restarts the server on its own): record it, so
+			# the log names the day instead of leaving an orphan pidfile.
+			trap "echo \"zz_crt_dual_vnc: loop killed by a signal — VNC off until the next start\" >>\"$3\"; rm -f \"$1\"; exit 143" TERM INT HUP
 			echo $$ >"$1"
 			_fails=0
 			while :; do
@@ -102,7 +105,7 @@ case "$1" in
 					_fails=$((_fails+1))
 				fi
 				if [ "$_fails" -ge "$6" ]; then
-					echo "zz_crt_dual_vnc: x11vnc died $_fails times in a row within ${5}s of starting (see above) — crash-loop, VNC off" >>"$3"
+					echo "zz_crt_dual_vnc: the VNC server died $_fails times in a row within ${5}s of starting (see above) — crash-loop, VNC off" >>"$3"
 					break
 				fi
 				sleep 2
@@ -110,23 +113,23 @@ case "$1" in
 			rm -f "$1"
 		' _ "$PIDFILE" "$VNC" "$LOG" "$XSOCK" "$HEALTHY_S" "$MAXFAILS" >/dev/null 2>&1 &
 		sleep 2
-		if pgrep -x x11vnc >/dev/null 2>&1; then
-			echo "zz_crt_dual_vnc: x11vnc started (port 5900, DISPLAY=$DISPLAY, respawn loop) — log: $LOG"
+		if pgrep -x X0tigervnc >/dev/null 2>&1; then
+			echo "zz_crt_dual_vnc: VNC server started (port 5900, DISPLAY=$DISPLAY, respawn loop) — log: $LOG"
 		else
-			echo "zz_crt_dual_vnc: x11vnc failed to start — log: $LOG" >&2
+			echo "zz_crt_dual_vnc: VNC server failed to start — log: $LOG" >&2
 			exit 1
 		fi
 		;;
 
 	stop)
 		PIDFILE="${CRT_DUAL_VNC_PIDFILE:-/tmp/crt-dual-vnc.pid}"
-		# Kill the loop FIRST (stops the respawning), then x11vnc.
+		# Kill the loop FIRST (stops the respawning), then the server.
 		if [ -f "$PIDFILE" ]; then
 			kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null || true
 			rm -f "$PIDFILE"
 		fi
-		pkill -x x11vnc 2>/dev/null || true
-		echo "zz_crt_dual_vnc: x11vnc stopped"
+		pkill -x X0tigervnc 2>/dev/null || true
+		echo "zz_crt_dual_vnc: VNC server stopped"
 		;;
 
 	*)
