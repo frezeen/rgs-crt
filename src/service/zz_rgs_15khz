@@ -665,10 +665,10 @@ i915_patch_decide() {
 		_mod_src="$_mod_dst"
 	elif [ -f "$_repo/src/service/i915/binaries/$_mod_name" ]; then
 		_mod_src="$_repo/src/service/i915/binaries/$_mod_name"
-	elif [ "${RGS15_I915_ALLOW_FETCH:-}" = "1" ]; then
+	elif [ "${RGS15_I915_ALLOW_FETCH:-1}" = "1" ]; then
 		_want_fetch="https://github.com/amxcs/batocera-crt-15khz-intel/releases/download/batocera-$(cut -d' ' -f1 "$BATOCERA_VERSION_SRC" 2>/dev/null)/$_mod_name"
 		mkdir -p "$_repo/src/service/i915/binaries" 2>/dev/null || true
-		if curl -fsSL "$_want_fetch" -o "$_repo/src/service/i915/binaries/$_mod_name" 2>/dev/null; then
+		if curl -fsSL --connect-timeout 5 --max-time 30 "$_want_fetch" -o "$_repo/src/service/i915/binaries/$_mod_name" 2>/dev/null; then
 			_mod_src="$_repo/src/service/i915/binaries/$_mod_name"
 			log "i915-patch: module fetched from the amxcs release (public URL, no credentials) -> $_repo/src/service/i915/binaries/$_mod_name"
 		else

@@ -2,6 +2,10 @@
 
 ## 2026-11-15
 
+- **Intel i915 480i patch:** the patched `i915` kernel module (`6.18.16`) now ships directly with the package so Intel 480i works even on offline installs, with automatic boot self-heal if missing.
+
+- **MAME (`mame`): re-certified on the 15 kHz CRT (owner verde).** GroovyMAME standalone with SwitchRes native board modes and artwork crop.
+
 - **Atomiswave (`atomiswave`): certified on the 15 kHz CRT (owner verde).** Native 640x480i 4:3 arcade signal with widescreen hacks disabled.
 
 - **In-place updates no longer require a reboot to re-apply CRT profiles.** Updating from the check tool re-arms the live 15 kHz display session immediately so games launched right after keep their CRT settings.

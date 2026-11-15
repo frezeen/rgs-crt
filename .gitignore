@@ -1,8 +1,11 @@
 # profile binaries are USER-PROCURED, never shipped — EXCEPT the engine
 # VNC payload (X0tigervnc + libjpeg: GPL-2.0 / IJG-BSD-zlib, THIRD-PARTY.md)
+# and the Intel i915 480i patched kernel module (GPL-2.0, THIRD-PARTY.md).
 **/binaries/
 !src/engine/vnc/binaries/
 !src/engine/vnc/binaries/**
+!src/service/i915/binaries/
+!src/service/i915/binaries/**
 __pycache__/
 *.pyc
 *.log
