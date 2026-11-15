@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-15
+
+- **Atomiswave (`atomiswave`): certified on the 15 kHz CRT (owner verde).** Native 640x480i 4:3 arcade signal with widescreen hacks disabled.
+
+- **In-place updates no longer require a reboot to re-apply CRT profiles.** Updating from the check tool re-arms the live 15 kHz display session immediately so games launched right after keep their CRT settings.
+
 ## 2026-11-14
 
 - **Amiga Ransom (`amiga_ransom`): certified on the 15 kHz CRT (owner verde).** Native `640x480i` 4:3 framing overriding the inherited Windows WinUAE resolutions and `2x` zoom inside `.uae` files; all 9482 `.uae` launchers audited (9441 valid media, 41 stock-pack anomalies).

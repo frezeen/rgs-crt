@@ -1184,6 +1184,40 @@ do_start() {
 	return 0
 }
 
+# Re-arm the live CRT session after an in-place update (`tool-update`
+# runs `get.sh` -> OLD `uninstall.sh` -> NEW `install.sh`; uninstall stops
+# `zz_crt_dual`/`zz_crt_dual_vnc`, clears `/tmp/crt-dual/detect-state`,
+# and resets `dotclock_min` to 0). When X11 is already running with the
+# CRT config, restarting the daemons + dotclock-write avoids a reboot.
+# Seam-guarded: skipped under test overrides (`RGS15_UPDATE_GET` or
+# non-live `PKG`).
+rearm_live_session() {
+	[ "$PKG" = "/userdata/system/crt-dual" ] || return 0
+	[ -z "${RGS15_UPDATE_GET:-}" ] || return 0
+	[ -z "${RGS15_SKIP_LIVE_REARM:-}" ] || return 0
+	local _svc_dir="${RGS15_SVCDIR:-/userdata/system/services}"
+	local _ds="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state"
+	local _i=0
+
+	log "update: re-arming live CRT session (no reboot needed)"
+	if [ -x "$_svc_dir/zz_crt_dual" ]; then
+		bash "$_svc_dir/zz_crt_dual" start >>"$LOG" 2>&1 || log "update: WARN zz_crt_dual start failed"
+		while [ ! -s "$_ds" ] && [ "$_i" -lt 20 ]; do
+			sleep 0.25
+			_i=$((_i + 1))
+		done
+		[ -s "$_ds" ] || log "update: WARN detect-state not ready after 5s — reboot if profiles do not apply"
+	fi
+	if [ -x "$_svc_dir/zz_crt_dual_vnc" ]; then
+		bash "$_svc_dir/zz_crt_dual_vnc" start >>"$LOG" 2>&1 || true
+	fi
+	if [ -x /etc/init.d/S30z-crt-dual-measure ]; then
+		bash /etc/init.d/S30z-crt-dual-measure start >>"$LOG" 2>&1 || true
+	elif [ -x "$_svc_dir/zz_rgs_15khz" ]; then
+		bash "$_svc_dir/zz_rgs_15khz" dotclock-write >>"$LOG" 2>&1 || true
+	fi
+}
+
 case "${1:-}" in
 start)
 	do_start
@@ -1380,6 +1414,7 @@ tool-update)
 	#     rgs.version is a loud WARN and the marker keeps its value.
 	_ver="not re-labelled"
 	if [ "$_installed" = "1" ]; then
+		rearm_live_session
 		_ver="$_feed_ver (installed: the marker keeps the release version)"
 	elif feed_is_base "$_live"; then
 		_base="$(printf '%s' "$_live" | cut -d. -f1,2)"
