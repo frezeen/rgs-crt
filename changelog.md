@@ -2,6 +2,7 @@
 
 ## 2026-11-16
 
+- **EmulationStation**: automatically restarts EmulationStation when returning from a game leaves a persistent black screen even after input wake.
 - **RetroArch (`libretro`)**: classic RGUI menu driver enabled by default on 15 kHz CRT for crisp, legible 240p/480i navigation.
 
 - **Naomi 2 (`naomi2`)**: native `640x480i.59.94` 4:3 CRT output (11/12 titles audited valid; `vf4tuned` is 0 bytes on stock disk).

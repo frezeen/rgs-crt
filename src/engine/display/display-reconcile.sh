@@ -429,7 +429,7 @@ _es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'L
 	# si' (l'owner congeda cosi' lo screensaver). Ma "Left" e' un'AZIONE
 	# (indietro/naviga): si manda SOLO quando il contenuto e' nero, mai a ogni
 	# passata — altrimenti la selezione scivolerebbe a ogni uscita.
-	local pct
+	local pct min="${CRT_DUAL_ES_CONTENT_MIN:-15}"
 	pct=$(_es_content) || return 0
 	[ -n "$pct" ] || return 0
 	# Soglia misurata sul banco (2026-10-18): il difetto (pagina nera con la
@@ -437,18 +437,23 @@ _es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'L
 	# ~47% (un'altra); le sane piene a 75-99%. 15% lascia 8 punti dal difetto e
 	# 10 dalla pagina scura piu' chiara vista: piu' in alto si rischia di
 	# "spingere" una pagina sana (falso positivo — l'owner l'ha chiesto esplicito).
-	if [ "$pct" -lt "${CRT_DUAL_ES_CONTENT_MIN:-15}" ]; then
+	if [ "$pct" -lt "$min" ]; then
 		log "es-content: ${pct}% non-nero — la pagina non si e' disegnata: spingo con 'Left'"
 		DISPLAY="${DISPLAY:-:0}" xdotool key --clearmodifiers Left 2>/dev/null || true
 		sleep 0.5
 		pct=$(_es_content) || return 0
+		[ -n "$pct" ] || return 0
 		log "es-content: dopo lo stimolo ${pct}% non-nero"
+		if [ "$pct" -lt "$min" ]; then
+			_es_repair "pagina nera dopo stimolo" || true
+		fi
 	else
 		log "es-content: ${pct}% non-nero"
 	fi
 }
 
 _es_repair() { # la riparazione che funziona, UNA volta, con pausa di sicurezza
+	local reason="${1:-finestra fuori misura}"
 	local now last
 	now=$(date +%s)
 	last=$(cat "$STATE_DIR/es-restarted" 2>/dev/null)
@@ -458,7 +463,7 @@ _es_repair() { # la riparazione che funziona, UNA volta, con pausa di sicurezza
 		return 1
 	fi
 	printf '%s\n' "$now" >"$STATE_DIR/es-restarted" 2>/dev/null || true
-	log "es-repair: riavvio EmulationStation (finestra fuori misura)"
+	log "es-repair: riavvio EmulationStation ($reason)"
 	if [ -n "${CRT_DUAL_ES_RESTART_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_ES_RESTART_CMD"
 	else
