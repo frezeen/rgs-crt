@@ -59,7 +59,23 @@ _H2 = '''                @MARKER@ — upstream patch 0003, adapted): a conf valu
                 # game carries the desktop mode), never silent.
                 if [ -f @BRIDGE@ ]; then
                     @POOL@
-                    if echo "$_POOL" | grep -qx "${PARTRES}"; then
+                    _MODE_RE=$(printf '%s' "${MODE}" | sed 's/[]\\.|$(){}?+*^\\\\]/\\\\&/g')
+                    if echo "$_POOL" | grep -qx "${MODE}"; then
+                        PARTRES="${MODE}"
+                    elif grep -qE "^[a-zA-Z0-9_.]+\\.videomode=${_MODE_RE}[[:space:]]*$" /userdata/system/batocera.conf 2>/dev/null; then
+                        _W=${PARTRES%%x*}; _H=${PARTRES#*x}; _I=""
+                        case "${_H}" in *i) _I="i"; _H="${_H%i}" ;; esac
+                        MODELINE=$(SR_FLOOR=1 python3 @BRIDGE@ calc "${_W}" "${_H}" "${PARTHZ}${_I}" --name "${MODE}" 2>>$log)
+                        if [ -n "$MODELINE" ]; then
+                            echo "setMode: generating ${MODE} via the Switchres CRT layer" >> $log
+                            _MPARAMS=$(echo "$MODELINE" | sed 's/^Modeline "[^"]*"//')
+                            xrandr --newmode "${MODE}" ${_MPARAMS}
+                            xrandr --addmode "${OUTPUT}" "${MODE}"
+                            PARTRES="${MODE}"
+                        else
+                            echo "setMode: ${MODE} declared but the Switchres layer produced no modeline (stock behavior kept)" >> $log
+                        fi
+                    elif echo "$_POOL" | grep -qx "${PARTRES}"; then
                         : # already in the pool — the apply below finds it
                     elif echo "$_POOL" | grep -qx "${PARTRES}i"; then
                         echo "setMode: interlaced fallback ${PARTRES} -> ${PARTRES}i" >> $log

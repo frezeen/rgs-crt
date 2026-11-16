@@ -1707,7 +1707,7 @@ def _validate_rasters(batocera: dict):
                 raise SpecError(
                     f"{key}: invalid raster '{v}' (the channel speaks "
                     "WxH[i][.RATE] — max-* forms stay stock)")
-            pool_name = v.split(".", 1)[0]
+            pool_name = v
             if seen.setdefault(pool_name, v) != v:
                 raise SpecError(
                     f"pool-name collision '{pool_name}': '{seen[pool_name]}' "

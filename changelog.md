@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-16
+
+- **Naomi 2 (`naomi2`)**: native `640x480i.59.94` 4:3 CRT output (11/12 titles audited valid; `vf4tuned` is 0 bytes on stock disk).
+- **Flycast & 59.94 Hz arcade/console systems**: restored SwitchRes off on Flycast (`dreamcast`, `atomiswave`, `naomi`, `naomi2`) so games open full-frame 4:3 without `853x480` pillarboxing, and matched native `59.94 Hz` vertical refresh across `naomi`, `naomi2`, `atomiswave`, `dreamcast`, `hikaru`, `chihiro`, `namco2x6`, `daphne`, and `singe`.
+- **Sega Model 2 & Model 3 (`model2`, `model3`)**: native `640x480i.57.524160` CRT raster at exact `57.52 Hz` without 520-line vertical overscan overflow.
+- **PS Vita (`psvita`)**: native 1x render with linear filtering, FXAA, and host mouse pointer disabled (`vita3k_show_pointer = 0`) on `864x486@60` full-bleed 480i CRT output.
+- **Nintendo Switch (`switch`, `eden`)**: 1-pass 720p Undocked CRT output (`1280x720` → `864x486@60` full-bleed stretch), Vulkan with BC3 ASTC recompression, GPU cache GC, and CPU cutscene decoding for 2 GB VRAM stability, and host mouse cursor suppressed (`yuzu.mouse = off` via RGS `generators.*` hook).
+- **Game & Watch (`gameandwatch`)**: all 56 MAME SVG/LCD sets rendered with uncropped 4:3 `Unit and Backdrop` handheld artwork (`artworkcrop = 0`, `switchres = 0`) direct on `640x480i` CRT (`mame`).
+
 ## 2026-11-15
 
 - **Intel i915 480i patch:** the patched `i915` kernel module (`6.18.16`) now ships directly with the package so Intel 480i works even on offline installs, with automatic boot self-heal if missing.

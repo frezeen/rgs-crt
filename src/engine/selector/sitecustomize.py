@@ -795,7 +795,7 @@ class _CrtDualPatchLoader(importlib.abc.Loader):
             # with call-time gates. Recorded in _PATCHER_RESULTS so a
             # generator class that stops existing after a Batocera update
             # is a visible FAIL when the profile declares ops for it.
-            if self._name.startswith('configgen.generators.'):
+            if self._name.startswith(('configgen.generators.', 'generators.')):
                 short = self._name.rsplit('.', 2)[-2]
                 try:
                     _PATCHER_RESULTS[self._name] = _patch_generic(module, short)
@@ -815,7 +815,7 @@ class _CrtDualMetaFinder(importlib.abc.MetaPathFinder):
     """Intercept imports of registered modules OR any configgen generator
     module (generic profile-driven patches), wrap their loader."""
     def find_spec(self, fullname, path, target=None):
-        if fullname not in _PATCHERS and not fullname.startswith('configgen.generators.'):
+        if fullname not in _PATCHERS and not fullname.startswith(('configgen.generators.', 'generators.')):
             return None
         for finder in sys.meta_path:
             if finder is self:
