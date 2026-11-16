@@ -2,6 +2,8 @@
 
 ## 2026-11-16
 
+- **RetroArch (`libretro`)**: classic RGUI menu driver enabled by default on 15 kHz CRT for crisp, legible 240p/480i navigation.
+
 - **Naomi 2 (`naomi2`)**: native `640x480i.59.94` 4:3 CRT output (11/12 titles audited valid; `vf4tuned` is 0 bytes on stock disk).
 - **Flycast & 59.94 Hz arcade/console systems**: restored SwitchRes off on Flycast (`dreamcast`, `atomiswave`, `naomi`, `naomi2`) so games open full-frame 4:3 without `853x480` pillarboxing, and matched native `59.94 Hz` vertical refresh across `naomi`, `naomi2`, `atomiswave`, `dreamcast`, `hikaru`, `chihiro`, `namco2x6`, `daphne`, and `singe`.
 - **Sega Model 2 & Model 3 (`model2`, `model3`)**: native `640x480i.57.524160` CRT raster at exact `57.52 Hz` without 520-line vertical overscan overflow.
