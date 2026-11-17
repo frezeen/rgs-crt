@@ -123,7 +123,10 @@ wayvnc/tigervnc/x0vncserver on stock Batocera 43.1).
 
 ## User-procured binaries (NOT bundled)
 
-GroovyMAME (`profiles/<name>/binaries/`, large third-party builds) is
-user-supplied and gitignored; `verify.sh` warns while it is missing and
-the arcade path then runs the stock emulator. See
-`docs/install-and-updates.md` ("The arcade binary is yours to supply").
+GroovyMAME and the libretro MAME core (`profiles/binaries/`, large
+third-party builds, one shared tree for every profile) are fetched at
+install from the project's public release into the gitignored `binaries/`
+tree; no binary is committed.
+`verify.sh` warns while one is missing and the affected launches then run
+the stock binary. See `docs/install-and-updates.md` ("The arcade binary
+arrives with the install").

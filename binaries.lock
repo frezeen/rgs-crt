@@ -2,4 +2,5 @@
 # One entry per line: <tree path> | <url> | <sha256> | <size bytes>.
 # A release that moves a binary changes ONLY this file. Blank lines and
 # lines starting with # are ignored. ASCII only (the publish gate scans).
-src/profiles/rgs-15khz/binaries/mame | https://github.com/frezeen/groovymame-build/releases/download/gm0289sr222f/mame | 7e182efade76fff069a13c3fda51588fa9246aa266b5855288de130ac980eb31 | 94131112
+src/profiles/binaries/mame | https://github.com/frezeen/groovymame-build/releases/download/gm0289sr222f/mame | 7e182efade76fff069a13c3fda51588fa9246aa266b5855288de130ac980eb31 | 94131112
+src/profiles/binaries/mame_libretro.so | https://github.com/frezeen/groovymame-build/releases/download/lrmame0289/mame_libretro.so | 8836009e44cc0a0eb0febb67656662319eeed1f7c4110f24b59c121b17321847 | 119679356

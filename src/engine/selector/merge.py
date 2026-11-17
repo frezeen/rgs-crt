@@ -1028,6 +1028,17 @@ def _overlay_lower_path(rel: str) -> str | None:
     return None
 
 
+def _binary_source(profile_dir: Path, rel: str) -> Path:
+    """Where a procured binary is read from. ONE shared tree at the
+    profiles root (`profiles/binaries/`) serves every profile that
+    declares the key, so a binary is fetched/stored once. A profile-local
+    `binaries/` file still wins — that is the per-profile override."""
+    local = profile_dir / "binaries" / rel
+    if local.is_file():
+        return local
+    return profile_dir.parent / "binaries" / rel
+
+
 def swap_binaries(profile_dir: Path, binaries: dict, target_root: Path,
                   backup_root: Path, name: str) -> None:
     """Symlink-swap the stock binary. NEVER rm a path that shadows a lower
@@ -1035,9 +1046,18 @@ def swap_binaries(profile_dir: Path, binaries: dict, target_root: Path,
     Restore = retarget back to the immutable lower path (or the original
     symlink target) — zero copy, zero whiteout."""
     for rel, dst in binaries.items():
-        src = profile_dir / "binaries" / rel
+        src = _binary_source(profile_dir, rel)
         if not src.is_file():
-            raise SpecError(f"binaries file missing: {src} (user must procure it)")
+            # Procured binaries are gitignored: get.sh WARNs and continues
+            # when a fetch fails, and do_validate/verify.sh WARN too. ONE
+            # missing binary must not abort the WHOLE apply — that drops
+            # every key/keypatch and runs stock (observed 2026-11-17: a
+            # missing mame_libretro.so under [emulator.libretro] killed CRT
+            # SwitchRes on every libretro launch, not just MAME). Skip this
+            # swap only; the rest of the profile still applies.
+            print(f"  WARN: binaries file missing: {src} "
+                  f"(user must procure it) — skipping swap")
+            continue
         dstp = Path(dst)
         bak = backup_root / name / "binaries" / rel
         bak.mkdir(parents=True, exist_ok=True)
@@ -1737,7 +1757,7 @@ def do_validate(profile_dir: Path, name: str, target_root: Path):
         if not (profile_dir / "configs" / rel).is_file():
             raise SpecError(f"configs file missing: {profile_dir}/configs/{rel}")
     for rel in binaries:
-        if not (profile_dir / "binaries" / rel).is_file():
+        if not _binary_source(profile_dir, rel).is_file():
             # binary is user-procured (official-script pattern): warn, not fail
             print(f"  WARN: {profile_dir}/binaries/{rel} missing — "
                   f"user must procure it (never shipped)")

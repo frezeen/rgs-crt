@@ -2,6 +2,12 @@
 
 ## 2026-11-17
 
+- **MAME (`mame`): the emulator is now your choice in EmulationStation, per system or per game.** The profile no longer forces standalone: picking MAME or libretro, and which core, is honoured on both the CRT and the LCD display. Both paths run the current 0.289 builds — GroovyMAME for standalone, the MAME core for libretro — with native board modes, artwork crop and stable audio on the 15 kHz tube. Certified with owner verde.
+
+- **MAME binaries arrive once for both display targets.** An install downloads GroovyMAME and the libretro MAME core into a single shared folder used by the CRT and LCD profiles; updating from an older release reuses the binary already on the box instead of fetching it again.
+
+- **A missing MAME binary no longer costs you the CRT picture.** If a download did not complete, the launch warns and runs the stock binary while keeping the native raster and the rest of the picture settings, instead of dropping the whole tuned setup.
+
 - **PlayStation (`psx`): certified on the 15 kHz CRT (owner verde).** The full set — 1,948 CHD / 69 M3U — was audited and needs no per-game or per-system keys: stock `libretro/pcsx_rearmed` with the global CRT baseline already renders the native 1:1 240p raster, with no bezel or shader, cursor hidden and lightgun input intact. Certified by sampled rendering classes (NTSC 60 Hz, PAL 50 Hz, multi-disc M3U, GunCon lightgun, prototype/homebrew) instead of title by title.
 
 - **Sega NAOMI (`naomi`): a wedged game no longer leaves the CRT frozen.** F355 Challenge runs on two emulator boards; a close request could end only one, leaving the other waiting with a still picture so EmulationStation never came back. The display supervisor now recognises that fatal condition and ends the session cleanly — the desktop is restored and ES returns in seconds without a second close. Tested with owner verde on the 15 kHz tube.

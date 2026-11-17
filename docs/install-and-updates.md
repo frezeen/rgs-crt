@@ -126,29 +126,38 @@ patch is moved back to a non-Intel graphics card, the layer removes its
 own files from the boot partition by itself at the next start — there is
 nothing to clean up by hand.
 
-## The arcade binary arrives with the install
+## The arcade binaries arrive with the install
 
-The tube profile runs arcade games (the MAME systems) through
-**GroovyMAME** — the special MAME build that generates video modes for
-arcade CRTs on the fly. Its binaries are large third-party builds, so
-this project never ships them in this repository.
+Neither display profile forces an emulator: you pick standalone or
+libretro in ES, per system or per game. Whichever you pick, the new
+binary is used — **GroovyMAME 0.289** for standalone MAME launches and
+the **libretro MAME 0.289 core** for libretro launches, on any system
+that uses them, both on the CRT and on the LCD target. RGS stock ships
+older MAME builds, so the layer swaps these two in whenever they are
+needed. Both are large third-party
+builds, so this project never ships them in the repository.
 
-You do nothing extra for it: the install fetches the tested build
-automatically from the project's public release, checks it, and places
-it where the arcade path expects it (the certification here was done on
-**0.289**). Updating later re-uses the binary already on the box when
-it matches, instead of downloading it again.
+You do nothing extra for them: the install fetches the tested builds
+automatically from the project's public release, checks their sha256,
+and places them where the launch path expects them. Updating later
+re-uses the binaries already on the box when they match, instead of
+downloading them again: a binary left by an older release in a
+profile-local folder is moved into the shared folder first, with no
+second download and no orphan copy.
 
-If the box was offline at install time and the binary is missing, the
+If the box was offline at install time and a binary is missing, the
 verifier says which one and where it goes
-(`/userdata/system/crt-dual/profiles/rgs-15khz/binaries/mame` — the
-file is simply named `mame`, and must be runnable), and still reports
-clean — every non-arcade system works untouched; once it is placed, the
-warning disappears and arcade launches use it.
+(`/userdata/system/crt-dual/profiles/binaries/mame` and
+`.../binaries/mame_libretro.so` — one shared tree serves both profiles,
+so each file is fetched only once),
+and still reports clean; once placed, the warning disappears and the
+corresponding launches use it. A missing standalone binary affects only
+standalone-MAME launches, a missing core only libretro launches — and even
+there only the binary is stock: the CRT keys and keypatches still apply.
 
-Without the binary, what you skip is the arcade certification (the
-native-mode per-game path described in the compatibility map); nothing
-else in the layer is affected.
+Without a binary, what you skip is that launch path's certification
+(the native-mode per-game path described in the compatibility map);
+nothing else in the layer is affected.
 
 ## `./verify.sh` — the gate
 

@@ -148,7 +148,7 @@ fi
 mkdir -p "$SRC" || fail "cannot create $SRC"
 KEPT="$TMPDIR/kept-binaries"
 mkdir -p "$KEPT" || fail "cannot create $KEPT"
-for _b in "$SRC"/src/profiles/*/binaries "$SRC"/src/service/i915/binaries; do
+for _b in "$SRC"/src/profiles/binaries "$SRC"/src/profiles/*/binaries "$SRC"/src/service/i915/binaries; do
 	[ -d "$_b" ] || continue
 	_rel="${_b#"$SRC"/}"
 	mkdir -p "$KEPT/$(dirname "$_rel")" || fail "cannot stage $_rel"
@@ -162,6 +162,37 @@ if [ -d "$KEPT/src" ]; then
 	log "restored procured binaries"
 fi
 log "source tree replaced: $SRC ($VERSION)"
+
+# ── d2) migrate procured binaries from the legacy per-profile layout into
+# the shared tree. An updater from a release whose lock pointed at
+# src/profiles/<name>/binaries/ already owns the file: move it ONCE, so the
+# NEW lock (src/profiles/binaries/) skips the download and no 94 MB orphan
+# is left behind. Only names the new lock expects in the shared tree are
+# migrated — an unrelated user file or a profile override stays put. The
+# genuinely new core is still fetched by the loop below. ──
+_MIG_PREFIX="src/profiles/binaries/"
+_MIG_LOCK="$SRC/binaries.lock"
+if [ -f "$_MIG_LOCK" ]; then
+	while IFS= read -r _mig_line || [ -n "$_mig_line" ]; do
+		case "$_mig_line" in ''|\#*) continue ;; esac
+		_mig_path="$(printf '%s' "$_mig_line" | cut -d'|' -f1 | tr -d ' \t\r\n')"
+		case "$_mig_path" in "$_MIG_PREFIX"*) ;; *) continue ;; esac
+		_mig_name="${_mig_path#"$_MIG_PREFIX"}"
+		[ -n "$_mig_name" ] || continue
+		[ -e "$SRC/$_mig_path" ] && continue
+		for _mig_legacy in "$SRC"/src/profiles/*/binaries; do
+			[ -d "$_mig_legacy" ] || continue
+			case "$_mig_legacy" in "$SRC"/src/profiles/binaries) continue ;; esac
+			[ -f "$_mig_legacy/$_mig_name" ] || continue
+			mkdir -p "$SRC/src/profiles/binaries" || fail "cannot create shared binaries dir"
+			mv -f "$_mig_legacy/$_mig_name" "$SRC/src/profiles/binaries/$_mig_name" \
+				|| fail "cannot migrate $_mig_name to the shared tree"
+			log "migrated procured binary to shared tree: $_mig_name"
+			rmdir "$_mig_legacy" 2>/dev/null || true
+			break
+		done
+	done < "$_MIG_LOCK"
+fi
 
 # ── e) procured binaries per the NEW lock: exact on disk = skip (no
 # download); otherwise download, verify sha256, place executable.
