@@ -209,7 +209,7 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	# shellcheck disable=SC2086 # a pid list is the point
 	kill -TERM $pids 2>/dev/null || true
 	while [ "$n" -lt 6 ] && kill -0 "$lp" 2>/dev/null; do
-		sleep 0.5
+		sleep "${CRT_DUAL_END_TREE_POLL:-0.5}"
 		n=$((n + 1))
 	done
 	left="$(_tree_pids "$lp" | tr '\n' ' ')"
@@ -378,7 +378,7 @@ _es_ok() { # rc 0 = la finestra di ES e' grande quanto lo schermo (o non c'e' ES
 	while [ "$i" -lt 4 ]; do
 		wid=$(_es_win)
 		[ -n "$wid" ] && break
-		sleep 0.4
+		sleep "${CRT_DUAL_ES_WIN_POLL:-0.4}"
 		i=$((i + 1))
 	done
 	[ -n "$wid" ] || { log "es-check: nessuna finestra ES dopo 4 tentativi — non decido"; return 0; }
@@ -417,21 +417,50 @@ _es_content() { # % intero di pixel NON neri DENTRO la finestra di ES; vuoto se 
 	[ "$((y + h))" -gt "${sz#*x}" ] && h=$(( ${sz#*x} - y ))
 	[ "$w" -gt 0 ] && [ "$h" -gt 0 ] || return 1
 	f=$(mktemp /tmp/crt-dual-content.XXXXXX.png) || return 1
-	timeout 5 env DISPLAY="${DISPLAY:-:0}" ffmpeg -y -loglevel error -f x11grab -video_size "$sz" -i :0 -frames:v 1 "$f" 2>/dev/null || { rm -f "$f"; return 1; }
+	timeout 5 env DISPLAY="${DISPLAY:-:0}" ffmpeg -y -loglevel error -f x11grab -video_size "$sz" -i "${DISPLAY:-:0}" -frames:v 1 "$f" 2>/dev/null || { rm -f "$f"; return 1; }
 	pct=$(ffmpeg -v error -i "$f" -vf "crop=$w:$h:${x:-0}:${y:-0},format=gray" -f rawvideo - 2>/dev/null |
 		od -An -tu1 -v | tr -s ' ' '\n' | awk 'NF==1 { n++; if ($1 > 8) m++ } END { if (n) printf "%d", 100*m/n }')
 	rm -f "$f"
 	[ -n "$pct" ] || return 1
 	printf '%s\n' "$pct"
 }
-_es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'Left'
+_es_cpu_ticks() { # somma utime+stime di ES in clock ticks (vuoto se il processo non esiste)
+	local p
+	p=$(_es_pid)
+	[ -n "$p" ] && [ -r "/proc/$p/stat" ] || return 1
+	sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | awk '{print ($12 + $13)}'
+}
+_es_content_gate() { # il contenuto della pagina; dinamico: attende finche' launcher/ES lavorano, poi Left / restart solo se bloccato nero
 	# Il MOUSE non sveglia ES (due prove su due, 2026-10-18); la freccia sinistra
 	# si' (l'owner congeda cosi' lo screensaver). Ma "Left" e' un'AZIONE
 	# (indietro/naviga): si manda SOLO quando il contenuto e' nero, mai a ogni
 	# passata — altrimenti la selezione scivolerebbe a ogni uscita.
 	local pct min="${CRT_DUAL_ES_CONTENT_MIN:-15}"
-	pct=$(_es_content) || return 0
-	[ -n "$pct" ] || return 0
+	if [ -z "${CRT_DUAL_ES_CONTENT_CMD:-}" ]; then
+		local prev_cpu="" cur_cpu="" idle=0 i=0
+		prev_cpu=$(_es_cpu_ticks 2>/dev/null || true)
+		while [ "$i" -lt 75 ]; do
+			pct=$(_es_content) || return 0
+			[ -n "$pct" ] || return 0
+			if [ "$pct" -ge "$min" ]; then
+				[ "$i" -gt 0 ] && log "es-content: pronto dopo ${i} cicli (${pct}% non-nero)" || log "es-content: ${pct}% non-nero"
+				return 0
+			fi
+			cur_cpu=$(_es_cpu_ticks 2>/dev/null || true)
+			if pgrep -f '/emulatorlauncher' >/dev/null 2>&1 || { [ -n "$cur_cpu" ] && [ -n "$prev_cpu" ] && [ "$cur_cpu" != "$prev_cpu" ]; }; then
+				idle=0
+			else
+				idle=$((idle + 1))
+				[ "$idle" -ge 2 ] && break
+			fi
+			prev_cpu="$cur_cpu"
+			sleep "${CRT_DUAL_ES_CONTENT_POLL:-0.4}"
+			i=$((i + 1))
+		done
+	else
+		pct=$(_es_content) || return 0
+		[ -n "$pct" ] || return 0
+	fi
 	# Soglia misurata sul banco (2026-10-18): il difetto (pagina nera con la
 	# barra) sta a 7,2%; una pagina legittima SCURA sta a 25,7% (osservata) e a
 	# ~47% (un'altra); le sane piene a 75-99%. 15% lascia 8 punti dal difetto e
@@ -440,7 +469,7 @@ _es_content_gate() { # il contenuto della pagina; se e' nero lo si spinge con 'L
 	if [ "$pct" -lt "$min" ]; then
 		log "es-content: ${pct}% non-nero — la pagina non si e' disegnata: spingo con 'Left'"
 		DISPLAY="${DISPLAY:-:0}" xdotool key --clearmodifiers Left 2>/dev/null || true
-		sleep 0.5
+		sleep "${CRT_DUAL_ES_STIM_SLEEP:-0.5}"
 		pct=$(_es_content) || return 0
 		[ -n "$pct" ] || return 0
 		log "es-content: dopo lo stimolo ${pct}% non-nero"
@@ -725,6 +754,11 @@ case "${1:---check}" in
 	_sess_start=0
 	_budget="${CRT_DUAL_SESSION_BUDGET:-120}"
 	_lost_budget="${CRT_DUAL_SESSION_LOST_BUDGET:-12}"
+	# A wedged game keeps its window mapped, so the window probes below can
+	# never end its session; the fatal line in its own stderr is the signal
+	# that separates it from a live game. The log is per-launch (ES redirects
+	# it with `2>`), so a hit always belongs to the session whose guard is up.
+	_fatal_log="${CRT_DUAL_LAUNCH_STDERR:-/userdata/system/logs/es_launch_stderr.log}"
 	_seen_at=0
 	_first=1
 	settle=0
@@ -769,6 +803,12 @@ case "${1:---check}" in
 				:
 			elif ! _under_es "$_lp"; then
 				_end_why="launcher orphaned (ES gone)"
+			elif [ -n "$_fatal_log" ] && grep -qF 'Cannot initialize Naomi multiboard shared memory' "$_fatal_log" 2>/dev/null; then
+				# measured 2026-11-17: an exit request reached only the NAOMI
+				# multiboard slave; the master survived in futex_do_wait with
+				# its window still mapped and no game-ended ever arrived. Same
+				# remedy as every other session end — no new kill mechanism.
+				_end_why="fatal emulator stdio"
 			elif _game_alive; then
 				_seen=$((_seen + 1))
 				_seen_at="$(date +%s)"

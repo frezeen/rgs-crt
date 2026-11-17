@@ -243,6 +243,10 @@ _decl_guard() { # one-time: suspend declarations contradicted by live evidence
 	# panel) is a contradiction — warn loud, suspend, evidence wins.
 	[ -z "$_GUARD_DONE" ] || return 0
 	_GUARD_DONE=1
+	local _crt_k="" _lcd_k=""
+	_crt_k=$(_knob 'crt-dual\.crt_output' || true)
+	_lcd_k=$(_knob 'crt-dual\.analog_lcd' || true)
+	[ -n "$_crt_k" ] || [ -n "$_lcd_k" ] || return 0
 	local f st drm edid cls rows="" panels="" analogs=""
 	for f in "$ENV_SYSFS"/card*-*/status; do
 		[ -f "$f" ] || continue
@@ -314,12 +318,9 @@ _classify() { # $1 = DRM connector, $2 = EDID path, $3 = status -> analog|panel
 	_analog_capable "$1" && echo analog || echo panel
 }
 
-_gpu_offset() { # DRM index vs X index (family fact: NVIDIA -1, others identity), cached
+_ensure_gpu_offset() { # DRM index vs X index (family fact: NVIDIA -1, others identity), cached
+	[ -n "${_GPU_OFF:-}" ] && return 0
 	local v off
-	if [ -n "$_GPU_OFF" ]; then
-		printf '%s\n' "$_GPU_OFF"
-		return 0
-	fi
 	v="${GPU_VENDOR:-}"
 	if [ -z "$v" ] && [ -r "$HERE/../lib/gpu-lib.sh" ]; then
 		# shellcheck disable=SC1090
@@ -332,7 +333,12 @@ _gpu_offset() { # DRM index vs X index (family fact: NVIDIA -1, others identity)
 	*) off=0 ;;
 	esac
 	_GPU_OFF="$off"
-	printf '%s\n' "$off"
+	export _GPU_OFF GPU_VENDOR
+}
+
+_gpu_offset() {
+	_ensure_gpu_offset
+	printf '%s\n' "$_GPU_OFF"
 }
 
 _pure_x_name() { # DRM name -> X name by the naming rule (pre-X safe)
@@ -347,12 +353,14 @@ _pure_x_name() { # DRM name -> X name by the naming rule (pre-X safe)
 		idx="${drm##*-}"
 		;;
 	esac
-	printf '%s-%s\n' "$type" "$((idx - $(_gpu_offset)))"
+	_ensure_gpu_offset
+	printf '%s-%s\n' "$type" "$((idx - _GPU_OFF))"
 }
 
 detect_connectors() { # connected connectors only, deterministic order
 	local f st drm cls x
 	local text
+	_ensure_gpu_offset
 	text=$(_x_outputs) # UNA lettura per scansione (vedi _x_name_of_text)
 	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do
@@ -370,6 +378,7 @@ detect_connectors() { # connected connectors only, deterministic order
 detect_all_connectors() { # every connector: drm, class, status, edid-bytes, X name (pure rule pre-X)
 	local f st drm cls edid x
 	local text
+	_ensure_gpu_offset
 	text=$(_x_outputs) # UNA lettura per scansione
 	_decl_guard
 	for f in "$ENV_SYSFS"/card*-*/status; do

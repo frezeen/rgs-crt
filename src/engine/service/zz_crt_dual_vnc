@@ -44,6 +44,7 @@ case "$1" in
 		XSOCK="${CRT_DUAL_VNC_XSOCK:-/tmp/.X11-unix/X0}"
 		MAXFAILS="${CRT_DUAL_VNC_MAXFAILS:-5}"
 		HEALTHY_S="${CRT_DUAL_VNC_HEALTHY_S:-30}"
+		POLL="${CRT_DUAL_VNC_POLL:-2}"
 		mkdir -p "$(dirname "$LOG")"
 
 		[ -x "$VNC" ] || {
@@ -72,12 +73,12 @@ case "$1" in
 		export DISPLAY="${DISPLAY:-:0}"
 		for _i in $(seq 1 15); do
 			xrandr --current 2>/dev/null | grep -q " connected" && break
-			sleep 2
+			sleep "$POLL"
 		done
 
 		# Respawn loop, bounded (see point 3 in the header). $1 pidfile,
 		# $2 launcher, $3 log, $4 X socket, $5 healthy-run seconds,
-		# $6 consecutive quick deaths allowed.
+		# $6 consecutive quick deaths allowed, $7 poll seconds.
 		nohup bash -c '
 			# A signal on the loop is the only way VNC disappears without a
 			# trace (the loop restarts the server on its own): record it, so
@@ -90,7 +91,7 @@ case "$1" in
 				# socket costs nothing and recovers by itself.
 				_waited=0
 				while [ ! -S "$4" ]; do
-					sleep 2; _waited=$((_waited+1))
+					sleep "$7"; _waited=$((_waited+1))
 					if [ "$_waited" -ge 300 ]; then
 						echo "zz_crt_dual_vnc: X socket $4 still absent after $((_waited*2))s — VNC off" >>"$3"
 						break 2
@@ -108,11 +109,11 @@ case "$1" in
 					echo "zz_crt_dual_vnc: the VNC server died $_fails times in a row within ${5}s of starting (see above) — crash-loop, VNC off" >>"$3"
 					break
 				fi
-				sleep 2
+				sleep "$7"
 			done
 			rm -f "$1"
-		' _ "$PIDFILE" "$VNC" "$LOG" "$XSOCK" "$HEALTHY_S" "$MAXFAILS" >/dev/null 2>&1 &
-		sleep 2
+		' _ "$PIDFILE" "$VNC" "$LOG" "$XSOCK" "$HEALTHY_S" "$MAXFAILS" "$POLL" >/dev/null 2>&1 &
+		sleep "$POLL"
 		if pgrep -x X0tigervnc >/dev/null 2>&1; then
 			echo "zz_crt_dual_vnc: VNC server started (port 5900, DISPLAY=$DISPLAY, respawn loop) — log: $LOG"
 		else

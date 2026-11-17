@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-17
+
+- **PlayStation (`psx`): certified on the 15 kHz CRT (owner verde).** The full set — 1,948 CHD / 69 M3U — was audited and needs no per-game or per-system keys: stock `libretro/pcsx_rearmed` with the global CRT baseline already renders the native 1:1 240p raster, with no bezel or shader, cursor hidden and lightgun input intact. Certified by sampled rendering classes (NTSC 60 Hz, PAL 50 Hz, multi-disc M3U, GunCon lightgun, prototype/homebrew) instead of title by title.
+
+- **Sega NAOMI (`naomi`): a wedged game no longer leaves the CRT frozen.** F355 Challenge runs on two emulator boards; a close request could end only one, leaving the other waiting with a still picture so EmulationStation never came back. The display supervisor now recognises that fatal condition and ends the session cleanly — the desktop is restored and ES returns in seconds without a second close. Tested with owner verde on the 15 kHz tube.
+
 ## 2026-11-16
 
 - **EmulationStation**: automatically restarts EmulationStation when returning from a game leaves a persistent black screen even after input wake.

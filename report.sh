@@ -82,8 +82,11 @@ esac
 
 OUTDIR="${RGS15_REPORT_DIR:-$REPO}"
 LOGS_DIR="${RGS15_LOGS_DIR:-/userdata/system/logs}"
+ES_DIR="${RGS15_ES_DIR:-/userdata/system/configs/emulationstation}"
 PKG="${RGS15_PKG:-/userdata/system/crt-dual}"
 DIAG_DUMP="${RGS15_DIAG_DUMP:-$REPO/src/engine/tools/diag-dump.sh}"
+EDID_INFO="${RGS15_EDID_INFO:-$REPO/src/engine/tools/edid-info.sh}"
+VERIFY_SH="${RGS15_VERIFY:-$REPO/verify.sh}"
 MARK_DIR="${RGS15_TMPMARK:-/tmp/crt-dual}"
 X11_CONF="${RGS15_X11_CONF:-/etc/X11/xorg.conf.d/99-crt.conf}"
 SYS_SWITCHRES="${RGS15_SYS_SWITCHRES:-/etc/switchres.ini}"
@@ -115,21 +118,24 @@ echo "collecting (this takes a few seconds)..."
 #     sits between the box and the tube, and whether an EDID is a real
 #     display's or a fabrication. Facts only; the class line comes from
 #     display-detect.sh (single source of truth).
-( bash "$REPO/src/engine/tools/edid-info.sh" >"$STAGE/adapters.txt" 2>&1 \
+( bash "$EDID_INFO" >"$STAGE/adapters.txt" 2>&1 \
 	|| echo "edid-info exited $? (kept its output anyway)" >>"$STAGE/adapters.txt" ) &
 
 # 2. The gate verdict.
-( bash "$REPO/verify.sh" >"$STAGE/verify.txt" 2>&1
+( bash "$VERIFY_SH" >"$STAGE/verify.txt" 2>&1
   echo "verify.sh exit code: $?" >>"$STAGE/verify.txt" ) &
 
 # 3. Runtime logs — ours and the stock display/launch ones (full copies;
 #    missing ones are benign: some never exist before first use).
 for _f in rgs-15khz.log selector-core.log selector.log \
-	display-reconcile.log gamepad-reprobe.log \
-	display-detect.log service.log display.log udev.log es_launch_stdout.log \
-	es_launch_stderr.log es_script_stdout.log es_script_stderr.log \
-	rgs_download.log vnc.log; do
+	display-reconcile.log display-trace.log gamepad-reprobe.log \
+	display-detect.log nvidia.log service.log display.log udev.log \
+	es_launch_stdout.log es_launch_stderr.log es_script_stdout.log \
+	es_script_stderr.log rgs_download.log vnc.log; do
 	[ -f "$LOGS_DIR/$_f" ] && cp -a "$LOGS_DIR/$_f" "$STAGE/logs/$_f" || true
+done
+for _f in es_log.txt es_log.0.txt; do
+	[ -f "$ES_DIR/$_f" ] && cp -a "$ES_DIR/$_f" "$STAGE/logs/$_f" || true
 done
 [ -f /var/run/boot.log ] && cp -a /var/run/boot.log "$STAGE/logs/boot.log" || true
 
@@ -212,6 +218,12 @@ dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \
 #     possible without cutting a section out by hand.
 [ -f "$X11_CONF" ] && cp -a "$X11_CONF" "$STAGE/99-crt.conf" 2>/dev/null || true
 [ -f "$SYS_SWITCHRES" ] && cp -a "$SYS_SWITCHRES" "$STAGE/switchres.ini" 2>/dev/null || true
+
+# 7b2. Process list and ES window geometry (for freeze/hang triage, no args/secrets).
+ps -eo pid,ppid,stat,etime,comm 2>/dev/null >"$STAGE/ps.txt" || true
+if command -v xdotool >/dev/null 2>&1; then
+	timeout 2 env DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation getwindowgeometry >"$STAGE/es-window.txt" 2>/dev/null || true
+fi
 
 # 7c. Self-check (U1b): a bundle must not look OK when a decisive field is
 #     missing. Reasons are ACCUMULATED (never stop at the first), written

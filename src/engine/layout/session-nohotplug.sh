@@ -24,20 +24,22 @@ NOHOTPLUG_FILE="${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}"
 # in cui il file viene ricreato rende la soppressione deterministica; alla
 # scadenza si rimuove, cosi' non resta nessun file stantio.
 HOLD="${CRT_DUAL_NOHOTPLUG_HOLD:-}"
+POLL="${CRT_DUAL_NOHOTPLUG_POLL:-0.5}"
+HOLD_POLLS="${CRT_DUAL_NOHOTPLUG_HOLD_POLLS:-$(( ${HOLD:-0} * 2 ))}"
 touched=0
 if [ -n "$HOLD" ] && [ "$HOLD" -gt 0 ] 2>/dev/null; then
 	i=0
-	while [ "$i" -lt "$((HOLD * 2))" ]; do
+	while [ "$i" -lt "$HOLD_POLLS" ]; do
 		[ -f "$NOHOTPLUG_FILE" ] || : >"$NOHOTPLUG_FILE" 2>/dev/null
 		[ -f "$NOHOTPLUG_FILE" ] && touched=1
-		sleep 0.5
+		sleep "$POLL"
 		i=$((i + 1))
 	done
 else
 	while [ -f "$MODE_FILE" ] || [ -f "$PROFILE_FILE" ]; do
 		[ -f "$NOHOTPLUG_FILE" ] || : >"$NOHOTPLUG_FILE" 2>/dev/null
 		[ -f "$NOHOTPLUG_FILE" ] && touched=1
-		sleep 0.5
+		sleep "$POLL"
 	done
 fi
 [ "$touched" = "1" ] && rm -f "$NOHOTPLUG_FILE" 2>/dev/null || true

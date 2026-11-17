@@ -232,6 +232,14 @@ _es_follow() {
 # sblocca con un input, e quello e' il caso in cui il menu resta nero.
 if [ "${1:-}" = "--es-follow" ]; then _es_follow; exit $?; fi
 
+if [ -z "${CRT_DUAL_DETECT_CHECK:-}" ] || [ -z "${CRT_DUAL_DETECT_LIST:-}" ]; then
+	_det_out=$(bash "$HERE/display-detect.sh" --state 2>/dev/null) || _det_out=""
+	if [ -n "$_det_out" ]; then
+		CRT_DUAL_DETECT_CHECK=$(printf '%s\n' "$_det_out" | sed -n 's/^CHECK	//p' | head -1)
+		CRT_DUAL_DETECT_LIST=$(printf '%s\n' "$_det_out" | sed -n 's/^LIST	//p')
+		export CRT_DUAL_DETECT_CHECK CRT_DUAL_DETECT_LIST
+	fi
+fi
 plan=$(bash "$HERE/display-model.sh") || exit 1
 [ "${1:-}" = "--plan" ] && { printf '%s\n' "$plan"; exit 0; }
 mode="${1:-dry}"
