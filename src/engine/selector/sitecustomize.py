@@ -203,10 +203,39 @@ def _patch_emulatorlauncher(module):
     _sys_scripts = module.SYSTEM_SCRIPTS
     _user_scripts = module.USER_SCRIPTS
     _gs_ran = [False]  # mutable flag for the closure
+    _session_profile = [""]  # non-empty when our profile ran for this launch
+
+    def _is_unrotated_mame_gamestop(folder, event, args) -> bool:
+        """Stock rotation_fix.sh runs `batocera-resolution setRotation $rot`
+        on every standalone MAME gameStop even when rot == 0, which sleeps
+        5s polling xinput for a non-existent touchscreen and emits a late
+        `xrandr --rotate normal`. Safe to skip when rotation is already '0'
+        on both CRT and LCD sessions."""
+        if not _session_profile[0] or event != 'gameStop' or folder != _sys_scripts:
+            return False
+        if len(args) < 2 or args[1] != 'mame':
+            return False
+        try:
+            rot = subprocess.check_output(
+                ['batocera-resolution', 'getRotation'],
+                stderr=subprocess.DEVNULL, text=True, timeout=2
+            ).strip()
+        except Exception:
+            return False
+        return rot == '0'
 
     def _patched_ces(folder, event, args):
         if event == 'gameStart' and _gs_ran[0]:
             return  # hoisted gameStart already ran — skip the duplicate
+        if _is_unrotated_mame_gamestop(folder, event, args) and Path(folder).is_dir():
+            for f in Path(folder).iterdir():
+                if f.is_dir():
+                    _patched_ces(f, event, args)
+                elif f.name == 'rotation_fix.sh':
+                    _log.info("crt-dual: skipping stock rotation_fix.sh (rotation=0)")
+                elif os.access(f, os.X_OK):
+                    subprocess.call([f, event, *args])
+            return
         return _orig_ces(folder, event, args)
 
     def patched_start_rom(args, maxnbplayers, rom, original_rom):
@@ -218,6 +247,7 @@ def _patch_emulatorlauncher(module):
         _orig_ces(_sys_scripts, "gameStart", [system_name, "", "", original_rom])
         _orig_ces(_user_scripts, "gameStart", [system_name, "", "", original_rom])
         _gs_ran[0] = True
+        _session_profile[0] = _active_profile()
         # RGS-15KHZ-EXT (pin): the PROFILE's emulator/core declaration
         # becomes the launch's. ES's -emulator argument (RGS's own
         # es_systems command) would otherwise win over the conf
@@ -237,6 +267,7 @@ def _patch_emulatorlauncher(module):
         finally:
             module.callExternalScripts = _orig_ces  # restore
             _gs_ran[0] = False
+            _session_profile[0] = ""
 
     module.start_rom = patched_start_rom
     _log.info("crt-dual: emulatorlauncher.start_rom monkey-patched (gameStart first)")

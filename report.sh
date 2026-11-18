@@ -211,6 +211,8 @@ dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \
 	df -h /userdata 2>/dev/null || true
 	echo "root mount (overlay layout):"
 	mount | grep -E " / |overlay|squashfs" || true
+	echo "binaries targets (swap class):"
+	ls -la /usr/bin/mame/mame /usr/lib/libretro/mame_libretro.so /overlay/base2/usr/bin/mame/mame /overlay/base2/usr/lib/libretro/mame_libretro.so 2>/dev/null || true
 } >"$STAGE/metadata.txt"
 
 # 7b. Convenience copies of the two living display configs (read-only). Both
@@ -219,10 +221,13 @@ dmesg 2>/dev/null | grep -iE "drm|amdgpu|radeon|nvidia|i915" | tail -400 \
 [ -f "$X11_CONF" ] && cp -a "$X11_CONF" "$STAGE/99-crt.conf" 2>/dev/null || true
 [ -f "$SYS_SWITCHRES" ] && cp -a "$SYS_SWITCHRES" "$STAGE/switchres.ini" 2>/dev/null || true
 
-# 7b2. Process list and ES window geometry (for freeze/hang triage, no args/secrets).
+# 7b2. Process list, ES window geometry and ES /runningGame HTTP status (for freeze/hang triage, no args/secrets).
 ps -eo pid,ppid,stat,etime,comm 2>/dev/null >"$STAGE/ps.txt" || true
 if command -v xdotool >/dev/null 2>&1; then
 	timeout 2 env DISPLAY="${DISPLAY:-:0}" xdotool search --class emulationstation getwindowgeometry >"$STAGE/es-window.txt" 2>/dev/null || true
+fi
+if command -v curl >/dev/null 2>&1; then
+	printf 'es_running_game_http: %s\n' "$(curl -s -m 1 -o /dev/null -w '%{http_code}' "${CRT_DUAL_ES_URL:-http://127.0.0.1:1234/runningGame}" 2>/dev/null || echo 000)" >>"$STAGE/es-window.txt" 2>/dev/null || true
 fi
 
 # 7c. Self-check (U1b): a bundle must not look OK when a decisive field is

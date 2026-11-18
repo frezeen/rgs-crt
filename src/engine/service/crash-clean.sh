@@ -12,7 +12,9 @@
 # from the persistent backup (merge.py remove)
 # 3. swapped binaries (e.g. GroovyMAME over /usr/bin/mame/mame) —
 # retargeted back to the immutable stock (merge.py remove)
-# 4. stale runtime state (/tmp/crt-dual-*) — removed
+# 4. batocera.conf residue keys a dead session left behind — healed
+#    against the first-install snapshot (merge.py heal)
+# 5. stale runtime state (/tmp/crt-dual-*) — removed
 #
 # Level 1 (next gameStart pre-clean) is inside merge.py apply. This
 # script is the level 2 boot cleanup, run by zz_crt_dual at boot.
@@ -20,7 +22,9 @@
 # The engine's merge.py remove IS the recovery (idempotent, no-op when
 # nothing active): for every profile that has a persistent backup, run
 # remove. The awk fallback below covers marked blocks whose profile was
-# deleted between sessions (defensive, byte-for-byte removal).
+# deleted between sessions (defensive, byte-for-byte removal). The heal
+# pass covers what remove cannot see — keys with no prev archive (the
+# 2026-11-17 LCD 480i residue class; see merge.py do_heal).
 #
 # Atomic write: temp + fsync + mv in the same directory (temp-files rule).
 #
@@ -86,6 +90,15 @@ if [ -f "$MERGE" ] && [ -d "$PKG_ROOT/profiles" ] && [ -d "$PKG_ROOT/backups" ];
 				>/dev/null 2>&1 || echo "CRT-DUAL-CRASH-CLEAN: WARN — recovery of $_name failed" >&2
 		fi
 	done
+
+	# ── 1.5 Residue heal: dead exits remove could not see — batocera keys
+	# sitting at a profile target with no prev archive, restored against
+	# the first-install snapshot (merge.py do_heal). At boot no session can
+	# be live (/tmp is fresh); bounded, idempotent, prints only actions. ──
+	_heal_out="$(python3 "$MERGE" heal "$PKG_ROOT/profiles" "$PKG_ROOT/backups" 2>&1)" || true
+	if [ -n "$_heal_out" ]; then
+		printf '%s\n' "$_heal_out" | sed 's/^/CRT-DUAL-CRASH-CLEAN: /'
+	fi
 fi
 
 # ── 2. Defensive fallback: marked blocks without a profile (deleted
@@ -98,7 +111,7 @@ for _f in "${TRACKED_FILES[@]}" $OPT_GLOB; do
 done
 
 # ── 3. Stale runtime state (a boot must start clean) ──
-for _s in crt-dual-mode crt-dual-profile; do
+for _s in crt-dual-mode crt-dual-profile crt-dual/profile crt-dual/launcher crt-dual/stopping; do
 	if [ -f "$STATE_ROOT/$_s" ]; then
 		rm -f "$STATE_ROOT/$_s" || true # best-effort; absence is the clean state
 		echo "CRT-DUAL-CRASH-CLEAN: removed stale state $STATE_ROOT/$_s"

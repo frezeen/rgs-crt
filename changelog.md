@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-18
+
+- **Leaving a game no longer leaves you without EmulationStation.** When the exit hangs halfway, the frontend repairs itself in seconds instead of making you restart the machine.
+
+- **A game started on the LCD panel after a crash no longer breaks it.** The CRT mode left behind in the settings by an unclean shutdown is cleaned up on boot and on every launch, so the panel never comes up with the wrong raster.
+
 ## 2026-11-17
 
 - **MAME (`mame`): the emulator is now your choice in EmulationStation, per system or per game.** The profile no longer forces standalone: picking MAME or libretro, and which core, is honoured on both the CRT and the LCD display. Both paths run the current 0.289 builds — GroovyMAME for standalone, the MAME core for libretro — with native board modes, artwork crop and stable audio on the 15 kHz tube. Certified with owner verde.

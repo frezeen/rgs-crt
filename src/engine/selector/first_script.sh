@@ -28,7 +28,12 @@ export DISPLAY="${DISPLAY:-:0}"
 PKG_ROOT="/userdata/system/crt-dual"
 ENGINE_DIR="$PKG_ROOT/src/selector"
 STATE_FILE="/tmp/crt-dual/profile"
-STATE_DIR="/tmp/crt-dual"
+STATE_DIR="${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}"
+# Stopping phase marker (2026-11-18):
+#   Writer:  first_script.sh (at gameStop entry, before remove_profile.sh)
+#   Reader:  display-reconcile.sh (_in_gamestop: disarms window-gone timers while merge.py restores)
+#   Cleaner: remove_profile.sh, first_script.sh (gameStart & gameStop end), display-reconcile.sh, crash-clean.sh
+STOPPING_FILE="${CRT_DUAL_STOPPING_FILE:-$STATE_DIR/stopping}"
 # The state file lives in /tmp/crt-dual/ (single source of
 # truth, single writer). The dir is NOT the display layer's /tmp/crt-dual-*
 # (hyphenated) namespace — it must exist for the `>` write to succeed
@@ -45,18 +50,11 @@ case "$1" in
 gameStart)
 	exec 1>&2 # RGS-15KHZ-EXT — same rule as gameStop (see block there)
 	log "gameStart ($2, core=${3:-unknown})"
+	rm -f "$STOPPING_FILE" 2>/dev/null || true
 
 	# A previous session that died hard can leave gamescope/reaper behind on any
 	# system: end them before a new launch (no-op when clean).
-	killall -q -9 gamescope gamescopereaper 2>/dev/null || true
-	case "$2" in
-	arcadepc|windows|wine|xbox360|pinballfx3|globalvr)
-		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
-		while IFS= read -r _m; do
-			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
-		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
-		;;
-	esac
+	bash "$ENGINE_DIR/remove_profile.sh" --sweep "$2" 2>/dev/null || true
 
 	# dotclock floor: measured at BOOT by the S30z hook (pre-X,
 	# KMS-native: mode set + WAIT_VBLANK = the behavioural oracle), which
@@ -96,6 +94,17 @@ gameStop)
 	exec 1>&2
 
 	log "gameStop ($2)"
+	: >"$STOPPING_FILE" 2>/dev/null || true
+
+	# Sweep leftover gamescope/reaper and Wine services/mounts FIRST, while the
+	# session guard and STOPPING_FILE are still up (covered by the 60s ceiling,
+	# and before merge.py restores files a lingering process could hold open).
+	bash "$ENGINE_DIR/remove_profile.sh" --sweep "$2" 2>/dev/null || true
+	# Background update notification check on gameStop (throttled inside zz_rgs_15khz)
+	_svc="${RGS15_SVCDIR:-/userdata/system/services}/zz_rgs_15khz"
+	if [ -x "$_svc" ]; then
+		( "$_svc" update-notify & ) 2>/dev/null || true
+	fi
 
 	_PREV="$(cat "$STATE_FILE" 2>/dev/null)"
 	if [ -n "$_PREV" ] && [ -d "$ENGINE_DIR" ]; then
@@ -106,25 +115,7 @@ gameStop)
 		# fallback when the state file was lost, e.g. crash + manual exit)
 		command -v restore_after_game >/dev/null 2>&1 && restore_after_game >/dev/null 2>&1 || true # best-effort; see apply
 	fi
-	rm -f "$STATE_FILE"
-	# gamescope's wrapper and its reaper outlive the game on EVERY system that
-	# uses them (the RGS gamescope patch); with the launcher no longer waiting
-	# for their pipe EOF (stdio detach) nothing else would end them. No-op when
-	# they are already gone — the wine family adds its .exe services below.
-	killall -q -9 gamescope gamescopereaper 2>/dev/null || true
-	case "$2" in
-	arcadepc|windows|wine|xbox360|pinballfx3|globalvr)
-		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver evmapy 2>/dev/null || true
-		while IFS= read -r _m; do
-			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
-		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
-		;;
-	esac
-	# Background update notification check on gameStop (throttled inside zz_rgs_15khz)
-	_svc="${RGS15_SVCDIR:-/userdata/system/services}/zz_rgs_15khz"
-	if [ -x "$_svc" ]; then
-		( "$_svc" update-notify & ) 2>/dev/null || true
-	fi
+	rm -f "$STATE_FILE" "$STOPPING_FILE" 2>/dev/null || true
 	log "gameStop done"
 	;;
 

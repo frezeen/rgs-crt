@@ -26,6 +26,12 @@ PROFILE_FILE="${CRT_DUAL_PROFILE_FILE:-/tmp/crt-dual/profile}"
 # ending the process ES waits for; the kernel start time makes a recycled pid
 # impossible to mistake for the session.
 LAUNCHER_FILE="${CRT_DUAL_LAUNCHER_FILE:-$STATE_DIR/launcher}"
+# Stopping phase marker (2026-11-18): written by first_script.sh at gameStop
+# entry and cleared by remove_profile.sh / first_script.sh / session-end /
+# crash-clean.sh. While present (or while remove_profile/merge.py remove runs
+# under the launcher), the session is in [STOPPING] and window-gone timers are
+# disarmed so a slow disk/restore is never killed mid-flight (Tonga PRO 17-11).
+STOPPING_FILE="${CRT_DUAL_STOPPING_FILE:-$STATE_DIR/stopping}"
 # Poll interval: the gameStop bell (udev-poke) is only seen at a loop wake,
 # so this bounds the visible "desktop comes back late" gap after a game
 # exit (owner-observed ~1 s FullHD flash at 2 s, 2026-09-20). 0.5 s keeps
@@ -84,19 +90,24 @@ _es_pid() { # il pid di ES: il PROPRIETARIO della finestra, non un match di cmdl
 # runs inside emulatorlauncher, so it records the pid of the process ES
 # waits for) together with the kernel start time, which makes a recycled
 # pid impossible to mistake for the session.
+_pid_starttime_ok() { # $1 = pid, $2 = optional starttime -> rc 0 when alive with matching starttime
+	local pid="${1:-}" start="${2:-}" cur
+	[ -n "$pid" ] && [ -r "/proc/$pid/stat" ] || return 1
+	[ -z "$start" ] && return 0
+	cur="$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
+	[ "$cur" = "$start" ]
+}
+
 _launcher_pid() {
 	if [ -n "${CRT_DUAL_LAUNCHER_PID_CMD:-}" ]; then
 		bash -c "$CRT_DUAL_LAUNCHER_PID_CMD"
 		return $?
 	fi
-	local pid start cur
+	local pid start
 	read -r pid start <"$LAUNCHER_FILE" 2>/dev/null || true
 	if [ -n "${pid:-}" ]; then
-		if [ -r "/proc/$pid/stat" ]; then
-			cur="$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')"
-			if [ -n "${start:-}" ] && [ "$cur" = "$start" ]; then
-				printf '%s\n' "$pid"
-			fi
+		if [ -n "${start:-}" ] && _pid_starttime_ok "$pid" "$start"; then
+			printf '%s\n' "$pid"
 		fi
 		return 0
 	fi
@@ -163,6 +174,23 @@ _tree_pids() { # $1 = root -> the root and its live (non-zombie) descendants
 		}'
 }
 
+_in_gamestop() { # $1 = launcher pid -> rc 0 while the session is executing gameStop ([STOPPING] phase)
+	if [ -n "${CRT_DUAL_STOPPING_CMD:-}" ]; then
+		bash -c "$CRT_DUAL_STOPPING_CMD" _ "${1:-}"
+		return $?
+	fi
+	[ -f "$STOPPING_FILE" ] && return 0
+	local lp="${1:-}" p
+	[ -n "$lp" ] || return 1
+	for p in $(_tree_pids "$lp"); do
+		[ "$p" = "$lp" ] && continue
+		case "$(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null)" in
+		*first_script.sh*gameStop* | *remove_profile.sh* | *merge.py\ remove*) return 0 ;;
+		esac
+	done
+	return 1
+}
+
 _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	local lp="$1" pids pg es_pg my_pg left n=0 count
 	if [ -n "${CRT_DUAL_END_TREE_CMD:-}" ]; then
@@ -224,9 +252,9 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 		kill -KILL -- "-$pg" 2>/dev/null || true
 	fi
 	# Gamescope / Wine daemons and input mappers reparented to init outside the launcher's PGID
-	# (gamescopereaper, wineserver, winedevice, evmapy): holding open files in /run/wine
+	# (gamescope, gamescopereaper, wineserver, winedevice, evmapy): holding open files in /run/wine
 	# blocks squashfs loop-device autoclear, and holding stdout hangs the ES launch pipeline.
-	killall -9 gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
+	bash "$HERE/../selector/remove_profile.sh" --sweep --all 2>/dev/null || true
 	return 0
 }
 
@@ -249,9 +277,7 @@ _stale_session_clean() { # il gameStop che non c'e' stato (latchato dal chiamant
 		bash "$HERE/../service/crash-clean.sh"
 	fi
 	# Unmount lingering squashfs and overlay mounts left in /run/wine
-	for _m in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/(var/)?run/wine/' | tac); do
-		umount -f -l "$_m" 2>/dev/null || true
-	done
+	bash "$HERE/../selector/remove_profile.sh" --sweep --all 2>/dev/null || true
 }
 
 _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES window)
@@ -500,6 +526,22 @@ _es_repair() { # la riparazione che funziona, UNA volta, con pausa di sicurezza
 	fi
 }
 
+# Un solo verdetto sull'uscita: lo stato di ES, non i pixel ne' i nostri
+# marker. `FileData::mRunningGame` viene azzerato subito dopo process.run()
+# (ADR-002, exit path): finche' ES risponde col gioco, ES non e' tornato,
+# anche con il quadro perfetto e il launcher gia' morto (misurato 2026-11-17:
+# blocco di 15 minuti con es-content al 100%). API muta = nessun verdetto.
+_es_delivered() {
+	local code
+	code="$(curl -s -m 1 -o /dev/null -w '%{http_code}' \
+		"${CRT_DUAL_ES_URL:-http://127.0.0.1:1234/runningGame}" 2>/dev/null)" || return 2
+	case "$code" in
+	201) return 0 ;; # ES ha oltrepassato process.run()
+	200) return 1 ;; # ES e' ancora dentro il lancio
+	*) return 2 ;;   # API non raggiungibile: non decidere
+	esac
+}
+
 # ── una topologia per PASSATA ─────────────────────────────────────────────
 # Il primo lettore della passata la dichiara (display-detect.sh --state, UN
 # processo) e la esporta: modello, apply e sonde del prep la ricevono. La
@@ -554,6 +596,9 @@ _session_start() { # $1 = crt|lcd — hand the display to the game (stock owns t
 	local target="$1" prep tname other rc=0 _err
 	case "$target" in crt | lcd) ;; *) echo "display-reconcile: --session-start needs crt|lcd" >&2; return 2 ;; esac
 	_reconcile_lock || { echo "display-reconcile: session-start: lock busy" >&2; return 1; }
+	# A new game launch proves ES was alive and interactive: clear any prior
+	# session's restart cooldown so the upcoming exit is never throttled.
+	rm -f "$STATE_DIR/es-restarted" "$STOPPING_FILE" 2>/dev/null || true
 	_detect_state || true # una topologia per passata, come nel giro d'uscita
 	# La fase SESSION la dichiara il MODELLO (display-model.sh --session): il
 	# bersaglio on+primary e NON scalato, l'altro libero, e lo SCREEN che ne
@@ -754,6 +799,11 @@ case "${1:---check}" in
 	_sess_start=0
 	_budget="${CRT_DUAL_SESSION_BUDGET:-120}"
 	_lost_budget="${CRT_DUAL_SESSION_LOST_BUDGET:-12}"
+	_stop_budget="${CRT_DUAL_STOPPING_BUDGET:-60}"
+	_stop_since=0
+	_interrupted_stop=0
+	_last_lp=""
+	_last_lp_st=""
 	# A wedged game keeps its window mapped, so the window probes below can
 	# never end its session; the fatal line in its own stderr is the signal
 	# that separates it from a live game. The log is per-launch (ES redirects
@@ -779,11 +829,18 @@ case "${1:---check}" in
 		if [ "$_sess_now" = 1 ] && [ "${_prev_sess:-0}" = 0 ]; then
 			_seen=0
 			_gone=0
+			_stop_since=0
+			_interrupted_stop=0
+			_last_lp=""
+			_last_lp_st=""
 			# _seen_at is PER SESSION: carried over, a new launch inherits the
 			# previous game's picture time and the lost-deadline fires on its
 			# FIRST pass (measured 2026-10-20 in the live demo: 60 ms, wrong
 			# reason, a false kill for every launch after a 12 s gap).
 			_seen_at=0
+			# A new session means ES just launched a game: reset any prior
+			# session's ES restart cooldown so this session's exit can repair.
+			rm -f "$STATE_DIR/es-restarted" 2>/dev/null || true
 			# the launch budget starts with the launch, not with the daemon
 			_sess_start="$(stat -c %Y "$LAUNCHER_FILE" 2>/dev/null || date +%s)"
 		fi
@@ -791,6 +848,10 @@ case "${1:---check}" in
 
 		if [ "$_sess_now" = 1 ]; then
 			_lp="$(_launcher_pid)"
+			if [ -n "$_lp" ]; then
+				_last_lp="$_lp"
+				_last_lp_st="$(sed 's/.*) //' "/proc/$_lp/stat" 2>/dev/null | awk '{print $20}')"
+			fi
 			_end_why=""
 			if [ -z "$_lp" ]; then
 				_end_why="launcher gone"
@@ -803,6 +864,15 @@ case "${1:---check}" in
 				:
 			elif ! _under_es "$_lp"; then
 				_end_why="launcher orphaned (ES gone)"
+			elif [ -f "$STOPPING_FILE" ] || { [ -n "${CRT_DUAL_STOPPING_CMD:-}" ] && _in_gamestop "$_lp"; }; then
+				# [STOPPING] phase (measured 2026-11-17 Tonga PRO): fast O(1)
+				# check (zero forks during gameplay). Window-gone timers are
+				# disarmed while gameStop runs; only a hard hang ceiling applies.
+				_now="$(date +%s)"
+				[ "${_stop_since:-0}" -eq 0 ] && _stop_since="$(stat -c %Y "$STOPPING_FILE" 2>/dev/null || echo "$_now")"
+				if [ "$(( _now - _stop_since ))" -ge "$_stop_budget" ]; then
+					_end_why="gameStop hung for ${_stop_budget}s"
+				fi
 			elif [ -n "$_fatal_log" ] && grep -qF 'Cannot initialize Naomi multiboard shared memory' "$_fatal_log" 2>/dev/null; then
 				# measured 2026-11-17: an exit request reached only the NAOMI
 				# multiboard slave; the master survived in futex_do_wait with
@@ -813,15 +883,18 @@ case "${1:---check}" in
 				_seen=$((_seen + 1))
 				_seen_at="$(date +%s)"
 				_gone=0
+			elif _in_gamestop "$_lp"; then
+				# Fallback /proc tree walk only when the window is already gone
+				# (never forks while _game_alive is true).
+				_now="$(date +%s)"
+				[ "${_stop_since:-0}" -eq 0 ] && _stop_since="$_now"
+				if [ "$(( _now - _stop_since ))" -ge "$_stop_budget" ]; then
+					_end_why="gameStop hung for ${_stop_budget}s"
+				fi
 			elif [ "$_seen" -ge "$SEEN_POLLS" ]; then
 				_gone=$((_gone + 1))
 				[ "$_gone" -ge "$GONE_POLLS" ] && _end_why="game window gone"
 			else
-				# A window that came and went before it was established is not
-				# an exit on its own (a boot transient), but a session that HAD
-				# a picture and lost it must not wait the whole launch budget:
-				# measured risk (audit 2026-10-20): a game that crashes 3 s in
-				# kept the screen frozen for the full 120 s. Two deadlines.
 				_now="$(date +%s)"
 				if [ "${_seen_at:-0}" -gt 0 ] && [ "$(( _now - _seen_at ))" -ge "$_lost_budget" ]; then
 					_end_why="picture lost for ${_lost_budget}s"
@@ -830,6 +903,9 @@ case "${1:---check}" in
 				fi
 			fi
 			if [ -n "$_end_why" ]; then
+				# If stopping was still present when the session aborted, gameStop
+				# was interrupted mid-flight: remember it as fallback if ES API is down.
+				[ -f "$STOPPING_FILE" ] && _interrupted_stop=1
 				log "session end: $_end_why — ending the launcher tree, then one restore"
 				if [ -n "$_lp" ] && ! _end_tree "$_lp"; then
 					# the walk refused (init reached / >128 pids): the processes
@@ -842,11 +918,13 @@ case "${1:---check}" in
 				else
 					log "session end: restore FAILED — guard cleared anyway (the desktop comes first)"
 				fi
-				rm -f "$MODE_FILE" "$PROFILE_FILE" "$LAUNCHER_FILE" 2>/dev/null || true
+				rm -f "$MODE_FILE" "$PROFILE_FILE" "$LAUNCHER_FILE" "$STOPPING_FILE" 2>/dev/null || true
+				prev_game="active"
 				_sess_now=0
 				_seen=0
 				_seen_at=0
 				_gone=0
+				_stop_since=0
 			fi
 			if [ "$_sess_now" = 1 ]; then
 				prev_game="active"
@@ -857,6 +935,7 @@ case "${1:---check}" in
 			_seen=0
 			_seen_at=0
 			_gone=0
+			_stop_since=0
 		fi
 		fired=""
 		[ "$_first" = "1" ] && {
@@ -900,9 +979,52 @@ case "${1:---check}" in
 				# L'uscita dal gioco e il primo giro convergono SUBITO: qui
 				# l'owner sta guardando e non c'e' nessun cavo in movimento.
 				_prev_n="$_n"; debounce=0
+				case " $fired " in *" game-ended "*)
+					# [DELIVERING] step 1: wait for emulatorlauncher to finish its
+					# post-hook scripts and time.sleep(1) (emulatorlauncher.py:681)
+					# BEFORE display-apply writes to X11 or _es_delivered polls ES.
+					# _pid_starttime_ok verifies kernel starttime, so a recycled PID
+					# never causes a false wait.
+					_lw=0
+					while [ -n "${_last_lp:-}" ] && [ "$_lw" -lt "${CRT_DUAL_LAUNCHER_EXIT_POLLS:-8}" ] && _pid_starttime_ok "$_last_lp" "${_last_lp_st:-}"; do
+						sleep "${CRT_DUAL_LAUNCHER_EXIT_WAIT:-0.25}"
+						_lw=$((_lw + 1))
+					done
+					_last_lp=""
+					_last_lp_st=""
+					;;
+				esac
 				log "event:$fired → reconcile"
 				_reconcile && settle=3 || true
-				case " $fired " in *" game-ended "*) _es_content_gate ;; esac
+				case " $fired " in *" game-ended "*)
+					_es_content_gate
+					# Un solo verdetto: lo stato di ES. Il polling non e' un
+					# timer d'uscita, e' un'attesa event-driven su uno stato
+					# che gira una volta sola (ADR-002, exit path). 12 x 0.25s
+					# (3.0s max, uscita immediata al 201) copre il time.sleep(1)
+					# finale di emulatorlauncher.py:681 e gli script stock post-hook.
+					_gd=2; _i=0
+					while [ "$_i" -lt "${CRT_DUAL_ES_DELIVERY_POLLS:-12}" ]; do
+						_es_delivered; _gd=$?
+						[ "$_gd" -ne 1 ] && break
+						sleep "${CRT_DUAL_ES_DELIVERY_WAIT:-0.25}"
+						_i=$((_i + 1))
+					done
+					case "$_gd" in
+					1) _es_repair "ES ancora dentro il lancio" || true ;;
+					2)
+						if [ "${_interrupted_stop:-0}" -eq 1 ] || [ -f "$STOPPING_FILE" ]; then
+							rm -f "$STOPPING_FILE" 2>/dev/null || true
+							log "es-delivery: API di ES non raggiungibile ma gameStop interrotto — riparazione ES"
+							_es_repair "gameStop interrotto" || true
+						else
+							log "es-delivery: API di ES non raggiungibile — nessun verdetto"
+						fi
+						;;
+					esac
+					_interrupted_stop=0
+					;;
+				esac
 				;;
 			*)
 				if [ "$_n" -lt "$_prev_n" ]; then

@@ -26,9 +26,22 @@ PROFILES_ROOT="$PKG_ROOT/profiles"
 MERGE="$PKG_ROOT/src/selector/merge.py"
 
 [ $# -ge 1 ] || {
-	echo "usage: remove_profile.sh <profile-name> [<system>]" >&2
+	echo "usage: remove_profile.sh <profile-name> [<system>] | --sweep [<system>|--all]" >&2
 	exit 1
 }
+if [ "$1" = "--sweep" ]; then
+	_sys="${2:-}"
+	killall -q -9 gamescope gamescopereaper 2>/dev/null || true
+	case "$_sys" in
+	arcadepc|windows|wine|xbox360|pinballfx3|globalvr|--all)
+		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
+		while IFS= read -r _m; do
+			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
+		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
+		;;
+	esac
+	exit 0
+fi
 NAME="$1"
 SYSTEM="${2:-}" # system that was launched (active-block filter for the
 # batocera restore/removal — merge.py remove mirrors the apply filter; a
@@ -73,7 +86,7 @@ fi
 # (remove_profile is exercised that way by seam test_remove_single_call).
 _lcd_out="$(sed -n 's/^LCD_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
 _crt_out="$(sed -n 's/^CRT_OUT=//p' "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/detect-state" 2>/dev/null | head -1)"
-rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/launcher" "${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}" 2>/dev/null || true
+rm -f /tmp/crt-dual-mode "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/profile" /tmp/crt-dual/profile "${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/launcher" "${CRT_DUAL_STOPPING_FILE:-${CRT_DUAL_STATE_DIR:-/tmp/crt-dual}/stopping}" "${CRT_DUAL_NOHOTPLUG_FILE:-/tmp/no-hotplug}" 2>/dev/null || true
 # Wake the single applier (2026-09-19): a session shorter than the 2 s
 # watcher poll leaves `game-ended` unseen, and the solo-prep's `enabled`
 # change is invisible to the status-only sysfs fingerprint — the restore

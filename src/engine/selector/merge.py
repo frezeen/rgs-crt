@@ -29,11 +29,13 @@ Usage:
     merge.py apply   <profile-dir> <name> <target-root> <backup-root>
     merge.py remove  <profile-dir> <name> <target-root> <backup-root>
     merge.py validate <profile-dir> <name> <target-root>
+    merge.py heal    <profiles-root> <backup-root>
 
 Exit codes: 0 = ok, 1 = spec/fatal error, 2 = apply failed + rolled back.
 All writes are atomic: temp + fsync + rename in the same directory.
 """
 import contextlib
+import fcntl
 import os
 import re
 import shutil
@@ -460,9 +462,10 @@ BATOCERA_SET = "/usr/bin/batocera-settings-set"
 BATOCERA_CONF = "/userdata/system/batocera.conf"
 
 
-def _batocera_prev(key: str, backup_root, name: str) -> Path:
+def _batocera_prev(key: str, backup_root, name: str, create: bool = True) -> Path:
     d = Path(backup_root) / name / "batocera"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     # A per-folder key carries "/" inside itself (xbox360.folder["/userdata/
     # roms/..."].key): as a file name it is a path separator and the archive
     # write dies on the missing intermediate dir (launch 2026-11-13). One
@@ -581,6 +584,163 @@ def restore_batocera(batocera: dict, backup_root, name: str, remove_missing: boo
             _batocera_delete_key(key)
             print(f"  batocera: removed {key} (was absent before apply)")
         prev_file.unlink(missing_ok=True)
+
+
+def _conf_eff_map(path) -> dict:
+    """A flat `key=value` file as {key: effective value} — the LAST
+    occurrence wins, comments never match (_conf_key semantics, one
+    read). A missing file maps to {}."""
+    out: dict[str, str] = {}
+    with contextlib.suppress(OSError):
+        for ln in Path(path).read_text(errors="replace").splitlines():
+            s = ln.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, _, v = s.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _heal_targets(batocera_raw: dict, block_of: dict, blocks, block_type: dict) -> dict:
+    """Every batocera.conf key a spec can ever write, with its most
+    specific declared value. The system=None collapse (global keys,
+    system-block bare keys qualified <block>.<key>, emulator/core bare
+    keys qualified <system>.<key> for every profiled system — the LCD
+    480i residue was exactly such a key, konamipc.videomode from
+    [emulator.windows-arcade-loader]) plus the raw DOTTED keys the
+    collapse drops without a system (per-game and system-level dotted
+    declarations) at their highest-precedence definition."""
+    out = _filter_for_system(batocera_raw, None, block_of, "batocera.conf", blocks, None, None, block_type)
+    for k, defs in batocera_raw.items():
+        if k in out or ("." not in k and "[" not in k):
+            continue
+        best = None
+        for blk, val in defs:
+            prec = _PRECEDENCE.index(_block_kind(blk, block_type))
+            if best is None or prec > best[0]:
+                best = (prec, val)
+        if best is not None:
+            out[k] = best[1]
+    return out
+
+
+def do_heal(profiles_root, backup_root) -> int:
+    """Heal batocera.conf keys a dead session left behind (crash level
+    2.5, boot via crash-clean.sh; level 1.5, apply pre-clean in
+    do_apply — both run with NO live session).
+
+    Two classes, both ours and both invisible to `remove`:
+      1. ARCHIVED residue — a per-key prev archive is an exit that never
+         ran (a live gameStop consumes archives): restore value-or-
+         absence and consume it, for ANY installed profile.
+      2. NAKED residue — the effective value sits at a profile-declared
+         target with NO archive. This is the poison chain end state
+         (measured 2026-11-17: a killed CRT session, a relaunch before
+         any reboot archived the dirty value as 'prev', the restore wrote
+         it back and consumed — konamipc.videomode=640x480i then drove
+         the stock launcher's changeMode onto the LCD primary). The
+         first-install stock snapshot is the only non-guess reference:
+         restore that value, or delete the key when the snapshot never
+         had it.
+
+    A value matching BOTH the target and the snapshot stays (stock/user
+    truth, not ours). Idempotent: healed keys stop matching. The whole
+    sweep is gated on the snapshot: without it nothing is touched (the
+    boot remove doctrine — never guess, and the hermetic boundary for
+    test roots). Prints ONLY actions; silent when clean. Never raises
+    into the caller's flow."""
+    profiles_root = Path(profiles_root)
+    backup_root = Path(backup_root)
+    if not profiles_root.is_dir():
+        print(f"  heal: profiles root {profiles_root} missing")
+        return 0
+    snapshot = backup_root / "stock-originals" / "batocera.conf.stock"
+    if not snapshot.is_file():
+        print("  heal: no first-install stock snapshot — residue left alone")
+        return 0
+    stock = _conf_eff_map(snapshot)
+    conf_eff = _conf_eff_map(BATOCERA_CONF)
+    healed = 0
+    for spec_dir in sorted(profiles_root.iterdir()):
+        if not spec_dir.is_dir() or not (spec_dir / "spec.conf").is_file():
+            continue
+        name = spec_dir.name
+        try:
+            _l, _d, _dt, batocera_raw, _p, _c, _b, blocks, block_of, block_type, _kp, _rt = parse_spec(spec_dir)
+            targets = _heal_targets(batocera_raw, block_of, blocks, block_type)
+        except Exception as e:  # never break a launch on one bad spec
+            print(f"  heal: WARN: cannot parse {name} ({e})")
+            continue
+        for key in sorted(targets):
+            prev_file = _batocera_prev(key, backup_root, name, create=False)
+            if prev_file.is_file():
+                prev = prev_file.read_text(errors="replace")
+                if prev:
+                    _batocera_set_inplace(key, prev)
+                    conf_eff[key] = prev
+                    print(f"  heal: restored {key}={prev} (dead exit, {name})")
+                elif _batocera_delete_key(key):
+                    conf_eff.pop(key, None)
+                    print(f"  heal: removed {key} (dead exit, {name})")
+                else:
+                    print(f"  heal: WARN: cannot remove {key} (dead exit, {name})")
+                    continue
+                prev_file.unlink(missing_ok=True)
+                healed += 1
+                continue
+            cur = conf_eff.get(key, "")
+            target = targets[key]
+            if cur != target:
+                continue
+            stock_v = stock.get(key, "")
+            if stock_v == cur:
+                continue  # stock itself held this value: not ours to touch
+            if stock_v:
+                _batocera_set_inplace(key, stock_v)
+                conf_eff[key] = stock_v
+                print(f"  heal: restored {key}={stock_v} (naked residue -> first-install)")
+                healed += 1
+            elif cur:
+                if _batocera_delete_key(key):
+                    conf_eff.pop(key, None)
+                    print(f"  heal: removed {key} (naked residue, absent at install)")
+                    healed += 1
+        # 3. stranded archives (spec evolution): keys that LEFT the spec
+        # are invisible to the declared pass — the archive file itself is
+        # the ownership record. Match it FORWARD from every conf key that
+        # differs from the snapshot (exact name mapping, no reverse
+        # guessing), complete the dead exit; any archive still unmatched
+        # is moot (no live session, its key not in the conf or already
+        # stock) — sweep it so a future spec that re-adds the key
+        # archives fresh instead of restoring a stale value.
+        bdir = Path(backup_root) / name / "batocera"
+        if bdir.is_dir():
+            stranded = {p.name: p for p in bdir.iterdir() if p.is_file()}
+            if stranded:
+                for k, cur in list(conf_eff.items()):
+                    if cur == stock.get(k, ""):
+                        continue
+                    pfile = stranded.pop(_batocera_prev(k, backup_root, name, create=False).name, None)
+                    if pfile is None:
+                        continue
+                    prev = pfile.read_text(errors="replace")
+                    if prev:
+                        _batocera_set_inplace(k, prev)
+                        conf_eff[k] = prev
+                        print(f"  heal: restored {k}={prev} (stranded archive, {name})")
+                    elif _batocera_delete_key(k):
+                        conf_eff.pop(k, None)
+                        print(f"  heal: removed {k} (stranded archive, {name})")
+                    else:
+                        print(f"  heal: WARN: cannot remove {k} (stranded archive, {name})")
+                        continue
+                    pfile.unlink(missing_ok=True)
+                    healed += 1
+                for pname, pfile in stranded.items():
+                    pfile.unlink(missing_ok=True)
+                    print(f"  heal: swept moot archive {name}/batocera/{pname}")
+                    healed += 1
+    return healed
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1061,7 +1221,8 @@ def swap_binaries(profile_dir: Path, binaries: dict, target_root: Path,
         dstp = Path(dst)
         bak = backup_root / name / "binaries" / rel
         bak.mkdir(parents=True, exist_ok=True)
-        if not (bak / "was_symlink").exists() and not (bak / "was_regular").exists():
+        if not any((bak / r).exists() for r in
+                   ("was_symlink", "was_regular", "stock_lower", "stock_copy")):
             # RGS-15KHZ-EXT (stock-record defense): a was_symlink record must
             # be a CREDIBLE stock target — absolute, resolving to an existing
             # file, never inside the profile binaries tree we swap in. The
@@ -1084,11 +1245,14 @@ def swap_binaries(profile_dir: Path, binaries: dict, target_root: Path,
                 lower = _overlay_lower_path(dst.lstrip("/"))
                 if lower:
                     (bak / "stock_lower").write_text(lower)
-                elif dstp.is_file():
+                elif dstp.is_file() and not dstp.is_symlink():
                     # no immutable lower reachable (exotic mount / tests):
-                    # keep an exact copy of the stock so restore is byte-exact
-                    shutil.copy2(dstp, bak / "stock_copy")
-                    print(f"  archived stock copy of {dstp} (no overlay lower found)")
+                    # rename stock in-place in the same directory (O(1) zero-copy)
+                    # and record its path in stock_copy so restore renames it back.
+                    renamed = dstp.with_name(f".{dstp.name}.crt-dual-stock")
+                    os.replace(dstp, renamed)
+                    (bak / "stock_copy").write_text(str(renamed))
+                    print(f"  renamed stock {dstp} -> {renamed} (zero-copy)")
                 elif dstp.is_symlink():
                     # shadowing symlink with no reachable lower and no credible
                     # stock target: nothing stock to restore — record it so
@@ -1120,8 +1284,26 @@ def restore_binaries(profile_dir: Path, binaries: dict, target_root: Path,
             os.symlink(target, dstp)
             print(f"  restored stock {rel} -> {dstp} -> {target}")
         elif (bak / "stock_copy").is_file():
-            atomic_write(dstp, (bak / "stock_copy").read_bytes())
-            print(f"  restored stock {rel} (copied back)")
+            sc_file = bak / "stock_copy"
+            sc_size = sc_file.stat().st_size
+            raw_ref = sc_file.read_text(errors="replace").strip() if 0 < sc_size < 4096 else ""
+            renamed_p = Path(raw_ref) if raw_ref.startswith("/") and raw_ref.endswith(".crt-dual-stock") else None
+            if renamed_p is not None:
+                if renamed_p.is_file() and not renamed_p.is_symlink():
+                    dstp.unlink(missing_ok=True)
+                    os.replace(renamed_p, dstp)
+                    print(f"  restored stock {rel} ({renamed_p} -> {dstp}, renamed back)")
+                else:
+                    # N1 (power-loss across reboot on a rename-class box): the
+                    # RAM overlay reset wiped .crt-dual-stock and restored dst
+                    # from the lower/boot image. Never write the path string of
+                    # stock_copy into dstp; remove our symlink if still present.
+                    if dstp.is_symlink() and str(os.readlink(dstp)).startswith(str(profile_dir.parent)):
+                        dstp.unlink(missing_ok=True)
+                    print(f"  restored stock {rel} (overlay reset across reboot; stock already in place)")
+            else:
+                atomic_write(dstp, sc_file.read_bytes())
+                print(f"  restored stock {rel} (copied back)")
         else:
             # no immutable lower found (rare): remove the shadowing symlink and
             # the whiteout char device from the overlay upper, then revalidate
@@ -1172,20 +1354,29 @@ def _runtime_record(backup_root, name: str, rid: str) -> Path:
 
 def _run_runtime_cmd(rid: str, verb: str, cmd: str) -> int | None:
     """Run one [runtime] command (/bin/sh -c). Output is captured and
-    reported; a non-zero exit WARNs and never breaks the launch (mirror
-    of the display hand-over style, apply_profile.sh:87). Returns the
-    exit code, or None when the command could not be started at all."""
+    reported; a non-zero exit or timeout WARNs and never breaks the launch
+    (mirror of the display hand-over style, apply_profile.sh:87). Returns
+    the exit code, or None when the command could not be started or timed out."""
+    # Flush block-buffered stdout (fd 1 -> es_launch_stderr.log file) before
+    # and after external commands so progress lines are never lost if a signal
+    # interrupts the hook (observed 2026-11-17: truncated stderr hid merge progress).
+    sys.stdout.flush()
+    t_sec = int(os.environ.get("CRT_DUAL_RUNTIME_TIMEOUT", "15"))
     try:
         proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                              text=True, errors="replace")
+                              text=True, errors="replace", timeout=t_sec)
+    except subprocess.TimeoutExpired:
+        print(f"  WARN: runtime {verb} {rid} timed out after {t_sec}s (continuing)", flush=True)
+        return None
     except OSError as e:
-        print(f"  WARN: runtime {verb} {rid}: cannot run: {e}")
+        print(f"  WARN: runtime {verb} {rid}: cannot run: {e}", flush=True)
         return None
     for stream in (proc.stdout, proc.stderr):
         for line in (stream or "").splitlines():
             print(f"    runtime {rid}: {line}")
     if proc.returncode != 0:
         print(f"  WARN: runtime {verb} {rid} exited {proc.returncode} (continuing)")
+    sys.stdout.flush()
     return proc.returncode
 
 
@@ -1625,6 +1816,15 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     # match gets its undo before the fresh apply (self-healing; the
     # remove path filters, its records were created by a matching apply).
     undo_runtime(runtime.get("cmds", {}), backup_root, name)
+    # RGS-15KHZ-EXT (residue heal, crash level 1.5): dead exits of ANY
+    # installed profile (a stranded prev archive) and naked keys sitting
+    # at a profile target — restored against the first-install snapshot
+    # BEFORE this apply re-archives, so a dirty value can never become
+    # the recorded 'previous' (the immortal-residue poison, measured
+    # 2026-11-17: konamipc.videomode=640x480i applied 480i to the LCD
+    # primary by the stock launcher). Gated on the snapshot: a no-op in
+    # test roots and on pre-snapshot installs.
+    do_heal(profile_dir.parent, backup_root)
 
     # provide full configs + swap binaries + batocera keys + RAM patches
     provide_configs(profile_dir, configs, target_root, backup_root, name)
@@ -1650,6 +1850,7 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
         _write_resolve(backup_root, name, system, emulator, core)  # RGS-15KHZ-EXT (resolve-record, POST)
     apply_keypatch(_filter_keypatch(keypatch, system, block_type, emulator, core),
                    target_root, backup_root, name)
+    sys.stdout.flush()  # ensure all apply steps land in es_launch_stderr.log immediately
     return True
 
 
@@ -1676,6 +1877,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     restore_binaries(profile_dir, binaries, target_root, backup_root, name)
     restore_batocera(batocera, backup_root, name, remove_missing=bool(system))
     restore_patches(patches)
+    sys.stdout.flush()  # flush file/key restores before running [runtime] undo subprocesses
     _em, _co = (emulator, core) if system else (None, None)
     # RGS-15KHZ-EXT (runtime section): same judge as do_apply (the
     # resolve-record lesson), then undo the recorded ids in REVERSE
@@ -1696,6 +1898,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
                       target_root, backup_root, name)
     with contextlib.suppress(OSError):  # RGS-15KHZ-EXT (resolve-record): record consumed
         _resolve_record_path(backup_root, name).unlink()
+    sys.stdout.flush()  # flush final remove log lines before exiting
     return True
 
 
@@ -1780,10 +1983,41 @@ def do_validate(profile_dir: Path, name: str, target_root: Path):
 
 
 def main():
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 4:
         print(__doc__)
         return 1
     cmd = sys.argv[1]
+    if cmd == "heal":
+        # heal <profiles-root> <backup-root>: residue sweep for boot
+        # (crash-clean) and manual recovery. Refuses a live game
+        # session — it would consume the session's own prev archives.
+        if len(sys.argv) < 4:
+            print(__doc__)
+            return 1
+        pr, br = Path(sys.argv[2]), Path(sys.argv[3])
+        for _guard in ("/tmp/crt-dual-mode", "/tmp/crt-dual/profile"):
+            if os.path.exists(_guard):
+                print(f"heal refused: a game session is active ({_guard}) — run at boot or between launches",
+                      file=sys.stderr)
+                return 1
+        lock_fd = None
+        with contextlib.suppress(OSError):
+            br.mkdir(parents=True, exist_ok=True)
+            lock_fd = open(br / ".merge.lock", "w")
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            do_heal(pr, br)
+        except Exception:
+            traceback.print_exc()
+            return 2
+        finally:
+            if lock_fd is not None:
+                with contextlib.suppress(OSError):
+                    lock_fd.close()
+        return 0
+    if len(sys.argv) < 5:
+        print(__doc__)
+        return 1
     if cmd == "validate":
         profile_dir, name, target_root = sys.argv[2:5]
         pd, tr = Path(profile_dir), Path(target_root)
@@ -1803,6 +2037,13 @@ def main():
     system = sys.argv[6] if len(sys.argv) > 6 else None
     rom = sys.argv[7] if len(sys.argv) > 7 else None
     pd, tr, br = Path(profile_dir), Path(target_root), Path(backup_root)
+    # Serialize apply/remove across hooks, _stale_session_clean and crash-clean
+    # so two concurrent merge.py invocations can never race on batocera.conf or backups/.
+    lock_fd = None
+    with contextlib.suppress(OSError):
+        br.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(br / ".merge.lock", "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
     try:
         if cmd == "apply":
             do_apply(pd, name, tr, br, system, rom)
@@ -1817,6 +2058,11 @@ def main():
     except Exception:
         traceback.print_exc()
         return 2
+    finally:
+        if lock_fd is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                lock_fd.close()
     return 0
 
 
