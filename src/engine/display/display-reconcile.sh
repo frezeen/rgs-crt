@@ -979,10 +979,13 @@ case "${1:---check}" in
 				# L'uscita dal gioco e il primo giro convergono SUBITO: qui
 				# l'owner sta guardando e non c'e' nessun cavo in movimento.
 				_prev_n="$_n"; debounce=0
+				log "event:$fired → reconcile"
+				_reconcile && settle=3 || true
 				case " $fired " in *" game-ended "*)
-					# [DELIVERING] step 1: wait for emulatorlauncher to finish its
-					# post-hook scripts and time.sleep(1) (emulatorlauncher.py:681)
-					# BEFORE display-apply writes to X11 or _es_delivered polls ES.
+					# [DELIVERING] _reconcile already restored X11 during
+					# emulatorlauncher.py's final time.sleep(1) so ES wakes up
+					# on 640x480 instead of 1920x1080. Now wait for the launcher
+					# to exit BEFORE _es_content_gate and _es_delivered judge ES.
 					# _pid_starttime_ok verifies kernel starttime, so a recycled PID
 					# never causes a false wait.
 					_lw=0
@@ -992,11 +995,6 @@ case "${1:---check}" in
 					done
 					_last_lp=""
 					_last_lp_st=""
-					;;
-				esac
-				log "event:$fired → reconcile"
-				_reconcile && settle=3 || true
-				case " $fired " in *" game-ended "*)
 					_es_content_gate
 					# Un solo verdetto: lo stato di ES. Il polling non e' un
 					# timer d'uscita, e' un'attesa event-driven su uno stato
