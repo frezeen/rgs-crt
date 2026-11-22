@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22
+
+- **Sega Europa-R & Sega Shell (`segaer`): certified on the 15 kHz CRT (owner verde).** All 8 arcade titles audited and optimized: widescreen 16:9 cabinets (Daytona 3, Daytona Championship USA New Season Edition, GRID, Men In Black, Mission: Impossible Arcade, SEGA Rally 3, Sega Showdown) render natively in 1 pass at 720p stretched edge-to-edge onto the 480i CRT with hidden mouse cursor and full lightgun input, while the native 4:3 cabinet Ford Racing - Full Blown renders directly on 640x480i without scaling.
+
+- **Leaving a game interrupted by a timeout no longer leaves files mounted in the background.** Overlays and squashfs filesystem mounts are cleanly unmounted on exit cleanup so games can be relaunched immediately without encountering busy mount errors.
+
 ## 2026-11-18
 
 - **Leaving a game no longer leaves you without EmulationStation.** When the exit hangs halfway, the frontend repairs itself in seconds instead of making you restart the machine.

@@ -1,0 +1,8 @@
+system: europar
+name: Ford Racing Full Blown
+
+# Native 4:3 cabinet resolution (640x480) directly on the 640x480i CRT raster; stock
+# systemprofile raises this to 1024x768 for LCD panels.
+env:
+  WAL_EUROPAR_RESOLUTION: 640x480
+  WAL_HIDE_CURSOR: "1"

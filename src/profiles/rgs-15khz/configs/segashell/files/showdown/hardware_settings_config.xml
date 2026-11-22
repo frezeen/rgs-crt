@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<hardware_settings_config version="62" deviceId="" >
+    <cpu>
+        <threadStrategy workerMapFile="system/workerMap.xml" forceFeedbackProcessor="0" dvdStorageProcessor="0" dataSetMonitorProcessor="0" renderProcessor="0" updateProcessor="0" fileStreamProcessor="0"/>
+    </cpu>
+    <audio_card>
+        <audio mixing="rapture3D" />
+    </audio_card>
+
+  <!-- cabinet settings (720p native render for 1-pass CRT downscale) -->
+  <graphics_card>
+    <directx forcedx10="false" />
+    <eyefinity force="" osd="" />
+    <stereo enabled="false" separation="0.015" convergence="1.5" />
+    <advanced forward="false" global_illumination="false" />
+    <resolution width="1280" height="720" aspect="auto" fullscreen="true" vsync="1" multisampling="8xmsaa">
+      <refreshRate rate="60" />
+    </resolution>
+    <gamma level="1.1" />
+  </graphics_card>
+  <shadows enabled="true" size="2048" maskQuality="1" />
+  <particles enabled="true" wind="true" dynamicRes="false" />
+  <crowd enabled="true" detail="1" />
+  <cloth enabled="true" tessellation="true" />
+  <postprocess quality="2" />
+  <groundcover mode="blended" clutter="true" />
+  <objects lod="1.25" maxlod="0" />
+  <trees lod="1.25" maxlod="0" />
+  <vehicles characterQuality="2" lodQuality="2" />
+  <envmap faces="6" size="512" drawallobjects="false" />
+  <water update="true" detail="2" tessellation="true" />
+  <skidmarks enabled="true" />
+  <dynamic_ambient_occ enabled="true" quality="1" />
+  <night_lighting volumes="true" lights="0" shadows="true" />
+  <physics environmentalDamage="true" vehicleDamage="true" />
+  <input device_type="auto" />
+  <motion enabled="true" ip="127.0.0.1" port="20777" delay="1" extradata="0" />
+
+</hardware_settings_config>

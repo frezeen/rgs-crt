@@ -1,0 +1,10 @@
+system: segashell
+name: Showdown
+
+# Render natively at 1280x720 (1-pass 720p -> 864x486 stretch) instead of the dump's
+# 1920x1080 cabinet XML, and hide the Win32 cursor.
+files:
+  Showdown/win/system/hardware_settings_config.xml: userprofiles/segashell/files/showdown/hardware_settings_config.xml
+
+env:
+  WAL_HIDE_CURSOR: "1"

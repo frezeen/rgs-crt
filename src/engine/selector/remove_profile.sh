@@ -35,9 +35,14 @@ if [ "$1" = "--sweep" ]; then
 	case "$_sys" in
 	arcadepc|windows|wine|xbox360|pinballfx3|globalvr|--all)
 		killall -q -9 -r '.*\.exe$' gamescope gamescopereaper wineserver winedevice.exe evmapy 2>/dev/null || true
-		while IFS= read -r _m; do
-			[ -n "$_m" ] && umount -f -l "$_m" 2>/dev/null || true
-		done < <(grep -E '[[:space:]]/(var/)?run/wine/' /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
+		for _pat in '[[:space:]]/(var/)?run/(wine|overlays)/' '[[:space:]]/(var/)?run/squashfs/'; do
+			while IFS= read -r _m; do
+				if [ -n "$_m" ]; then
+					umount "$_m" 2>/dev/null || umount -f -l "$_m" 2>/dev/null || true
+					rmdir "$_m" 2>/dev/null || true
+				fi
+			done < <(grep -E "$_pat" /proc/mounts 2>/dev/null | awk '{print $2}' | sed 's/\\040/ /g' | tac)
+		done
 		;;
 	esac
 	exit 0
