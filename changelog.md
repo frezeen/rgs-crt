@@ -2,6 +2,8 @@
 
 ## 2026-11-24
 
+- **Sega Hikaru (`hikaru`): re-certified on the 15 kHz CRT under Odin v0.1.1 (owner verde).** All 6 titles (**Air Trix**, **Brave Firefighters**, **Planet Harriers**, **NASCAR Arcade**, **Star Wars Racer Arcade**, **Cyber Troopers Virtual-On Force**) audited and confirmed on the tube at native 4:3 `640x480i` 59.94 Hz with zero compositor overhead, no 16:9 bezel or CRT filter, hidden host cursor, and full lightgun support; removed the resolved stock **Cyber Troopers Virtual-On Force** entry from the non-working RGS report.
+
 - **Gaelco (`gaelco`): certified on the 15 kHz CRT (owner verde).** All 35 titles work on the tube: the 27 classic arcade ZIPs run on GroovyMAME at their own board resolutions and original refresh rates, ATV Track (both sets), Gaelco Football and Smashing Drive run direct on the 480i raster, Radikal Bikers on the arcade Windows loader, Ring Riders and Tokyo Cop on the Linux cabinet loader, and Tuning Race at its full 4:3 cabinet canvas.
 
 - **Gaelco Championship Tuning Race (`gaelco`): the whole 4:3 picture on the 15 kHz CRT (owner verde).** The title's cabinet canvas is 720x540; the Linux cabinet loader used to scale it twice, shrinking the picture to 569x427 with black bands on the right and at the top. It now renders natively at 720x540 in a single gamescope pass down to the 640x480i raster, so the picture fills the tube at its true 4:3.
