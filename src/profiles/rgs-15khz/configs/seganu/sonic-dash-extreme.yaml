@@ -1,0 +1,8 @@
+system: seganu
+name: Sonic Dash Extreme
+
+# Cabinet art recomposed for 4:3 tube (640x480, 185/270/185 opening, sides squeezed whole);
+# payload fits 1:1 on 640x480i with gamescope = 0.
+env:
+  WAL_BEZEL: 'Z:\userdata\system\crt-dual\profiles\rgs-15khz\configs\seganu\SonicDashExtreme_Bezel.png'
+  WAL_HIDE_CURSOR: "1"

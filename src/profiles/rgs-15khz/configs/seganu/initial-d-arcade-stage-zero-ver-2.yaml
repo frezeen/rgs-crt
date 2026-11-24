@@ -1,0 +1,7 @@
+system: alls
+name: Initial D ARCADE STAGE Zero Ver.2
+
+# 1-pass 720p native render via initialD.ini and WAL_DESKTOP_SIZE (1280x720 -> 864x486).
+env:
+  WAL_ALLS_INI_FILE: "initialD.ini:FullScreen=0,Width=1280,Height=720"
+  WAL_DESKTOP_SIZE: 1280x720

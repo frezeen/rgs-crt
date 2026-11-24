@@ -12,6 +12,8 @@
 
 - **Gaelco: the four `.squashfs` cabinet titles start on their proper engine again.** Tuning Race, Ring Riders and Tokyo Cop run on the Linux cabinet loader and Radikal Bikers on the arcade Windows loader, instead of silently falling back to MAME; the classic ZIP roster keeps GroovyMAME.
 
+- **Sega Nu: certified on the 15 kHz CRT.** All 22 Sega Nu / Nu 1.1 / Nu SX titles now fill the 4:3 tube: Initial D, Project Diva and KanColle render natively at 720p, CHUNITHM, Crossbeats, Luigi's Mansion and Wonderland Wars keep their full-HD canvas with a single downscale, and the three portrait cabinets keep their proportions with the title's cabinet art (Kemono Friends uses its black-pillar fallback). Cursor hidden, gun/touch input intact, clean return to ES.
+
 ## 2026-11-22
 
 - **Xbox (`xbox`): certified on the 15 kHz CRT (owner verde).** All 872 XISO titles audited and migrated to direct native `640x480i` at 59.94 Hz (`gamescope` off, Vulkan backend, 1:1 render scale, vsync locked, host cursor hidden) matching the original NTSC 4:3 console output.

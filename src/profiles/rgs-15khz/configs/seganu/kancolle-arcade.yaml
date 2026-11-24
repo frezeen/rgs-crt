@@ -1,0 +1,6 @@
+system: seganu
+name: KanColle Arcade
+
+# Hide Win32 cursor arrow while keeping WAL_CROSSHAIR red dot and guns_enabled touch input intact.
+env:
+  WAL_HIDE_CURSOR: "1"
