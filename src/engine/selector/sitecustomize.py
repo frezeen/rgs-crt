@@ -75,6 +75,7 @@ RUNTIME_ENV_STATE = Path('/tmp/crt-dual/runtime-env')
 # returns with the direct child, instead of waiting for the pipe EOF that the
 # gamescope reaper and the wine services never close.
 STDIO_DETACH_ENV = 'RGS_STDIO_DETACH'
+DROP_NET_ADMIN_ENV = 'RGS_DROP_CAP_NET_ADMIN'
 
 
 def _apply_runtime_env() -> None:
@@ -105,6 +106,19 @@ def _apply_runtime_env() -> None:
                     os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
     except Exception as e:  # patch-discipline: never break a launch
         _log.warning("crt-dual: runtime-env apply failed (%s): %s", RUNTIME_ENV_STATE, e)
+
+
+def _drop_net_admin() -> None:
+    """Drop CAP_NET_ADMIN (prctl 24, cap 12) from THIS process: the configgen
+    process is per launch, so the whole tree it spawns inherits the
+    restriction (a child could only be covered while the stdio lever was on).
+    Fails soft — a refused drop warns and the launch goes on."""
+    try:
+        import ctypes
+        if ctypes.CDLL('libc.so.6').prctl(24, 12, 0, 0, 0) != 0:
+            _log.warning("crt-dual: dropping CAP_NET_ADMIN refused (not privileged?) — the game keeps it")
+    except Exception as e:  # patch-discipline: never break a launch
+        _log.warning("crt-dual: dropping CAP_NET_ADMIN failed (%s)", e)
 
 
 # ──────────────────────────────────────────────
@@ -262,6 +276,10 @@ def _patch_emulatorlauncher(module):
         # is the only channel env/PATH can reach the game through (the hook
         # is a subprocess.call child, emulatorlauncher.py:407-417).
         _apply_runtime_env()
+        # NIC shield: drop the capability in-process, before the game is
+        # spawned, so every child inherits it (see _drop_net_admin).
+        if os.environ.get(DROP_NET_ADMIN_ENV):
+            _drop_net_admin()
         try:
             return orig_start_rom(args, maxnbplayers, rom, original_rom)
         finally:

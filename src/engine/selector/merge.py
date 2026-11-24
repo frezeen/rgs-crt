@@ -64,7 +64,19 @@ _KNOWN_SECTIONS = frozenset((
 # Duplicate batocera key precedence: least -> most specific. The runtime
 # picks the definition of the most specific MATCHING block (an index into
 # this tuple; a higher index wins).
-_PRECEDENCE = ("global", "emulator", "system", "core")
+_PRECEDENCE = ("global", "emulator", "system", "core", "game")
+
+# Per-game block [<system>["<rom>"]]: ONE title gets the whole block (sections
+# included), matched against the launched ROM — for a non-key claim (a
+# post-generate [*Generator.py] edit, [runtime], [keypatch]) the system block
+# would impose on every sibling.
+_GAME_BLOCK = re.compile(r'^(?P<sys>[^\[\]"]+)\["(?P<rom>[^"]+)"\]$')
+
+
+def _game_block(block: str) -> tuple[str, str] | None:
+    """(system, rom name) of a per-game block, None for any other block."""
+    m = _GAME_BLOCK.match(block or "")
+    return (m.group("sys").strip(), m.group("rom")) if m else None
 
 
 def _is_section_header(header: str) -> bool:
@@ -85,6 +97,8 @@ def _is_section_header(header: str) -> bool:
         return True
     if header.startswith(("system.", "emulator.", "core.")):
         return False  # typed block tags — see docstring
+    if _game_block(header):
+        return False  # per-game block — a ROM name carries '.' far too often
     if header.startswith(("patches.", "configs/", "keypatch/")):
         return True
     if "." in header or "/" in header:
@@ -209,6 +223,13 @@ def parse_spec(profile_dir: Path):
                     block_type[block] = "core"
                     block_type.setdefault(name, "core")
                     blocks.add(name)
+                elif _game_block(block):
+                    # PER-GAME BLOCK: its system stays registered for the
+                    # bare-key / system=None paths.
+                    game_sys, _game_rom = _game_block(block)
+                    block_type[block] = "game"
+                    block_type.setdefault(game_sys, "system")
+                    blocks.add(game_sys)
                 else:
                     block_type[block] = "global" if block == "global" else "system"
                 blocks.add(block)
@@ -296,10 +317,21 @@ def parse_spec(profile_dir: Path):
             continue
         if in_configs:
             if key:
+                # A target file may be declared in SEVERAL blocks (the arcade
+                # mame.ini for the mame system and for a roster system): the
+                # FILE is one, so a second block may only repeat the same
+                # destination — provision/restore keep one mapping each, and
+                # the launch keeps the key when ANY owning block matches
+                # (config.files:<key> holds every owning block).
+                prev = configs.get(key)
+                if prev is not None and prev != value:
+                    raise SpecError(
+                        f"[configs] '{key}' declared twice with different "
+                        f"targets ({prev} / {value})")
                 configs[key] = value
-                if block:
-                    block_of[f"config.files:{key}"] = block
-                    block_of[f"configs:{key}"] = block
+                owners = block_of.setdefault(f"config.files:{key}", [])
+                if block and block not in owners:
+                    owners.append(block)
             continue
         if in_binaries:
             if key:
@@ -830,7 +862,8 @@ def _has_ini_sections(lines: list) -> bool:
 
 
 def _filter_keypatch(keypatch: dict, system: str | None, block_type: dict | None,
-                     emulator: str | None = None, core: str | None = None) -> dict:
+                     emulator: str | None = None, core: str | None = None,
+                     rom: str | None = None) -> dict:
     """Keep only the entries whose block matches this launch (global and
     legacy-flat always; typed blocks on match — same rule as batocera).
 
@@ -851,7 +884,7 @@ def _filter_keypatch(keypatch: dict, system: str | None, block_type: dict | None
     out: dict = {}
     for target, entries in keypatch.items():
         kept = [(b, ln) for b, ln in entries
-                if _block_matches(b, block_type, system, emulator, core)]
+                if _block_matches(b, block_type, system, emulator, core, rom)]
         if kept:
             out[target] = kept
     return out
@@ -1458,7 +1491,7 @@ def restore_runtime_env() -> None:
 PIN_STATE = "/tmp/crt-dual/pin"
 
 
-def apply_pin(system: str, batocera: dict, name: str) -> None:
+def apply_pin(system: str, batocera: dict, name: str, *, skip_system_pin: bool = False) -> None:
     """Write the emulator/core pin marker for the launched system, from
     the PROFILE's own declarations only (<system>.emulator /
     <system>.core and per-game <system>["<game>"].emulator / .core).
@@ -1479,10 +1512,11 @@ def apply_pin(system: str, batocera: dict, name: str) -> None:
         g_core = str(batocera.get(f"{target}.core", "") or "")
         if g_emu or g_core:
             lines.append(f"pin {target} {g_emu or '-'} {g_core or '-'}")
-    emu = str(batocera.get(f"{system}.emulator", "") or "")
-    core = str(batocera.get(f"{system}.core", "") or "")
-    if emu or core:
-        lines.append(f"pin {system} {emu or '-'} {core or '-'}")
+    if not skip_system_pin:
+        emu = str(batocera.get(f"{system}.emulator", "") or "")
+        core = str(batocera.get(f"{system}.core", "") or "")
+        if emu or core:
+            lines.append(f"pin {system} {emu or '-'} {core or '-'}")
     if len(lines) == 1:
         p.unlink(missing_ok=True)
         return
@@ -1541,14 +1575,21 @@ def _block_kind(block: str, block_type: dict | None) -> str:
 
 
 def _block_matches(block: str, block_type: dict | None, system: str | None,
-                   emulator: str | None, core: str | None) -> bool:
-    """Does the block apply to this launch? global/legacy -> yes; a typed
-    block matches its kind ([system.X] -> X == system, [emulator.Y] ->
-    Y == resolved emulator, [core.Z] -> Z == resolved core); a bare block
-    is a system block (legacy [mame])."""
+                   emulator: str | None, core: str | None,
+                   rom: str | None = None) -> bool:
+    """Does the block apply to this launch? global/legacy always; a typed
+    block on its kind ([system.X], [emulator.Y], [core.Z]); a per-game block
+    also on the launched ROM (name or stem)."""
     if not block or block == "global":
         return True
     kind = _block_kind(block, block_type)
+    if kind == "game":
+        parsed = _game_block(block)
+        if not parsed or not rom or parsed[0] != system:
+            return False
+        launched = Path(rom)
+        return (launched.name == parsed[1]
+                or launched.stem == Path(parsed[1]).stem)
     target = block.split(".", 1)[1] if block.startswith(("emulator.", "core.", "system.")) else block
     if kind == "emulator":
         return emulator is not None and emulator == target
@@ -1672,7 +1713,7 @@ def _read_resolve(backup_root, name: str, system: str):
     return lines[1], lines[2]
 
 
-def _filter_for_system(mapping: dict, system: str | None, block_of: dict, section: str, all_blocks: set | None = None, emulator: str | None = None, core: str | None = None, block_type: dict | None = None):
+def _filter_for_system(mapping: dict, system: str | None, block_of: dict, section: str, all_blocks: set | None = None, emulator: str | None = None, core: str | None = None, block_type: dict | None = None, rom: str | None = None):
     """Keep only the entries belonging to the launched launch (system +
     resolved emulator/core).
 
@@ -1711,13 +1752,13 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
                             continue
                         targets = [f"{blk}.{k}"]
                     elif system:
-                        if system not in sys_blocks or not _block_matches(blk, block_type, system, emulator, core):
+                        if system not in sys_blocks or not _block_matches(blk, block_type, system, emulator, core, rom):
                             continue
                         targets = [f"{system}.{k}"]
                     else:
                         targets = [f"{s}.{k}" for s in sys_blocks]
                 else:
-                    if not _block_matches(blk, block_type, system, emulator, core):
+                    if not _block_matches(blk, block_type, system, emulator, core, rom):
                         continue
                     targets = [k]
                 for tk in targets:
@@ -1732,11 +1773,11 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
         for k, v in mapping.items():
             pkey = f"patches:{k}"
             if pkey in block_of:
-                if _block_matches(block_of[pkey], block_type, system, emulator, core):
+                if _block_matches(block_of[pkey], block_type, system, emulator, core, rom):
                     out[k] = v
                 continue
             block = block_of.get(section, "")
-            if _block_matches(block, block_type, system, emulator, core):
+            if _block_matches(block, block_type, system, emulator, core, rom):
                 if not block or block == "global":
                     out[k] = v
                 else:
@@ -1749,8 +1790,16 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
     if section in ("config.files", "configs", "binaries"):
         out = {}
         for k, v in mapping.items():
-            blk = block_of.get(f"{section}:{k}", block_of.get(section, ""))
-            if _block_matches(blk, block_type, system, emulator, core):
+            # The key belongs to every block that declared it (a file
+            # declared in [mame] and in [gaelco] must land on both launches,
+            # and on neither of the others): the launch keeps it when ANY
+            # owning block matches. Legacy flat declaration has no owner.
+            owners = block_of.get(f"{section}:{k}")
+            if isinstance(owners, str) or owners is None:
+                owners = [owners if owners is not None else block_of.get(section, "")]
+            if not owners:
+                owners = [block_of.get(section, "")]
+            if any(_block_matches(b, block_type, system, emulator, core, rom) for b in owners):
                 out[k] = v
         return out
     if section == "runtime":
@@ -1758,24 +1807,66 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
         matched_any = False
         for rid, ops in mapping.get("cmds", {}).items():
             blk = block_of.get(f"runtime:cmds:{rid}", block_of.get("runtime", ""))
-            if _block_matches(blk, block_type, system, emulator, core):
+            if _block_matches(blk, block_type, system, emulator, core, rom):
                 out["cmds"][rid] = ops
                 matched_any = True
         for env_item in mapping.get("env", []):
             blk = block_of.get(f"runtime:env:{env_item}", block_of.get("runtime", ""))
-            if _block_matches(blk, block_type, system, emulator, core):
+            if _block_matches(blk, block_type, system, emulator, core, rom):
                 out["env"].append(env_item)
                 matched_any = True
         for prep_item in mapping.get("prepend", []):
             blk = block_of.get(f"runtime:prepend:{prep_item}", block_of.get("runtime", ""))
-            if _block_matches(blk, block_type, system, emulator, core):
+            if _block_matches(blk, block_type, system, emulator, core, rom):
                 out["prepend"].append(prep_item)
                 matched_any = True
         return out if matched_any else {}
     block = block_of.get(section, "")
-    if _block_matches(block, block_type, system, emulator, core):
+    if _block_matches(block, block_type, system, emulator, core, rom):
         return mapping  # always/legacy or a matching block
     return {}
+
+
+def _stock_game_pin(system: str, target_root: Path, rom: str | None) -> bool:
+    """True if batocera.conf carries a per-game emulator pin for this rom."""
+    if not system or not rom:
+        return False
+    conf = Path(target_root) / "batocera.conf"
+    return bool(_conf_key(conf, f'{system}["{Path(rom).name}"].emulator'))
+
+
+def _apply_profile_pin(raw_batocera: dict, block_type: dict, system: str,
+                       rom: str | None, emulator: str, core: str,
+                       stock_game_pin: bool = False) -> tuple[str, str]:
+    """Overlay any system-block emulator/core pin onto the resolved (emulator, core).
+
+    Inspects ONLY system-block definitions (blk == system) so emulator/core
+    blocks cannot feed back into their own selection. Per-game pins override
+    system pins; stock per-game pins (stock_game_pin=True) suppress system-level
+    profile pins so per-game > system precedence holds."""
+    sys_emu = ""
+    sys_core = ""
+    rom_emu = ""
+    rom_core = ""
+    rom_prefix = f'{system}["{Path(rom).name}"].' if rom else ""
+    for k, defs in raw_batocera.items():
+        for blk, val in defs:
+            # System-block definitions only, plus the per-game block of THIS
+            # launch (it is already scoped to the launched ROM, so it cannot
+            # feed an emulator/core selection back into its siblings).
+            if blk != system and not _block_matches(blk, block_type, system, None, None, rom):
+                continue
+            if rom_prefix and k == f"{rom_prefix}emulator":
+                rom_emu = val
+            elif rom_prefix and k == f"{rom_prefix}core":
+                rom_core = val
+            elif k == f"{system}.emulator":
+                sys_emu = val
+            elif k == f"{system}.core":
+                sys_core = val
+    if stock_game_pin:
+        return (rom_emu or emulator), (rom_core or core)
+    return (rom_emu or sys_emu or emulator), (rom_core or sys_core or core)
 
 
 def do_apply(profile_dir, name: str, target_root, backup_root, system: str | None = None, rom: str | None = None):
@@ -1784,72 +1875,53 @@ def do_apply(profile_dir, name: str, target_root, backup_root, system: str | Non
     backup_root = Path(backup_root)
     _label, _desc, _dt, batocera, patches, configs, binaries, blocks, block_of, block_type, keypatch, runtime = parse_spec(profile_dir)
 
-    # per-system filter (block syntax): apply only the launched system's
-    # block (+ always + legacy). system=None -> everything (validate path).
-    # emulator/core are RESOLVED from the stock config (batocera.conf +
-    # configgen-defaults) — the gameStart hook receives them empty (the
-    # RAM patch hoists the hook before configgen resolves them,
-    # sitecustomize.py). Matched only by [emulator.X]/[core.X] blocks.
-    # PRE-pin resolution: drives the FILE-based selections only (keys,
-    # patches, configs, binaries). The emulator-pinning keys live in system
-    # blocks and must not feed back into their own block selection.
-    emulator, core = _resolve_emulator_core(system, target_root, rom=rom) if system else (None, None)
-    batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
-    patches = _filter_for_system(patches, system, block_of, "mameGenerator.py", blocks, emulator, core, block_type)
-    configs = _filter_for_system(configs, system, block_of, "config.files", blocks, emulator, core, block_type)
-    binaries = _filter_for_system(binaries, system, block_of, "binaries", blocks, emulator, core, block_type)
-    # RGS-15KHZ-EXT (runtime section): the WHOLE [runtime] section belongs
-    # to one block (block_of is per section name, like [binaries]), so one
-    # _filter_for_system call scopes the commands AND the env/prepend
-    # entries together ({} = block mismatch = stock behavior).
-    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, emulator, core, block_type)
-
-    # pre-clean (crash level 1): half-provided files from a previous
-    # session that ended without gameStop. Idempotent, no-op when clean —
-    # the recovery rule: the backup archive is the truth, restore it
-    # before applying fresh.
-    restore_configs(profile_dir, configs, target_root, backup_root, name)
-    restore_binaries(profile_dir, binaries, target_root, backup_root, name)
-    # RGS-15KHZ-EXT (runtime section): the DECLARED ids are pre-cleaned,
-    # not the filtered ones — an .applied record is the truth that the
-    # command ran once, so even a record stranded by a changed block
-    # match gets its undo before the fresh apply (self-healing; the
-    # remove path filters, its records were created by a matching apply).
-    undo_runtime(runtime.get("cmds", {}), backup_root, name)
     # RGS-15KHZ-EXT (residue heal, crash level 1.5): dead exits of ANY
     # installed profile (a stranded prev archive) and naked keys sitting
     # at a profile target — restored against the first-install snapshot
-    # BEFORE this apply re-archives, so a dirty value can never become
-    # the recorded 'previous' (the immortal-residue poison, measured
-    # 2026-11-17: konamipc.videomode=640x480i applied 480i to the LCD
-    # primary by the stock launcher). Gated on the snapshot: a no-op in
-    # test roots and on pre-snapshot installs.
+    # BEFORE resolving or re-archiving, so a dirty value can never skew
+    # emulator resolution or become the recorded 'previous'. Gated on the
+    # snapshot: a no-op in test roots and on pre-snapshot installs.
     do_heal(profile_dir.parent, backup_root)
 
-    # provide full configs + swap binaries + batocera keys + RAM patches
+    # pre-clean (crash level 1): half-provided files from a previous
+    # session that ended without gameStop. Unfiltered (archive-gated)
+    # like do_remove, so residue from a dead session on a different
+    # emulator is cleaned too. Idempotent, no-op when clean.
+    restore_configs(profile_dir, configs, target_root, backup_root, name)
+    restore_binaries(profile_dir, binaries, target_root, backup_root, name)
+    undo_runtime(runtime.get("cmds", {}), backup_root, name)
+
+    # Effective (emulator, core): stock/user resolution overlaid with any
+    # system-block pin, computed ONCE and recorded so do_apply and
+    # do_remove filter all 6 sections identically. Stock per-game pins
+    # suppress system-level profile pins (per-game > system).
+    has_game_pin = _stock_game_pin(system, target_root, rom) if system else False
+    if system:
+        emulator, core = _resolve_emulator_core(system, target_root, rom=rom)
+        emulator, core = _apply_profile_pin(batocera, block_type, system, rom, emulator, core, stock_game_pin=has_game_pin)
+        _write_resolve(backup_root, name, system, emulator, core)
+    else:
+        emulator, core = (None, None)
+
+    batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type, rom)
+    patches = _filter_for_system(patches, system, block_of, "mameGenerator.py", blocks, emulator, core, block_type, rom)
+    configs = _filter_for_system(configs, system, block_of, "config.files", blocks, emulator, core, block_type, rom)
+    binaries = _filter_for_system(binaries, system, block_of, "binaries", blocks, emulator, core, block_type, rom)
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, emulator, core, block_type, rom)
+    keypatch_f = _filter_keypatch(keypatch, system, block_type, emulator, core, rom)
+
+    # provide full configs + swap binaries + batocera keys + pin + RAM patches + runtime + keypatch
     provide_configs(profile_dir, configs, target_root, backup_root, name)
     swap_binaries(profile_dir, binaries, target_root, backup_root, name)
     apply_batocera(batocera, backup_root, name)
     # RGS-15KHZ-EXT (pin marker): the profile's OWN emulator/core
     # declaration, handed to the launcher (configgen gives ES's -emulator
     # argument priority over the conf — see PIN_STATE above).
-    apply_pin(system, batocera, name)
+    apply_pin(system, batocera, name, skip_system_pin=has_game_pin)
     apply_patches(patches)
-    # RGS-15KHZ-EXT (runtime section): command ops in declaration order,
-    # then the in-process env marker (its own state: no archive, the
-    # configgen process is per launch — sitecustomize applies it).
     apply_runtime(runtime_f.get("cmds", {}), backup_root, name)
     apply_runtime_env(name, runtime_f.get("env", []), runtime_f.get("prepend", []))
-    # RGS-15KHZ-EXT (post-pin resolve): configgen resolves AT LAUNCH, AFTER
-    # this apply's own keys landed (the [mame] block pins mame.emulator=mame).
-    # The runtime consumers must match the launch that will actually run,
-    # not the pre-apply stock default (live 2026-09-10: a standalone-mame
-    # session carried the [emulator.libretro] retroarch keypatch — mis-scoped).
-    emulator, core = _resolve_emulator_core(system, target_root, rom=rom) if system else (None, None)
-    if system:
-        _write_resolve(backup_root, name, system, emulator, core)  # RGS-15KHZ-EXT (resolve-record, POST)
-    apply_keypatch(_filter_keypatch(keypatch, system, block_type, emulator, core),
-                   target_root, backup_root, name)
+    apply_keypatch(keypatch_f, target_root, backup_root, name)
     sys.stdout.flush()  # ensure all apply steps land in es_launch_stderr.log immediately
     return True
 
@@ -1871,7 +1943,7 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
         # live conf may carry our own emulator flip (see helper docstring).
         rec = _read_resolve(backup_root, name, system)
         emulator, core = rec if rec is not None else _resolve_emulator_core(system, target_root, rom=rom)
-        batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type)
+        batocera = _filter_for_system(batocera, system, block_of, "batocera.conf", blocks, emulator, core, block_type, rom)
 
     restore_configs(profile_dir, configs, target_root, backup_root, name)
     restore_binaries(profile_dir, binaries, target_root, backup_root, name)
@@ -1884,17 +1956,17 @@ def do_remove(profile_dir, name: str, target_root, backup_root, system: str | No
     # declaration order and drop the in-process env marker (the env dies
     # with the configgen process — the marker must not outlive the
     # session).
-    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, _em, _co, block_type)
+    runtime_f = _filter_for_system(runtime, system, block_of, "runtime", blocks, _em, _co, block_type, rom)
     undo_runtime(runtime_f.get("cmds", {}), backup_root, name)
     restore_runtime_env()
     restore_pin()
-    restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co),
+    restore_keypatch(_filter_keypatch(keypatch, system, block_type, _em, _co, rom),
                      target_root, backup_root, name)
     # RGS-15KHZ-EXT (genconfig-archive): the SAME patches filter as
     # do_apply (same judge for apply and remove — the resolve-record
     # lesson), then value-restore the wrapper `.config` archives.
     restore_genconfig(_filter_for_system(patches, system, block_of, "mameGenerator.py",
-                                         blocks, _em, _co, block_type),
+                                         blocks, _em, _co, block_type, rom),
                       target_root, backup_root, name)
     with contextlib.suppress(OSError):  # RGS-15KHZ-EXT (resolve-record): record consumed
         _resolve_record_path(backup_root, name).unlink()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-24
+
+- **Gaelco (`gaelco`): certified on the 15 kHz CRT (owner verde).** All 35 titles work on the tube: the 27 classic arcade ZIPs run on GroovyMAME at their own board resolutions and original refresh rates, ATV Track (both sets), Gaelco Football and Smashing Drive run direct on the 480i raster, Radikal Bikers on the arcade Windows loader, Ring Riders and Tokyo Cop on the Linux cabinet loader, and Tuning Race at its full 4:3 cabinet canvas.
+
+- **Gaelco Championship Tuning Race (`gaelco`): the whole 4:3 picture on the 15 kHz CRT (owner verde).** The title's cabinet canvas is 720x540; the Linux cabinet loader used to scale it twice, shrinking the picture to 569x427 with black bands on the right and at the top. It now renders natively at 720x540 in a single gamescope pass down to the 640x480i raster, so the picture fills the tube at its true 4:3.
+
+- **The Gaelco Linux cabinet titles no longer take the network down (`gaelco`).** Ring Riders, Tuning Race and Tokyo Cop move the wired interface to their own 90.0.0.x subnet a few seconds after start; with the games on a network share the box lost LAN, SSH and VNC and had to be restarted. The game process now starts without the network-admin capability, so those writes are refused at the kernel and the connection stays up.
+
+- **Gaelco: the four `.squashfs` cabinet titles start on their proper engine again.** Tuning Race, Ring Riders and Tokyo Cop run on the Linux cabinet loader and Radikal Bikers on the arcade Windows loader, instead of silently falling back to MAME; the classic ZIP roster keeps GroovyMAME.
+
 ## 2026-11-22
 
 - **Xbox (`xbox`): certified on the 15 kHz CRT (owner verde).** All 872 XISO titles audited and migrated to direct native `640x480i` at 59.94 Hz (`gamescope` off, Vulkan backend, 1:1 render scale, vsync locked, host cursor hidden) matching the original NTSC 4:3 console output.
