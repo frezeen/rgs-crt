@@ -1,0 +1,3 @@
+env:
+  WAL_BEZEL: bezel.png
+  WAL_BEZEL_FIT: stretch

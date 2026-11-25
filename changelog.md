@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-25
+
+- **Arcade PC (`arcadepc`): certified on the 15 kHz CRT for the new 72-title pack (owner verde).** All 70 launchable `.squashfs` titles under Windows Arcade Loader and `linuxloader` fill the 4:3 tube cleanly at 480i: native 4:3 titles and **Sega Rally 2** (forced to 4:3) run without widescreen distortion, portrait cabinets (**Bullseye Crack Shot**, **Fix it Felix Jr.**, **Pigs Might Fly**, **Top Gun**, **Topgun 2**, **Space Warp 66**, **Cut The Rope**) keep their vertical proportions with full squeezed cabinet art, and widescreen 16:9/16:10 titles stretch edge-to-edge in a single pass with lowered GPU load (**The House of the Dead 2 Remake**, **Zombie Crisis**, **Bullseye Crack Shot**, **Tatsunoko vs. Capcom**, **Mars Sortie**, and the Unity 720p titles); **Crossfire Maximum Paintball**, **Red Gun**, and **Tatsunoko vs. Capcom** are pinned to their proper launchers.
+
 ## 2026-11-24
 
 - **Sega Hikaru (`hikaru`): re-certified on the 15 kHz CRT under Odin v0.1.1 (owner verde).** All 6 titles (**Air Trix**, **Brave Firefighters**, **Planet Harriers**, **NASCAR Arcade**, **Star Wars Racer Arcade**, **Cyber Troopers Virtual-On Force**) audited and confirmed on the tube at native 4:3 `640x480i` 59.94 Hz with zero compositor overhead, no 16:9 bezel or CRT filter, hidden host cursor, and full lightgun support; removed the resolved stock **Cyber Troopers Virtual-On Force** entry from the non-working RGS report.

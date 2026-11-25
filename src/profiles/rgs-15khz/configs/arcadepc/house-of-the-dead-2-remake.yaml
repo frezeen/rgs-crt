@@ -1,0 +1,3 @@
+args: [-logFile, Player.log, -screen-quality, Fastest]
+env:
+  DXVK_CONFIG: "dxgi.maxFrameRate = 60"
