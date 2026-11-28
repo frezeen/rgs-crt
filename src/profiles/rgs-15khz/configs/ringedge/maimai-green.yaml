@@ -1,0 +1,8 @@
+system: ringedge
+name: maimai GreeN
+
+# Stock systemprofile omits WAL_WINDOW_SIZE/WAL_WINDOW_POPUP despite declaring a borderless
+# screen-sized window in its comments (unlike maimai-plus/pink/finale).
+env:
+  WAL_WINDOW_SIZE: screen
+  WAL_WINDOW_POPUP: "1"

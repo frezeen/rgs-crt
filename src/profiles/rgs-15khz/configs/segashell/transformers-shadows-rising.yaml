@@ -1,0 +1,6 @@
+system: segashell
+name: "Transformers: Shadows Rising"
+
+# Hide Win32 mouse cursor arrow (Game.ini Cursor=1) while keeping guns_enabled lightgun input intact.
+env:
+  WAL_HIDE_CURSOR: "1"
