@@ -52,6 +52,8 @@ Inside a profile, settings are scoped, not sprayed:
 - If two settings could apply, the more specific one wins: a
   system-level choice beats an emulator-level one beats the common
   ground.
+- Per-game generator edits keep each declaration's scope even when
+  several titles use the same operation key.
 
 What a profile may adjust for a game: which emulator or core runs the
 system, the display signal to aim for, the emulator's own options

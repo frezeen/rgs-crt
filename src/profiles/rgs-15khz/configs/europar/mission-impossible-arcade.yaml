@@ -1,0 +1,6 @@
+system: europar
+name: "Mission: Impossible Arcade"
+
+# Fixed 1920x1080 Unity HUD (720p clips bottom prompt); hide Windows mouse cursor arrow.
+env:
+  WAL_HIDE_CURSOR: "1"

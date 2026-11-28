@@ -63,6 +63,11 @@ is. The block types:
 | `[snes]` (or `[system.snes]`) | games of the system `snes` |
 | `[emulator.libretro]` | every game whose emulator resolves to libretro — one block for a whole family |
 | `[core.snes9x]` | games running that specific core |
+| `[<system>["<rom>"]]` | one title, with every section inside the block scoped to it |
+
+Repeated generator operation keys in different per-game blocks remain
+separately scoped: only the launched title's declarations reach the
+launcher, in declaration order.
 
 When two blocks set the same setting, **the more specific one wins**:
 core beats system beats emulator beats global. Inside `[emulator.*]` and

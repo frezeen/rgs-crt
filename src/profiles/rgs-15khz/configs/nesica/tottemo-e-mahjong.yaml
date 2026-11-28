@@ -3,3 +3,6 @@ name: Tottemo E Mahjong
 
 env:
   WAL_NESICA_REG: "Resolution=0"
+  WAL_D3D9_WINDOWED_SIZE: ""
+  WAL_WINDOW_POPUP: ""
+  WAL_WINDOW_SIZE: ""

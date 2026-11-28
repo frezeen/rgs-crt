@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-28
+
+- **Raw Thrills (`rawthrills`): certified on the 15 kHz CRT for the 49-title pack (owner verde).** 33 titles now draw directly on the `640x480i` raster with zero compositor overhead (including **Aliens Armageddon**, **Cruis'n Blast**, **Frogger** at `-640x480`, **Guitar Hero Arcade EDITION**, **Injustice Arcade**, **TMNT Arcade Wrath Of The Mutants**, and the **Deal or No Deal** series, with **Deal or No Deal** and **Deluxe UK** sized to `640x360` to eliminate internal black bars); **Doodle Jump** displays with recomposed 4:3 cabinet art, **Nerf Arcade** aligns its nested canvas to `1920x1080` so gun aim stays accurate, and the 16 HD/WXGA titles stretch cleanly to fill the 4:3 tube. (**Tippin Bloks** has no cabinet art in the stock dump and remains centered with black pillars; stock input/calibration defects on **Big Buck Safari** and **The Walking Dead** are documented.)
+- **Mission: Impossible Arcade (`segaer`):** keeps its fixed `1920x1080` layout without clipping the bottom HUD and hides the Windows mouse cursor arrow.
+- **Session cleanup:** the session supervisor now recognizes full-screen cabinet windows without a window class and terminates orphaned processes before unmounting squashfs/overlay layers, preventing leftover loop devices on subsequent launches.
+- **RGS-CRT check/updater tool:** the final verdict screen can now also be dismissed with any gamepad button, not only the keyboard.
+
 ## 2026-11-25
 
 - **Arcade PC (`arcadepc`): certified on the 15 kHz CRT for the new 72-title pack (owner verde).** All 70 launchable `.squashfs` titles under Windows Arcade Loader and `linuxloader` fill the 4:3 tube cleanly at 480i: native 4:3 titles and **Sega Rally 2** (forced to 4:3) run without widescreen distortion, portrait cabinets (**Bullseye Crack Shot**, **Fix it Felix Jr.**, **Pigs Might Fly**, **Top Gun**, **Topgun 2**, **Space Warp 66**, **Cut The Rope**) keep their vertical proportions with full squeezed cabinet art, and widescreen 16:9/16:10 titles stretch edge-to-edge in a single pass with lowered GPU load (**The House of the Dead 2 Remake**, **Zombie Crisis**, **Bullseye Crack Shot**, **Tatsunoko vs. Capcom**, **Mars Sortie**, and the Unity 720p titles); **Crossfire Maximum Paintball**, **Red Gun**, and **Tatsunoko vs. Capcom** are pinned to their proper launchers.

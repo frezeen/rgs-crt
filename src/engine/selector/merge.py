@@ -314,6 +314,12 @@ def parse_spec(profile_dir: Path):
                     patches[full_key] = value
                 if block:
                     block_of[f"patches:{full_key}"] = block
+                # The same op key may appear in several per-game blocks.
+                # Keep ordered (value, owner) entries: a key-level owner alone
+                # lets the last declaration mask every earlier title, while a
+                # value-only map cannot distinguish two equal declarations.
+                entries = block_of.setdefault("patches:entries", {}).setdefault(full_key, [])
+                entries.append((value, block))
             continue
         if in_configs:
             if key:
@@ -1725,7 +1731,8 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
     always, the exact key wins unchanged). PATCH keys are qualified with
     the owning block ([mame] [mameGenerator.py] cli.drop ->
     mame.cli.drop — the marker keeps the generator prefix the RAM patcher
-    reads, _marker_ops('mame')); the section's block decides the match.
+    reads, _marker_ops('mame')); repeated op keys keep ordered owners so
+    one title's declaration cannot mask another's.
     configs/binaries keys are bare (the section's block is known via
     block_of). system=None or "" (remove/validate/full apply) keeps
     everything.
@@ -1770,7 +1777,19 @@ def _filter_for_system(mapping: dict, system: str | None, block_of: dict, sectio
         return mapping
     if section.endswith("Generator.py") or section == "patches":
         out = {}
+        entry_table = block_of.get("patches:entries", {})
         for k, v in mapping.items():
+            values = str(v).split("\n")
+            entries = entry_table.get(k)
+            if entries is not None and [one for one, _owner in entries] == values:
+                kept = [
+                    one for one, owner in entries
+                    if _block_matches(owner, block_type, system, emulator, core, rom)
+                ]
+                if kept:
+                    out[k] = "\n".join(kept)
+                continue
+            # Legacy/manual mappings have no ordered owner table.
             pkey = f"patches:{k}"
             if pkey in block_of:
                 if _block_matches(block_of[pkey], block_type, system, emulator, core, rom):

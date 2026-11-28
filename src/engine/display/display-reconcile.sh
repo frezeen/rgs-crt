@@ -240,8 +240,30 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 		sleep "${CRT_DUAL_END_TREE_POLL:-0.5}"
 		n=$((n + 1))
 	done
-	left="$(_tree_pids "$lp" | tr '\n' ' ')"
-	if [ -n "${left// /}" ]; then
+	# Keep the ORIGINAL snapshot: once the launcher dies, its children are
+	# reparented to init and a fresh tree walk loses them. A game that ignores
+	# TERM then survives with the squashfs/overlay still open (measured live:
+	# Big Buck Safari PID 13910 holding loop2 after session end).
+	_live_pids() {
+		local _out="" _p
+		for _p in "$@"; do
+			if kill -0 "$_p" 2>/dev/null; then
+				case "$(ps -o stat= -p "$_p" 2>/dev/null)" in
+				Z*) ;; # a zombie holds no mount or file
+				*) _out="$_out $_p" ;;
+				esac
+			fi
+		done
+		printf '%s' "${_out# }"
+	}
+	# shellcheck disable=SC2086 # $pids is a whitespace-separated pid list
+	left="$(_live_pids $pids)"
+	# Include descendants that appeared after the first snapshot, without
+	# duplicating the original pids.
+	for p in $(_tree_pids "$lp"); do
+		case " $left " in *" $p "*) ;; *) left="${left:+$left }$p" ;; esac
+	done
+	if [ -n "$left" ]; then
 		# shellcheck disable=SC2086 # wine and the loader ignore TERM
 		kill -KILL $left 2>/dev/null || true
 	fi
@@ -250,6 +272,23 @@ _end_tree() { # $1 = launcher pid: TERM the tree, KILL what survives
 	# design (audit 2026-10-20). Same guards as the TERM above.
 	if [ "$_pg_in_tree" -eq 1 ] && [ -n "$pg" ] && [ "$pg" -gt 1 ] && [ "$pg" != "$es_pg" ] && [ "$pg" != "$my_pg" ]; then
 		kill -KILL -- "-$pg" 2>/dev/null || true
+	fi
+	# Sweep only after the killed mount holders are really gone. Otherwise
+	# umount detaches lazily and the loop device stays attached for the next
+	# launch. The wait is bounded; zombies count as gone.
+	if [ -n "$left" ]; then
+		n=0
+		_still=""
+		while [ "$n" -lt 6 ]; do
+			# shellcheck disable=SC2086 # $left is a whitespace-separated pid list
+			_still="$(_live_pids $left)"
+			[ -z "$_still" ] && break
+			sleep "${CRT_DUAL_END_TREE_POLL:-0.5}"
+			n=$((n + 1))
+		done
+		if [ -n "$_still" ]; then
+			log "end-tree: pids still alive after KILL: $_still"
+		fi
 	fi
 	# Gamescope / Wine daemons and input mappers reparented to init outside the launcher's PGID
 	# (gamescope, gamescopereaper, wineserver, winedevice, evmapy): holding open files in /run/wine
@@ -307,7 +346,9 @@ _game_alive() { # rc 0 while the session's GAME is on screen (a viewable non-ES 
 	command -v xdotool >/dev/null 2>&1 || return 0
 	local _all _eswins _win _geo _w _h _sz _sw _sh
 	# Fail safe: if the X query itself fails we assume the game is on screen.
-	_all="$(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible --class '.' 2>/dev/null)" || return 0
+	# No --class filter: native/GL cabinets can expose a full-screen window
+	# with an empty WM_CLASS. The geometry floor below still rejects helpers.
+	_all="$(DISPLAY="${DISPLAY:-:0}" xdotool search --onlyvisible '.*' 2>/dev/null)" || return 0
 	# EmulationStation is identified by its WINDOW CLASS, not a pid: the window
 	# is owned by the `emulationstation` process while the session launcher is
 	# its `dbus-run-session` parent (measured: window pid 6859 vs launcher
@@ -797,7 +838,7 @@ case "${1:---check}" in
 	_seen=0
 	_gone=0
 	_sess_start=0
-	_budget="${CRT_DUAL_SESSION_BUDGET:-120}"
+	_budget="${CRT_DUAL_SESSION_BUDGET:-150}"
 	_lost_budget="${CRT_DUAL_SESSION_LOST_BUDGET:-12}"
 	_stop_budget="${CRT_DUAL_STOPPING_BUDGET:-60}"
 	_stop_since=0

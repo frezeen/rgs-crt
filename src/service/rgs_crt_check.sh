@@ -60,6 +60,10 @@ off = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 0
 vfile = sys.argv[3] if len(sys.argv) > 3 else ""
 
 pygame.init()
+pygame.joystick.init()
+joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
+for joy in joysticks:
+    joy.init()
 clock = pygame.time.Clock()
 scr = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 pygame.display.set_caption("rgs-crt")
@@ -143,6 +147,8 @@ while running:
                 running = False
             elif verdict is not None:
                 running = False
+        elif ev.type == pygame.JOYBUTTONDOWN and verdict is not None:
+            running = False
     if verdict is None:
         tail_log()
         read_verdict()
@@ -202,7 +208,7 @@ while running:
                 scr.blit(s2, (margin, ty))
                 ty += int(fs * 1.45)
         else:
-            s2 = f_body.render("Press any key to close.", True, dim)
+            s2 = f_body.render("Press any key or pad button to close.", True, dim)
             scr.blit(s2, (margin, ty))
 
     if verdict is None:
@@ -210,7 +216,7 @@ while running:
     elif verdict == "RED":
         hint = "U = uninstall, ESC = exit"
     else:
-        hint = "any key = close"
+        hint = "any key / pad button = close"
     h2 = f_pick.render(hint, True, dim)
     scr.blit(h2, (w // 2 - h2.get_width() // 2, h - int(h * 0.06) - h2.get_height() // 2))
     pygame.display.flip()
