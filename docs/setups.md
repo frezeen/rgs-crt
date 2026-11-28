@@ -59,8 +59,10 @@ The full, honest picture, because this manual tells you everything:
   carries the trigger: **Select + L1** re-scans the connections and
   the change is applied. Everywhere else
   the re-scan simply never needs to be used;
-- Intel hardware was last exercised on an older revision: until the
-  re-test lands, no claim in either direction about its detection;
+- on Intel gen9 hardware, the bundled patched `i915` module is tested for
+  480i boot output, while live hotplug re-detection has been exercised
+  primarily on NVIDIA and AMD — reboot after changing cables if a plug
+  event looks ignored;
 - if your tube sits behind an adapter that the system cannot recognize
   (an adapter that makes a CRT look like an ordinary panel), you can
   tell the layer exactly where it is: add `crt-dual.crt_output=<port>`

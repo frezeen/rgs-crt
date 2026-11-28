@@ -6,8 +6,8 @@ This is the honest per-system status of the **RGS 15 kHz CRT** profile.
 Certification box: RGS 43.88 (live 2026-11-28; Batocera 43.1 base),
 x86_64, arcade tube in the demonstrated 13.6–16.2 kHz range —
 the recent verdicts were measured on the AMD R9 270X machine, and the
-layer is also certified on an NVIDIA GTX 970; Intel hardware carries a
-pending re-test. Every TESTED verdict
+layer has also been tested on an NVIDIA GTX 970 and Intel gen9 iGPU
+(using the bundled patched 6.18.16 `i915` module for 480i). Every TESTED verdict
 below comes from a real launch on that tube with the resulting signal
 measured — a glance is never a verdict.
 

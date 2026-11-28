@@ -70,9 +70,9 @@ your own, with every instruction available and working examples:
 ## Quick start
 
 **You need:** an x86_64 machine, an updated stock RGS (43.54 or newer),
-and a CRT tube. The layer has been tested on NVIDIA GTX 970 and AMD
-R9 270X graphics; Intel gen9 iGPU support exists but is not yet
-certified. Other hardware is not claimed.
+and a CRT tube. The layer has been tested on NVIDIA GTX 970, AMD
+R9 270X, and Intel gen9 iGPU (with the bundled 480i `i915` patch).
+Other hardware is not claimed.
 
 **Prerequisite: an updated, stock RGS.** RGS itself is what you get by
 taking an untouched Batocera and applying RGS's own installation script
@@ -173,17 +173,15 @@ its dependencies and reports loudly.
 
 ## Status & limitations
 
-- Tested on two reference machines: RGS 43.54+ base (Batocera 43.1
+- Tested on reference machines: RGS 43.54+ base (Batocera 43.1
   base; the layer tracks the live RGS version, currently 43.88),
-  x86_64, one with an **NVIDIA GTX 970** and one with an **AMD R9
-  270X**, arcade tube in the demonstrated 13.6–16.2 kHz range. An
-  **Intel** gen9 iGPU path is included: the patched 6.18.16 `i915` module
-  (from [amxcs/batocera-crt-15khz-intel](https://github.com/amxcs/batocera-crt-15khz-intel),
-  credited at the bottom of this page) ships directly with the package so
-  true 480i works even offline — its behavior on this layer is still
-  pending a full live verdict before it is claimed as proven. Other
-  hardware is not claimed at all: `./verify.sh` plus your report is how
-  the map grows.
+  x86_64, with **NVIDIA GTX 970**, **AMD R9 270X**, and **Intel** gen9
+  iGPU (the patched 6.18.16 `i915` module from
+  [amxcs/batocera-crt-15khz-intel](https://github.com/amxcs/batocera-crt-15khz-intel),
+  credited at the bottom of this page, ships directly with the package
+  so true 480i works even offline), arcade tube in the demonstrated
+  13.6–16.2 kHz range. Other hardware is not claimed at all: `./verify.sh`
+  plus your report is how the map grows.
 - On **AMD** machines running a kernel below 6.19, the layer pins the
   classic display stack at install: the modern stack has no analog
   encoders on those kernels, so a CRT on the analog output stayed dark
