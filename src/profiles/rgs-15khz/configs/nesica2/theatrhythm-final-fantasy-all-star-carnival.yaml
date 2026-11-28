@@ -1,0 +1,2 @@
+# 1-pass 720p native render on 4:3 CRT (overrides globalgamemanagers 1920x1080 and Wine user.reg)
+args: [-screen-width, "1280", -screen-height, "720"]

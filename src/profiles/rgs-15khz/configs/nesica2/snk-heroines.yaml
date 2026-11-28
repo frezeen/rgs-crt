@@ -1,0 +1,4 @@
+# 1080p stock canvas: the 720p Resolution=0 path hangs in the intro movie (winedmo/qasf);
+# keep 1080p and let gamescope do the single 1920x1080 -> 864x486 pass.
+env:
+  WAL_NXL2_SETTINGS: Resolution=1

@@ -6,6 +6,8 @@
 - **Mission: Impossible Arcade (`segaer`):** keeps its fixed `1920x1080` layout without clipping the bottom HUD and hides the Windows mouse cursor arrow.
 - **Session cleanup:** the session supervisor now recognizes full-screen cabinet windows without a window class and terminates orphaned processes before unmounting squashfs/overlay layers, preventing leftover loop devices on subsequent launches.
 - **RGS-CRT check/updater tool:** the final verdict screen can now also be dismissed with any gamepad button, not only the keyboard.
+- **NESiCAxLive 2 (`nesicax2`): certified on the 15 kHz CRT for the 16-title pack (owner verde).** All 16 `.squashfs` titles fill the 4:3 tube at 480i: the 16:9 titles render 720p natively and are downscaled once (Fighting Ex Layer, Samurai Shodown, Million Arthur Arcana Blood, Puzzle & Dragons Battle Tournament, Left 4 Dead Survivors, Love Live! School Idol Festival, Starwing Paradox, Street Fighter V - Type Arcade, Theatrhythm Final Fantasy - All-Star Carnival and The King of Fighters XIV), Magicians Dead - Next Blazing keeps its native 1360x768, Gunslinger Stratos 2/3 keep their fixed 1920x1080 gun projection so the reticles stay accurate, and the two portrait cabinets Groove Coaster 2 - Heavenly Festival and Tetote X Connect stay vertical with black pillars because their dumps ship no cabinet art. SNK Heroines Tag Team Frenzy no longer hangs in its intro movie: it plays with its stock 1080p layout in a single pass. Gun and touch input stay live, the host cursor is hidden, and every session returns clean to ES.
+- **Launch logs:** the game's own output now keeps `[stdout]`/`[stderr]`, and only explicit errors and warnings keep their severity — ordinary informational lines are no longer labelled `ERROR`.
 
 ## 2026-11-25
 

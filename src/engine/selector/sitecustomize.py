@@ -71,11 +71,30 @@ RUNTIME_ENV_STATE = Path('/tmp/crt-dual/runtime-env')
 
 # RGS-15KHZ-EXT (stdio stream): a profile's `[runtime] env = RGS_STDIO_DETACH=1`
 # keeps the stock capture (the game's stdout/stderr still land in the launcher's
-# own logs at debug/error level, no new file) but drains it in streaming and
-# returns with the direct child, instead of waiting for the pipe EOF that the
-# gamescope reaper and the wine services never close.
+# own logs, no new file) but drains it in streaming and returns with the direct
+# child, instead of waiting for the pipe EOF that the gamescope reaper and the
+# wine services never close.
 STDIO_DETACH_ENV = 'RGS_STDIO_DETACH'
 DROP_NET_ADMIN_ENV = 'RGS_DROP_CAP_NET_ADMIN'
+
+
+def _log_child_line(logger, stream_name: str, text: str) -> None:
+    """Preserve child text and stream, assigning severity only from explicit markers.
+
+    stderr is a transport, not a severity: launchers routinely print normal
+    information there. Explicit fatal/error markers stay ERROR, explicit
+    warnings stay WARNING, and everything else is INFO.
+    """
+    lowered = text.lower()
+    if any(mark in lowered for mark in (
+            "traceback", "exception", "fatal", "segfault", "crash",
+            "not responding", "error:", "[error]", "panic")):
+        level = logging.ERROR
+    elif any(mark in lowered for mark in ("warn", "attention", "failed", "failure")):
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+    logger.log(level, "pump [%s] %s", stream_name, text)
 
 
 def _apply_runtime_env() -> None:
@@ -319,17 +338,17 @@ def _patch_emulatorlauncher(module):
             module.proc = proc  # the launcher's SIGINT handler kills this child
             logger = module._logger
 
-            def pump(stream, emit):
+            def pump(stream, stream_name):
                 try:
                     for chunk in iter(lambda: stream.readline(65536), b""):
                         text = chunk.decode(errors="backslashreplace").rstrip("\n")
                         if text.strip():
-                            emit(text)
+                            _log_child_line(logger, stream_name, text)
                 except (ValueError, OSError, AttributeError):
                     pass  # pipe closed on return: the session is over
 
-            for stream, emit in ((proc.stdout, logger.debug), (proc.stderr, logger.error)):
-                threading.Thread(target=pump, args=(stream, emit), daemon=True).start()
+            for stream, stream_name in ((proc.stdout, "stdout"), (proc.stderr, "stderr")):
+                threading.Thread(target=pump, args=(stream, stream_name), daemon=True).start()
             # Return with the direct child. The pumps are daemons on purpose:
             # closing a buffered pipe from here while a reader thread is inside
             # read() blocks on the object's lock (measured: the launcher hung

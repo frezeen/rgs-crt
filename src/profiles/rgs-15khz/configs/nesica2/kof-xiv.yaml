@@ -1,0 +1,3 @@
+# 1-pass 720p native render on 4:3 CRT (0 = 1280x720 instead of stock Resolution=1 1920x1080)
+env:
+  WAL_NXL2_SETTINGS: Resolution=0
