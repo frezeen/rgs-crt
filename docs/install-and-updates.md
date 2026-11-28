@@ -12,7 +12,7 @@ Batocera, then running their update tool at least once (the RGS upgrade
 script inside EmulationStation's Batocera config list). The updater run
 is not a formality: it completes the RGS setup and stamps the version
 record that this layer's install and self-check read. A box where RGS
-was fullinstalled but never updated is refused outright, and the
+was freshly installed but never updated is refused outright, and the
 message says exactly what to do. Beyond that, the details of building
 or updating RGS itself belong to RGS's official channels, not to this
 manual. This layer extends that stock RGS from the inside; it assumes
@@ -106,14 +106,16 @@ console-class systems.
 So on an Intel machine of that generation, the install places the
 display patch from the community project
 [amxcs/batocera-crt-15khz-intel](https://github.com/amxcs/batocera-crt-15khz-intel)
-(GPL-2.0, credited below and in the main page). It fetches the ready-made
-patch for the exact system the box runs — **this requires the box to be
-on the network at install time**. If that is not possible, place the
-patch file yourself — the verifier prints the exact name it expects
-(`i915-patched-<your-kernel>.ko`) and the folder
-(`src/service/i915/binaries/`, inside the project folder — create it if
-it does not exist) — before
-installing; it warns, without failing, while the file is missing.
+(GPL-2.0, credited in [THIRD-PARTY.md](../THIRD-PARTY.md) and in the main page). The prebuilt patch for
+the current Batocera 43.1 kernel (`i915-patched-6.18.16.ko`) **ships
+directly with the package**, so Intel gen9 480i works even on offline
+installs, with automatic boot self-heal if removed. If a future RGS
+update moves to a different kernel version, the install attempts to
+fetch the matching prebuilt module from the `amxcs` release (which
+needs network access), or you can place `i915-patched-<your-kernel>.ko`
+in `src/service/i915/binaries/` inside the project folder before
+installing; the verifier warns without failing while a module for
+another kernel is missing.
 
 The patch survives an RGS update the same way the rest of the layer's
 boot work does: it is checked against the running system at every boot,
@@ -172,10 +174,9 @@ mixed between them fails with a listing:
 - **STOCK** — nothing of the layer is left (before any install, or
   after a complete uninstall).
 
-The verifier **warns** (never fails) about missing user-procured
-binaries: they are yours to download, and the warning tells you which
-ones and where they go, so you can test everything that does not need
-them.
+The verifier **warns** (never fails) about missing procured arcade
+binaries (for example if an install ran offline): the warning tells you
+which ones and where they go, so you can still run everything else.
 
 Run it after install, after uninstall, and whenever something looks
 wrong. One timing note: on an AMD machine, run it **after the first
@@ -246,21 +247,25 @@ nothing to press: opening it looks for a newer release of the layer,
 installs one on the spot if it is certified for this box, re-certifies
 the layer against the RGS version the box runs, and shows each step as it
 happens, then the verdict.
-Nothing reboots on its own — an update installs in place, and you
-restart by hand when RGS says a reboot is due. Opening the tool counts
+Nothing reboots on its own — an update installs in place and re-arms the
+live 15 kHz display session immediately so games launched right after
+keep their CRT profiles without requiring a reboot (restart by hand
+only when RGS itself says a reboot is due). Opening the tool counts
 as a game session (it runs as a game entry itself), and the update it
 installs is allowed to proceed from inside that session — you never
 quit the tool to let its own update in.
 
 | Verdict | Meaning | Your options |
 | --- | --- | --- |
-| **GREEN** | Everything is aligned. The screen shows the version, which tracks the RGS the layer certified on. | Nothing to do: close with any key. |
-| **RED** | The self-check could not vouch for the layer on this system; games keep running exactly like stock while held. | ESC — keep playing. U — uninstall the layer and reboot: pure stock RGS. |
+| **GREEN** | Everything is aligned. The screen shows the version, which tracks the RGS the layer certified on. | Nothing to do: close with any key or gamepad button. |
+| **RED** | The self-check could not vouch for the layer on this system; games keep running exactly like stock while held. | ESC or any gamepad button — keep playing. U (keyboard) — uninstall the layer and reboot: pure stock RGS. |
 
 A release built for a newer RGS than the box runs is never installed —
 update RGS itself first. With no network the tool still re-certifies and
 only the update step is skipped; a failed update is shown on screen and
-in the log, never silently ignored.
+in the log, never silently ignored. EmulationStation also displays a
+periodic on-screen notice when a newer RGS base update or RGS-CRT
+release is available.
 
 ## Remote access (VNC)
 

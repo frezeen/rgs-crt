@@ -117,4 +117,7 @@ the classic arcade mode — so EmulationStation and the menus are fully
 usable on glass, and a connected LCD mirrors the same image. During a
 stock-profile game session the LCD switches back to its normal
 full-resolution mode for the game, tube dark; when the session ends,
-the mirrored desktop returns.
+the mirrored desktop returns cleanly, and EmulationStation is
+automatically recovered if a game exit ever leaves a blank screen. The
+display supervisor also catches wedged games or startup crashes and
+returns the box cleanly to EmulationStation on its own.

@@ -3,9 +3,12 @@
 This repository bundles the following third-party components. All are
 under free-software licenses compatible with this repository's LICENSE
 (GPL-2.0): the VNC server is GPL-2.0-or-later, the JPEG library is under
-the libjpeg-turbo triple license (IJG / BSD-3-Clause / zlib). They are
-shipped for stock Batocera, where no VNC server is present (verified: no
-wayvnc/tigervnc/x0vncserver on stock Batocera 43.1).
+the libjpeg-turbo triple license (IJG / BSD-3-Clause / zlib), and the
+prebuilt Intel gen9 `i915` 480i kernel module
+(`src/service/i915/binaries/i915-patched-6.18.16.ko`) is GPL-2.0. The
+VNC components are shipped for stock Batocera, where no VNC server is
+present (verified: no wayvnc/tigervnc/x0vncserver on stock Batocera
+43.1).
 
 ## TigerVNC 1.12.0 (SHIPPED — `src/engine/vnc/binaries/X0tigervnc`)
 
@@ -88,7 +91,7 @@ wayvnc/tigervnc/x0vncserver on stock Batocera 43.1).
   or modified by this repository.
 - **Upstream**: <https://github.com/antonioginer/switchres>
 
-## amxcs batocera-crt-15khz-intel (prebuilt i915 patch — NOT committed)
+## amxcs batocera-crt-15khz-intel (SHIPPED — `src/service/i915/binaries/i915-patched-6.18.16.ko`)
 
 - **Purpose**: true interlaced 480i output on Intel gen9 graphics
   (DISPLAY_VER 9 — Skylake HD 530 through Coffee Lake UHD 630). Stock
@@ -107,11 +110,14 @@ wayvnc/tigervnc/x0vncserver on stock Batocera 43.1).
 - **License**: GPL-2.0 (the patch modifies Linux kernel source, so
   GPL-2.0 is a condition of the kernel's own licence — amxcs's words,
   honored as-is).
-- **Provenance**: downloaded by `install.sh` from the project's public
-  release URL at install time (or user-procured into
-  `src/service/i915/binaries/`, which is gitignored — the binary is
-  never committed). vermagic is verified against the running kernel
-  before every deploy; a mismatch is refused.
+- **Provenance**: `i915-patched-6.18.16.ko` (from the `batocera-43.1`
+  release) is shipped in `src/service/i915/binaries/` so offline installs
+  work. For any other kernel version, `install.sh` / `zz_rgs_15khz` falls
+  back to fetching the matching release asset from `amxcs` or reading a
+  user-placed module from the same folder. Vermagic is always verified
+  against the running kernel before deployment; a mismatch is refused.
+  The GPL-2.0 written source offer above applies to this shipped module
+  as well.
 - **Upstream / source offer**: <https://github.com/amxcs/batocera-crt-15khz-intel>
   (the patch source, the build instructions against the exact Batocera
   kernel, and the boot-swap mechanism documentation).
@@ -128,5 +134,5 @@ third-party builds, one shared tree for every profile) are fetched at
 install from the project's public release into the gitignored `binaries/`
 tree; no binary is committed.
 `verify.sh` warns while one is missing and the affected launches then run
-the stock binary. See `docs/install-and-updates.md` ("The arcade binary
-arrives with the install").
+the stock binary. See `docs/install-and-updates.md` ("The arcade binaries
+arrive with the install").

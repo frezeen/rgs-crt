@@ -8,17 +8,23 @@ removes itself back to the exact stock state at any time.
 
 ---
 
+## See it in action
+
+https://github.com/user-attachments/assets/1f840230-6cea-4183-a0eb-1537c00ae384
+
 ## What you get
 
 New releases and what changed recently: **[changelog.md](changelog.md)**.
 
 | | What you see on the screen |
 | --- | --- |
-| Native signals | A SNES game outputs a SNES signal, a Dreamcast game a 480i arcade signal, an arcade board its own native mode — crisp pixels and correct refresh. Where a system's native signal is outside what a tube can show, it runs fullscreen at the best quality alternative instead; for a few HD consoles that alternative is a deliberate full-bleed stretch, and the compatibility map marks exactly which systems those are. |
+| Native signals | A SNES game outputs a SNES signal, a Dreamcast game a 480i arcade signal, an arcade board its own native mode — crisp pixels and correct refresh. Where a system's native signal is outside what a tube can show, it runs fullscreen at the best quality alternative instead; for a few HD consoles and widescreen cabinets that alternative is a single-pass 720p render (where supported) stretched full-bleed, and the compatibility map marks exactly which systems those are. |
+| 4:3 cabinet framing | On vertical/portrait arcade cabinets where stock RGS uses 16:9 bezels, the picture keeps its true vertical aspect and fills the sides with that title's own cabinet art recomposed for 4:3. |
 | No fake CRT effects | Smoothing and scanline-style filters are switched off on the tube. The tube is the filter. |
+| Clean cursor & input | The host mouse arrow stays hidden on the tube during gameplay while lightguns, mice, touchscreens, and trackballs keep working. |
 | The menu keeps working | Between games the desktop runs on the tube, on a connected LCD, or on both. Pick whichever you plugged in. |
 | It gives things back | Every setting a game needed is reverted when the game exits. The desktop and the values return to what they were. |
-| A safety net you can see | A check entry in the Batocera config menu — **RGS-CRT CHECK & UPDATE** — shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry is also where this layer updates itself: opening it looks for a newer release and installs one on its own, then re-certifies against the RGS version the box runs. |
+| A safety net you can see | A check entry in the Batocera config menu — **RGS-CRT CHECK & UPDATE** — shows green when everything is aligned and red when an RGS update changed the system underneath — with a one-press return to pure stock RGS. While red, games keep running exactly as stock. The same entry updates this layer on its own and accepts a gamepad button on the final verdict screen; EmulationStation also shows an on-screen notice when a newer RGS or RGS-CRT update is available. |
 
 ## Three ways to plug it in
 
@@ -54,7 +60,9 @@ starts and reverted when it exits. Two ship today:
 
 There is no limit to how many profiles you can have: each one is a
 plain-text folder, and a chooser appears only when there is a real
-choice to make. How profiles work and what to expect:
+choice to make — showing two visual panels (an arcade cabinet for
+15 kHz CRT, a flat-panel TV for LCD) instead of plain text buttons.
+How profiles work and what to expect:
 **[docs/profiles.md](docs/profiles.md)** — and to write or maintain
 your own, with every instruction available and working examples:
 **[docs/writing-profiles.md](docs/writing-profiles.md)**.
@@ -105,13 +113,21 @@ check tool decides green vs red: **[docs/install-and-updates.md](docs/install-an
 Every claim about a system carries a verdict:
 
 - **TESTED** — launched on a real tube and measured (resolution,
-  frequency, on-screen result), with the numbers kept.
+  frequency, on-screen result), with the numbers kept (`TESTED-with-note`
+  when a stock caveat or intentional aspect trade applies).
+- **CONFIGURED** — profiled and verified on the render chain, waiting
+  for live tube confirmation.
 - **family** — shares a pipeline already certified by a TESTED launch
   of the same kind; expected to work, not yet individually launched.
 - **pending** — declared untested, usually no content on the test box.
   Never presented as working.
 
-The honest per-system map lives in **[docs/emulators-status.md](docs/emulators-status.md)**.
+Over 70 system entries are certified in **[docs/emulators-status.md](docs/emulators-status.md)**,
+spanning classic 240p/480i consoles and home computers, GroovyMAME /
+libretro MAME, Sega Model 2/3/Naomi/Hikaru/Chihiro/Lindbergh, modern
+PC/Linux arcade platforms (Taito Type X/X2, NESiCAxLive 1/2, Sega
+RingWide/RingEdge/Nu/Europa-R, Raw Thrills, Namco ES3/246/256, Gaelco,
+Adrenaline, UNIS, Global VR, ArcadePC), HD consoles, and pinball suites.
 
 ## Bonus: a JammASD arcade control board? It speaks two gamepads
 
@@ -157,17 +173,17 @@ its dependencies and reports loudly.
 
 ## Status & limitations
 
-- Tested on two reference machines: RGS 43.54 base (Batocera 43.1
-  base; the layer follows the RGS version, now 43.58),
+- Tested on two reference machines: RGS 43.54+ base (Batocera 43.1
+  base; the layer tracks the live RGS version, currently 43.88),
   x86_64, one with an **NVIDIA GTX 970** and one with an **AMD R9
   270X**, arcade tube in the demonstrated 13.6–16.2 kHz range. An
-  **Intel** gen9 iGPU path exists since the current revision: the install
-  places a small display patch (from
-  [amxcs/batocera-crt-15khz-intel](https://github.com/amxcs/batocera-crt-15khz-intel),
-  credited at the bottom of this page) that unlocks true 480i on those
-  chips — its behavior on this layer is on the list for a first live
-  verdict before it is claimed as proven. Other hardware is not claimed
-  at all: `./verify.sh` plus your report is how the map grows.
+  **Intel** gen9 iGPU path is included: the patched 6.18.16 `i915` module
+  (from [amxcs/batocera-crt-15khz-intel](https://github.com/amxcs/batocera-crt-15khz-intel),
+  credited at the bottom of this page) ships directly with the package so
+  true 480i works even offline — its behavior on this layer is still
+  pending a full live verdict before it is claimed as proven. Other
+  hardware is not claimed at all: `./verify.sh` plus your report is how
+  the map grows.
 - On **AMD** machines running a kernel below 6.19, the layer pins the
   classic display stack at install: the modern stack has no analog
   encoders on those kernels, so a CRT on the analog output stayed dark
@@ -192,18 +208,18 @@ its dependencies and reports loudly.
   It starts at boot and serves port **5900 without a password** — keep
   the box on a trusted network, or stop it when you do not need it
   ([details](docs/install-and-updates.md#remote-access-vnc)).
-- The arcade path runs on **GroovyMAME** (the CRT-capable MAME build):
-  the install fetches the tested build automatically from the project's
-  public release — it is still never shipped in this repository (the VNC
-  server is the exception — it ships
-  with the layer, see [THIRD-PARTY.md](THIRD-PARTY.md)). The exact
-  binary, its checksum and its source are pinned in
-  [`binaries.lock`](binaries.lock). If the box was
-  offline and the binary is missing, the verifier
-  tells you exactly which one
-  is missing and at which path to place it — and warns without
-  blocking, so everything else keeps working meanwhile
-  ([details](docs/install-and-updates.md#the-arcade-binary-arrives-with-the-install)).
+- The arcade path runs on **GroovyMAME 0.289** (standalone) and the
+  **libretro MAME 0.289 core**, honoring your EmulationStation
+  emulator/core choice on both CRT and LCD: the install fetches both
+  tested builds automatically from the project's public release —
+  neither is shipped in this repository (the VNC server and the Intel
+  6.18.16 `i915` patch do ship with the package, see
+  [THIRD-PARTY.md](THIRD-PARTY.md)). The exact binaries, their
+  checksums and their sources are pinned in [`binaries.lock`](binaries.lock).
+  If the box was offline and a binary is missing, the verifier tells you
+  exactly which one is missing and at which path to place it — and warns
+  without blocking, so everything else keeps working meanwhile
+  ([details](docs/install-and-updates.md#the-arcade-binaries-arrive-with-the-install)).
 - After an RGS system update, reinstalling this layer is required if
   its self-check cannot vouch for the new system — by design, so you
   never run a half-verified setup.
@@ -278,5 +294,3 @@ own log lives in `/userdata/system/logs/` (the main one is
    which socket the CRT hangs off, and what you saw. For picture
    quality questions, a photo of the actual glass still beats any
    description.
-
-<!-- smoke 2026-10-12 -->

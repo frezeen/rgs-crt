@@ -20,7 +20,7 @@ it, take it off when the game is over.
 | Profile | What it does |
 | --- | --- |
 | **RGS 15 kHz CRT** | The tube experience. Games launch at their native signal, CRT-emulation filters are switched off (the tube is the filter). The systems with their own tuning carry it; the rest ride the common base plus their emulator family — the compatibility map shows which is which. |
-| **RGS stock (compat)** | **It changes nothing.** A game launched under it runs exactly as plain RGS runs it. Its purpose is to be the proof: the layer can be told to step aside completely, and "completely" is measured, not promised — the compatibility run produced the same modes, the same logs and the same settings as an untouched system. |
+| **RGS stock (compat)** | **It changes no stock display or emulator visuals.** A game launched under it runs with plain RGS visuals, while sharing the updated MAME 0.289 binaries and the network/clean-exit safety guards (so LAN/NFS never freezes on cabinet titles and games exit cleanly on LCD too). |
 
 ## Where you meet profiles
 
@@ -28,7 +28,7 @@ The chooser only appears when a real choice exists:
 
 | Your setup | Profiles that fit you | What happens |
 | --- | --- | --- |
-| Tube + LCD | one for each | You are asked which experience to run. |
+| Tube + LCD | one for each | You are asked which experience to run — the picker shows an arcade cabinet for CRT and a flat-panel TV for LCD. |
 | One display, several profiles that fit it | 2 or more | You are asked to pick between them. |
 | One display, one matching profile | 1 | No question — it applies directly. |
 | Nothing connected | — | Stock behavior, always. |
@@ -36,6 +36,14 @@ The chooser only appears when a real choice exists:
 The rule behind the table: the system checks what you actually have
 plugged in and offers only what can work. It never assumes "CRT always"
 — if there is no tube, there is no tube experience offered.
+
+When the chooser opens, it draws visual panels for the two shipped
+profiles (an arcade cabinet for `CRT`, a flat-panel TV for `LCD`) and
+text panels (from `label` and `description`) for any custom profile you
+add. You can navigate with keyboard arrows, arcade stick, or D-pad, and
+confirm with Enter, Space, or any gamepad button; after a 10-second
+countdown it picks the display-compatible default, and clears the screen
+to black before closing so no frame lingers behind the game.
 
 ## What a profile decides for a game
 
@@ -49,9 +57,21 @@ Inside a profile, settings are scoped, not sprayed:
 - A system without its own entry still gets the common ground and the
   emulator's own defaults — being unlisted means "run as designed",
   never "broken".
+- Per-game blocks (`[<system>["<rom>"]]`) can scope any setting, file,
+  or command to a single title.
+- A profile can pin an emulator or core for a system or title even when
+  EmulationStation passes its own emulator flag on the command line,
+  while stock or user-saved per-game pins in `batocera.conf` still take
+  precedence over system-level profile pins.
+- Leaving a `batocera.conf` key empty removes a stock setting for the
+  session and restores it when the game exits.
+- If a declared binary is missing, only that executable swap falls back
+  to stock (with a warning) while the rest of the profile stays active.
+- If a `[runtime]` start command fails or times out, it is not recorded
+  as applied, so its undo does not run at exit.
 - If two settings could apply, the more specific one wins: a
-  system-level choice beats an emulator-level one beats the common
-  ground.
+  per-game choice beats a core choice beats a system-level choice beats
+  an emulator-level one beats the common ground.
 - Per-game generator edits keep each declaration's scope even when
   several titles use the same operation key.
 
@@ -106,8 +126,12 @@ Guarantees you get from the framework, not from the individual profile:
   emulator looks for it; it stays, because the next launch needs it.
 - **Nothing invisible.** `./verify.sh` fails if any session ever
   stranded a trace of a profile behind.
-- **A hard stop is cleaned.** If the box loses power mid-game, the
-  next boot removes the session's leftovers by itself.
+- **A hard stop is cleaned.** If the box loses power or a session dies
+  mid-game, automatic recovery runs both at boot and before the next
+  launch: it cleans half-applied files, binaries, keypatches, and
+  runtime records, heals any leftover `batocera.conf` keys back against
+  the first-install stock snapshot, and sweeps stray compositor/Wine
+  processes and mounts.
 
 ## Switching between profiles
 

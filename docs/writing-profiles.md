@@ -63,18 +63,36 @@ is. The block types:
 | `[snes]` (or `[system.snes]`) | games of the system `snes` |
 | `[emulator.libretro]` | every game whose emulator resolves to libretro — one block for a whole family |
 | `[core.snes9x]` | games running that specific core |
-| `[<system>["<rom>"]]` | one title, with every section inside the block scoped to it |
+| `[<system>["<rom>"]]` | one title, matched by exact filename or stem (extension optional), with every section inside the block scoped to it |
 
 Repeated generator operation keys in different per-game blocks remain
 separately scoped: only the launched title's declarations reach the
-launcher, in declaration order.
+launcher, in declaration order. For example, targeting a single title:
+
+```
+[gaelco["Gaelco Championship Tuning Race.squashfs"]]
+[batocera.conf]
+gaelco["Gaelco Championship Tuning Race.squashfs"].gamescope = 1
+```
 
 When two blocks set the same setting, **the more specific one wins**:
-core beats system beats emulator beats global. Inside `[emulator.*]` and
-`[core.*]`, bare `[batocera.conf]` keys (like `videomode = 640x480i`)
-automatically apply as `<system>.<key>` to every profiled system running
-that emulator or core, so shared defaults live in one place and only
-system-specific overrides stay in `[<system>]`.
+per-game beats core beats system beats emulator beats global. Bare
+`[batocera.conf]` keys (like `videomode = 640x480i`) work inside
+`[<system>]` (qualified as `<system>.<key>`) and inside `[emulator.*]` /
+`[core.*]`, where they apply as `<system>.<key>` **only to systems that
+have a block in the profile** — an unlisted system does not inherit bare
+keys from `[emulator.*]` or `[core.*]`, whereas dotted keys and
+per-emulator generator operations apply whenever the emulator or core
+matches.
+
+If a system or per-game block declares `<system>.emulator` or
+`<system>.core`, that pin overrides even when EmulationStation passes
+`-emulator` or `-core` on the launch command line. The engine overlays
+the profile pin **before** matching `[emulator.*]` and `[core.*]` blocks
+(so pinning `gaelco.emulator = mame` automatically pulls in
+`[emulator.mame]` on that launch). A stock or user-saved per-game pin in
+`batocera.conf` still takes precedence over a system-level profile pin
+(`per-game > system`), while a profile's own per-game pin overrides both.
 
 > **Gotcha that bites everyone once:** every `[...]` header is a block.
 > ini-style sub-headings like `[Graphics]` do not exist here — such a
@@ -100,8 +118,16 @@ mame.switchres = 1            # ...in native-resolution mode
 n64.core = parallel_n64       # or: pick a different core for this session
 ```
 
-Applied at game start, given back at game exit. If the setting did not
-exist before, it is removed again — your file never accumulates junk.
+Applied at game start, given back at game exit. Existing keys are
+replaced **in place** (keeping their position in `batocera.conf` rather
+than moving to the end of the file); if a key appears more than once in
+`batocera.conf`, only the last (effective) occurrence is modified and
+restored. If the setting did not exist before, it is removed again — your
+file never accumulates junk. Per-game keys (`<system>["<rom>"].key =
+value`) and per-folder keys (`<system>.folder["/path"].key = value`) work
+here too, and leaving a value empty (`gaelco.videomode =`) removes a
+stock setting for the duration of the session and restores it when the
+game exits.
 
 ### 2. Single lines in an emulator's own settings file — `[keypatch/...]`
 
@@ -113,15 +139,21 @@ reicast_internal_resolution = "640x480"
 
 Rewrites the named lines in the live file for the session (the path is
 relative to the box's system config folder, or absolute), keeps the
-previous content, restores it byte-for-byte when the game exits.
-This is the right tool for any settings file the emulator owns and may
-rewrite itself — it always operates on the current content, so it
-cannot silently rot.
+previous content, and restores it byte-for-byte when the game exits. If
+the target file does not exist yet, it is created for the session and
+removed again on exit. UTF-8 BOM headers (used by emulators such as
+PPSSPP) are handled automatically, and duplicate occurrences of a
+patched key are collapsed during the session. This is the right tool for
+any settings file the emulator owns and may rewrite itself — it always
+operates on the current content, so it cannot silently rot. Legacy
+flat-file injection headers (`[configs/<path>]`) are removed and rejected
+at validation time — always use `[keypatch/<path>]` for living files.
 
 If the setting must live inside a named section of the file (INI files
 group their keys under `[Section]` headers), write the section in front
 of the key — the line lands in that section (created if the file has
-none yet) and is removed from it again at exit:
+none yet, and removed on exit once empty) and is removed from it again
+at exit:
 
 ```
 [psp]
@@ -130,7 +162,9 @@ Graphics/DisplayStretch = True
 ```
 
 A key written without a section keeps the plain behavior (anywhere in
-the file).
+the file), though adding a flat key to a file that already carries
+`[Section]` headers triggers a warning because it lands outside any
+section and is inert — always use `Section/Key` for INI files.
 
 Some emulators keep a `<key>\default` marker beside every setting (Qt
 and QSettings-based programs such as azahar do this, and they rewrite
@@ -151,15 +185,21 @@ Layout/custom_top_width\default = false
 ```
 [mame]
 [configs]
-mame.ini = configs/mame/mame.ini
+mame/mame.ini = configs/mame/mame.ini
 ```
 
-The file from your `configs/` folder takes over the target path for
-the session, the stock one is restored byte-identical at exit. Use
-this only for content you author and that does not belong to the
-system (a launcher config, a game list) — **never** for living files
-the software rewrites on its own; a frozen copy of those rots quietly.
-For those, use the keypatch above.
+The file from your `configs/` folder (named on the left) takes over the
+target path (on the right, relative to `/userdata/system/` or absolute)
+for the session, and the stock one is restored byte-identical at exit.
+The same config file can be declared in more than one block as long as
+every declaration maps to the same target path (for example `mame/mame.ini`
+in both `[mame]` and `[gaelco]`). If a target file is already
+byte-identical to the profile copy (for example left behind by a hard
+crash), the engine treats it as absent stock rather than archiving your
+profile file as stock. Use this only for content you author
+and that does not belong to the system (a launcher config, a game list)
+— **never** for living files the software rewrites on its own; a frozen
+copy of those rots quietly. For those, use the keypatch above.
 
 ### 4. A program of your own — `[binaries]`
 
@@ -170,24 +210,35 @@ mame = /usr/bin/mame/mame
 ```
 
 The file named in your `binaries/` folder is what launches, instead of
-the system's copy, for the duration of the profile's apply. Swapped
-reversibly and never copied over the original. Binaries are yours to
-procure; the project never ships them, the verifier only tells you
-when one is expected.
+the system's copy, for the duration of the profile's apply — swapped
+reversibly via symlink retargeting (or zero-copy rename on non-overlay
+paths) without copying large files or creating overlay whiteouts, and
+restored cleanly on exit or reboot. For shipped profiles, install fetches
+pinned binaries from `binaries.lock` into the shared `profiles/binaries/`
+tree, which is resolved automatically for every profile declaring the
+key (a profile-local `binaries/` folder overrides if present). Custom or
+offline binaries can be placed in either folder; if a declared binary is
+missing, the engine logs a warning and skips only that executable swap
+so the rest of the profile still applies.
 
 ### 5. Tuning the launch itself — the per-emulator sections
 
 Some things must change after the system has assembled the command and
 written its files — because the software would overwrite anything
 changed earlier. Each section is named after the launcher piece it
-talks to (keep the naming of the shipped profiles: `<something>Generator.py`):
+talks to — whether a stock Batocera generator or an RGS custom generator
+such as `linuxloaderGenerator.py`, `odinGenerator.py`, or
+`sm2Generator.py` (`<something>Generator.py`). Prefix each key with the
+generator's short/folder name (for example `mame`, `libretro`,
+`hypseus_singe`, `linuxloader`); bare keys inside a matching block
+qualify automatically, while already-prefixed keys stay untouched:
 
 | Instruction | What it does | Real example |
 | --- | --- | --- |
 | `cli.drop` | remove an argument from the launch command (and its value) | `libretro.cli.drop = --set-shader` — no fake scanlines on the tube, from any source |
 | `cli.add` | append an argument if it is not already there | `mame.cli.add = -autosync` |
 | `cli.append` | append verbatim, for pairs that need to stay together | `amiberry.cli.append = -s gfx_vsync=true` |
-| `cli.set` | replace the value of an argument already present | `mame.cli.set = -video accel` |
+| `cli.set` | replace the value of an existing argument, or append it if absent | `mame.cli.set = -video accel` |
 | `config` | after the settings file is written, force single lines | `libretro.config = /userdata/system/configs/retroarch/retroarchcustom.cfg\|video_shader_enable=false` |
 | `config.drop` | after writing, remove lines so the program's own default speaks again (restored at exit) | `mybox.config.drop = /path/file.ini\|ratio` |
 | `config.xml` | after writing, force settings in a settings XML file, one named setting at a time (restored at exit) | `openmsx.config.xml = /userdata/system/configs/openmsx/share/settings.xml\|blur=0;scanline=0;glow=0` |
@@ -195,12 +246,14 @@ talks to (keep the naming of the shipped profiles: `<something>Generator.py`):
 | `runtime_dir` | make sure a folder exists before the emulator runs | `azahar.runtime_dir = /userdata/saves/3ds/azahar-emu` |
 | `ensure` | before the launch, put a missing program file back into the folder the program reads | `openmsx.ensure = /usr/share/openmsx/skins/DejaVuSans.ttf.gz\|/userdata/system/configs/openmsx/share/skins/DejaVuSans.ttf.gz` |
 
-Everything here is session-scoped: archived and restored on exit like
-the rest — except `ensure`, which is a repair, not a change. It only
-ever copies a file that is missing (never overwrites one that is there),
-and what it copies is the program's own file where the program expects
-it, so it stays in place: taking it away at exit would break the next
-launch again.
+Repeating the same operation accumulates entries in declaration order
+(for example multiple `config` or `ensure` lines). On each launch the
+operations run in order: `ensure` -> `runtime_dir` -> generator runs ->
+`cli.*` -> `config` -> `config.xml` -> `config.drop`. Post-generate
+edits (`config`, `config.xml`, and `config.drop`) are archived on first
+apply and restored byte-for-byte on exit — only `ensure` is a permanent
+repair that stays in place, because taking a missing stock file away at
+exit would break the next launch again.
 
 Two notes on `config.xml` and `ensure`:
 
@@ -233,8 +286,13 @@ preset that governs every mode of the system — it delivers it as asked
 or places it at the nearest safe refresh by its own rules. The launcher
 switches to it on its own, computed with the same safety rules the rest
 of the layer uses, and returns to the desktop signal at exit; a refusal
-leaves the launch on the standard signal instead of breaking it.
-Advanced: the shipped tube profile uses this key for the systems it
+leaves the launch on the standard signal instead of breaking it. Each
+dotted value (`640x480i.59.94`, `640x480i.57.524160`) registers its own
+pool entry so multiple refresh rates at the same resolution coexist
+cleanly (`max-*`, `auto`, and empty session-deletion values pass
+validation untouched, while literal rasters are validated for shape and
+unique pool-name timing). Advanced: the shipped tube profile uses this
+key for the systems it
 has measured (the compatibility map shows which ones) — reach for it
 for another system only after you have measured it yourself.
 
@@ -271,16 +329,32 @@ that cannot be undone is a design error, not a profile.
 must be declared this way and never faked inside a command: the
 launcher only passes its own environment to the game, so the entries
 are planted in the launcher's own process and die with it — gone by
-construction, nothing to undo. One `[runtime]` section per block, like
-the binaries above. A command that fails logs a warning and the game
-runs anyway; its undo still fires at exit.
+construction, nothing to undo. `[global]`, system blocks, typed blocks,
+and per-game blocks can each declare their own `[runtime]` section, and
+each command, `env`, or `path.prepend` entry runs only when its owning
+block matches. Each command runs under `/bin/sh -c` with a 15-second
+timeout; a command that fails or times out logs a warning and the game
+runs anyway, and because it is not recorded as applied, its undo does
+not fire at exit.
+
+Two built-in engine `env` levers used in the shipped profiles:
+
+- `env = RGS_STDIO_DETACH=1` — streams game stdout/stderr with `[stdout]`
+  and `[stderr]` tags and returns immediately when the direct game
+  process exits instead of waiting on background gamescope/Wine pipe
+  holders.
+- `env = RGS_DROP_CAP_NET_ADMIN=1` — drops Linux `CAP_NET_ADMIN` for the
+  launch tree so cabinet titles cannot reconfigure `eth0` and knock out
+  LAN, NFS, or SSH.
 
 ## Recipes that do the rounds
 
-**"Give my arcade games the real MAME":** the `[mame]` block of the
-tube profile above — settings that redirect the launch (1), the binary
-swap (4), an authored `mame.ini` (3), and `cli.drop` to stop the
-launcher's hardcoded audio override from beating the ini (5).
+**"Give my arcade games the real MAME":** the shipped profile puts the
+binary swaps in `[emulator.mame]` and `[core.mame]` (4), an authored
+`mame.ini` in `[mame]` (3), and `cli.drop` in `[emulator.mame]` to stop
+the launcher's hardcoded audio override from beating the ini (5), while
+leaving standalone vs libretro to your EmulationStation choice (add
+`mame.emulator = mame` in `[batocera.conf]` if you want to pin it).
 
 **"Stop the smoothing/filters on this system":** a `[batocera.conf]`
 key if RGS knows one (`snes.smooth = false` style), or `cli.drop` +
@@ -308,6 +382,14 @@ That is profile maintenance in one move.
 - **Comment your whys.** The shipped specs carry a single factual line
   above each non-default override stating why the mechanism is needed
   (never dates, GPU names, or test history).
+- **What `./verify.sh` checks on every profile:** non-empty `label`,
+  valid `[display] target` (`crt` or `lcd`), valid `videomode` raster
+  shapes and unique pool-name timings, paired `<id>.apply`/`.undo`
+  commands, no legacy `[configs/<path>]` headers, no conflicting
+  `[configs]` targets, existing `[configs]` source files, and valid
+  `[keypatch]` lines (missing `[binaries]` warn without failing). Crash
+  recovery runs automatically at boot and before the next launch
+  (lock-serialized).
 - **When a knob seems missing, say so.** A genuinely missing
   capability is a framework question for the maintainers, not a
   per-profile hack.
